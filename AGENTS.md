@@ -1,16 +1,32 @@
 # AI Assistant Instructions
 
-This is an **AI-Friendly Repository Template** - a starter kit for creating LLM-optimized codebases with optional add-ons.
+MyTrader is a cross-platform (macOS/Windows/Linux) desktop trading workstation for experienced individual traders.
+This document records repo navigation and constraints for AI assistants and contributors.
 
 ## Project Type
 
-Template repository. Users clone this to start new AI-friendly projects.
+mytrader - 跨平台桌面端个人交易工作台（本地优先）：风险/敞口、组合管理、行情跟踪、数据记录、回测、机会发现、观点管理
+
+## Tech Stack
+
+| Category | Value |
+|----------|-------|
+| Desktop runtime | Electron |
+| Frontend | React + TypeScript |
+| Backend | Electron main process (Node) |
+| Storage | SQLite (business) + DuckDB (analysis) |
+| Package manager | pnpm |
+| Repo layout | monorepo (`apps/`, `packages/`) |
+| Node | >= 20 |
+| LLM | Optional external API |
 
 ## Key Directories
 
 | Directory | Purpose | Entry Point |
 |-----------|---------|-------------|
-| `init/` | Project initialization | `init/AGENTS.md` |
+| `apps/` | Applications (desktop UI + main process) | `apps/frontend/README.md` |
+| `packages/` | Shared packages/types | `packages/shared/README.md` |
+| `docs/project/` | Requirements + blueprint (archived) | `docs/project/requirements.md` |
 | `addons/` | Optional add-on payloads | `addons/AGENTS.md` |
 | `.ai/` | Skills, scripts, LLM governance | `.ai/AGENTS.md` |
 | `dev-docs/` | Complex task documentation | `dev-docs/AGENTS.md` |
@@ -21,7 +37,7 @@ Template repository. Users clone this to start new AI-friendly projects.
 
 | Task Type | Entry Point |
 |-----------|-------------|
-| **First time / Project setup** | `init/AGENTS.md` |
+| **Project overview / requirements** | `docs/project/requirements.md` |
 | **Skill authoring / maintenance** | `.ai/AGENTS.md` |
 | **LLM engineering** | `.ai/llm-config/AGENTS.md` |
 | **Complex task documentation** | `dev-docs/AGENTS.md` |

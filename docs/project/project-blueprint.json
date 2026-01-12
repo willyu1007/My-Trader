@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "project": {
+    "name": "mytrader",
+    "description": "跨平台桌面端个人交易工作台（本地优先）：风险/敞口、组合管理、行情跟踪、数据记录、回测、机会发现、观点管理"
+  },
+  "repo": {
+    "layout": "monorepo",
+    "language": "typescript",
+    "packageManager": "pnpm"
+  },
+  "capabilities": {
+    "frontend": { "enabled": true, "framework": "react" },
+    "backend": { "enabled": true, "framework": "electron-main" },
+    "database": { "enabled": true, "kind": "sqlite", "analysisEngine": "duckdb" },
+    "llm": { "enabled": true, "mode": "optional-api" }
+  },
+  "quality": {
+    "testing": {
+      "unit": true
+    }
+  },
+  "skills": {
+    "packs": ["workflows", "standards", "backend", "frontend"]
+  },
+  "addons": {},
+  "notes": {
+    "desktop": { "runtime": "electron" },
+    "node": { "engines": ">=20.0.0" },
+    "markets": ["cn-a-share", "hk"],
+    "dataSources": {
+      "primary": { "market": "cn-a-share", "provider": "tushare" },
+      "secondary": [
+        { "market": "hk", "provider": "akshare" },
+        { "market": "us", "provider": "akshare" }
+      ]
+    },
+    "backtest": {
+      "frequency": "daily-first",
+      "includes": ["cn-limit-up-down", "fees", "taxes", "hk-fees-taxes"]
+    },
+    "opinion": { "mvp": ["tags", "full-text-search"], "future": ["rag", "llm-similarity"] }
+  }
+}

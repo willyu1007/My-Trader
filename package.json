@@ -1,0 +1,22 @@
+{
+  "name": "mytrader",
+  "version": "0.1.0",
+  "description": "跨平台桌面端个人交易工作台（本地优先）：风险/敞口、组合管理、行情跟踪、数据记录、回测、机会发现、观点管理",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "build": "echo \"Add build script\"",
+    "dev": "echo \"Add dev script\"",
+    "lint": "echo \"Add lint script\"",
+    "test": "echo \"Add test script\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
+

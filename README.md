@@ -1,70 +1,42 @@
-# AI-Friendly Repository Template (Basic)
+# mytrader
 
-This repository is a starter template for building **LLM-first** codebases with:
+跨平台桌面端个人交易工作台（本地优先）：风险/敞口、组合管理、行情跟踪、数据记录、回测、机会发现、观点管理
 
-- **Single Source of Truth (SSOT)** skills under `.ai/skills/`
-- Generated provider wrappers under `.codex/skills/` and `.claude/skills/`
-- A **verifiable, 3-stage initialization pipeline** under `init/`
+## Scope (MVP)
 
-## Quick start
+- Markets: A 股、港股
+- Instruments: 股票、ETF（含债券 ETF、贵金属 ETF 等高流通性风险管理品类）
+- Data sources: A 股主数据源 Tushare；港股/美股 AkShare（必要时补充交易所公开数据）
+- Backtest: 日频优先；纳入 A 股涨跌停与费用税；港股费用税也纳入（参数与规则版本需可复现）
+- Opinions: 结构化字段 + 标签 + 全文检索（后续预留 RAG/LLM 相似发现；允许外部 API）
 
-| For | Action |
-|-----|--------|
-| **AI Assistants** | Read `init/AGENTS.md` and run the Stage A/B/C pipeline |
-| **Humans** | Read `init/README.md` and follow the steps |
+## Tech Stack
 
-## Repository layout (high-level)
+| Category | Value |
+|----------|-------|
+| Desktop runtime | Electron |
+| Frontend | React + TypeScript |
+| Backend | Electron main process (Node) |
+| Storage | SQLite (business) + DuckDB (analysis) |
+| Node | >= 20 |
+| Package manager | pnpm |
+| Repo layout | monorepo |
 
-```
-init/                         # Project bootstrap kit (Stage A/B/C)
-  README.md
-  AGENTS.md
-  stages/
-  skills/                     # Init-related workflow skill + scripts/templates
+## Repo Layout
 
-.ai/
-  skills/                     # SSOT skills (edit here only)
-  scripts/                    # `sync-skills.cjs` (generates provider wrappers)
+- `apps/frontend/` - UI
+- `apps/backend/` - Desktop main process / local services
+- `packages/shared/` - Shared types/utilities
+- `docs/project/` - Requirements and blueprint (archived)
 
-.codex/skills/                # Generated wrappers (DO NOT EDIT)
-.claude/skills/               # Generated wrappers (DO NOT EDIT)
+## Docs
 
-dev-docs/                     # Complex task documentation
-```
+- Requirements: `docs/project/requirements.md`
+- Blueprint: `docs/project/project-blueprint.json`
 
-## Key rules (SSOT + wrappers)
+## Getting Started
 
-- **MUST** edit skills only in `.ai/skills/`.
-- **MUST NOT** edit `.codex/skills/` or `.claude/skills/` directly.
-- After changing `.ai/skills/`, regenerate wrappers:
-
-```bash
-node .ai/scripts/sync-skills.cjs --scope current --providers both --mode reset --yes
-```
-
-## Pointers
-
-- Initialization: `init/README.md`
-- AI assistant rules: `AGENTS.md` and `init/AGENTS.md`
-- Skill authoring standard: `.ai/skills/standards/documentation-guidelines/SKILL.md`
-- Documentation standard: `.ai/skills/standards/documentation-guidelines/SKILL.md`
-
-
-## Optional add-ons (addon template)
-
-This template includes opt-in add-ons under `addons/` (kept out of the default paths until enabled).
-
-- `addons/context-awareness/` provides a context layer (`docs/context/`) and scripts that force all context updates through reproducible commands.
-
-Enable via `init/project-blueprint.json`:
-
-```json
-{
-  "addons": { "contextAwareness": true },
-  "context": { "mode": "contract" }
-}
-```
-
-`context.*` is optional configuration and does not trigger installation.
-
-Then run Stage C (`init/.../init-pipeline.cjs apply`).
+- Install: `pnpm install`
+- Dev: `pnpm dev` (placeholder until Electron/Vite scaffolding is added)
+- Test: `pnpm test` (placeholder)
+- Typecheck: `pnpm typecheck`
