@@ -126,6 +126,20 @@ Use explicit requirement strength.
   - Factor / Model / Signal（因子/模型/信号）
   - BacktestRun / BacktestMetric（回测运行与指标）
   - ThesisNote / TradeJournal（观点与日志）
+
+### Data storage and account isolation
+- MUST: 全局账号索引库仅保存账号列表、密码哈希/密钥引用、数据目录与最后登录时间，不存业务数据
+- MUST: 每个账号独立业务库（SQLite），包含组合/持仓、风险规则、自选、回测结果、观点/日志、导入记录
+- SHOULD: 每账号独立分析库（DuckDB）用于衍生分析，可由业务库+市场数据重建
+- SHOULD: 市场/基准数据使用共享本地缓存库，跨账号复用，业务库不重复保存
+- MUST: 账号切换必须关闭前一账号连接并阻断跨账号读写
+- MUST NOT: 在仓库中保存 API Token/密钥；通过本地配置或系统钥匙串加载
+- MAY: 后续支持账号级数据库加密；MVP 仅密码解锁
+- Acceptance criteria:
+  - [ ] 新建第二个账号会创建独立数据目录/DB 文件
+  - [ ] 切换账号后不可访问其他账号的业务数据
+  - [ ] 共享市场缓存可复用且不导致业务数据重复
+
 - External systems:
   - 行情与基础数据提供方：
     - A 股：Tushare（主数据源；可能需要 API Token）
