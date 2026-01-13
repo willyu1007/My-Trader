@@ -4,5 +4,20 @@ export const IPC_CHANNELS = {
     ACCOUNT_CREATE: "account:create",
     ACCOUNT_UNLOCK: "account:unlock",
     ACCOUNT_LOCK: "account:lock",
-    ACCOUNT_CHOOSE_DATA_ROOT_DIR: "account:chooseDataRootDir"
+    ACCOUNT_CHOOSE_DATA_ROOT_DIR: "account:chooseDataRootDir",
+    PORTFOLIO_LIST: "portfolio:list",
+    PORTFOLIO_CREATE: "portfolio:create",
+    PORTFOLIO_UPDATE: "portfolio:update",
+    PORTFOLIO_REMOVE: "portfolio:remove",
+    PORTFOLIO_GET_SNAPSHOT: "portfolio:getSnapshot",
+    POSITION_CREATE: "position:create",
+    POSITION_UPDATE: "position:update",
+    POSITION_REMOVE: "position:remove",
+    RISK_CREATE: "risk:create",
+    RISK_UPDATE: "risk:update",
+    RISK_REMOVE: "risk:remove",
+    MARKET_CHOOSE_CSV_FILE: "market:chooseCsvFile",
+    MARKET_IMPORT_HOLDINGS_CSV: "market:importHoldingsCsv",
+    MARKET_IMPORT_PRICES_CSV: "market:importPricesCsv",
+    MARKET_INGEST_TUSHARE: "market:ingestTushare"
 };

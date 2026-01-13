@@ -13,6 +13,7 @@ const electronPath = require("electron");
 function spawnChild(command, args, options) {
   return spawn(command, args, {
     stdio: "inherit",
+    shell: process.platform === "win32",
     ...options
   });
 }
@@ -51,7 +52,7 @@ function waitForExitOk(child, name) {
 }
 
 async function run() {
-  const devServerUrl = "http://127.0.0.1:5173";
+  const devServerUrl = "http://localhost:5173";
 
   const sharedDir = path.resolve(backendDir, "../../packages/shared");
   const sharedBuild = spawnChild(pnpmCmd, ["run", "build"], { cwd: sharedDir });

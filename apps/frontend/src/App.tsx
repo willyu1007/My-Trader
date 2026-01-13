@@ -1,5 +1,7 @@
-import type { AccountSummary, CreateAccountInput } from "@mytrader/shared";
+﻿import type { AccountSummary, CreateAccountInput } from "@mytrader/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { Dashboard } from "./components/Dashboard";
 
 type ViewState =
   | { kind: "loading" }
@@ -80,7 +82,9 @@ export function App() {
 
   const refreshAccounts = useCallback(async (preferredLoginAccount?: string) => {
     if (!window.mytrader) {
-      setError("未检测到桌面端后端（preload API），请使用桌面端启动应用。");
+      setError(
+        "未检测到桌面端后端（preload API），请使用桌面端启动应用。"
+      );
       setState({ kind: "locked", accounts: [] });
       return;
     }
@@ -100,7 +104,9 @@ export function App() {
     setIsChoosingDataRootDir(true);
     try {
       if (!window.mytrader) {
-        throw new Error("未检测到桌面端后端（preload API），无法打开系统选择器。");
+        throw new Error(
+          "未检测到桌面端后端（preload API），无法打开系统选择器。"
+        );
       }
       const selected = await window.mytrader.account.chooseDataRootDir();
       if (selected) setCreateDataRootDir(selected);
@@ -187,241 +193,279 @@ export function App() {
   }, [refreshAccounts, state]);
 
   return (
-    <>
-      <header className="h-12 bg-white dark:bg-slate-900 border-b border-border-light dark:border-border-dark flex items-center justify-between px-4 shrink-0 z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 bg-primary rounded flex items-center justify-center text-white font-bold text-[10px] shadow-sm">
-            M
-          </div>
-          <h1 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">MyTrader</h1>
+    <div className="app">
+      <header className="topbar">
+        <div className="brandGroup">
+          <div className="brandMark">M</div>
+          <h1 className="brand">MyTrader</h1>
         </div>
-        <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-          MVP 基础
-        </div>
+        <div className="badge">MVP 基础</div>
       </header>
-      
-      <main className="flex-1 flex items-center justify-center p-4 relative overflow-hidden bg-background-light dark:bg-background-dark">
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0 hidden dark:block">
-          <div className="absolute top-[10%] left-[20%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-[100px]"></div>
-        </div>
 
-        <div className="relative z-10 w-full max-w-xl bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl shadow-xl dark:shadow-lg overflow-hidden">
-          <div className="p-6 space-y-6">
-            {state.kind === "loading" ? (
-               <div className="text-center py-10 text-slate-500 dark:text-slate-400 text-sm">加载中...</div>
-            ) : state.kind === "unlocked" ? (
-               <div className="text-center py-6">
-                  <h2 className="text-lg font-semibold mb-3 text-slate-900 dark:text-white">已解锁</h2>
-                  <p className="mb-1 text-sm text-slate-600 dark:text-slate-300">当前账号: <strong>{state.account.label}</strong></p>
-                  <p className="mb-5 text-xs font-mono text-slate-500 truncate px-4">{state.account.dataDir}</p>
-                  <button 
-                    onClick={handleLock}
-                    className="bg-primary hover:bg-[#06b6d4] text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md shadow-primary/20 transition-all"
-                  >
-                    锁定
-                  </button>
-               </div>
-            ) : (
-              <>
-                <section>
-                  <div className="flex items-center gap-2 mb-4 text-slate-900 dark:text-white border-l-4 border-primary pl-3">
-                    <h2 className="text-lg font-semibold">登录</h2>
-                    <span className="text-xs font-normal text-slate-500 dark:text-slate-400">(Login)</span>
-                  </div>
-                  <form className="grid grid-cols-1 md:grid-cols-[90px_1fr] gap-y-4 gap-x-4 items-center">
-                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      账号 <span className="block text-[10px] text-slate-400 font-normal">Account</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <span className="material-icons-outlined text-lg">account_circle</span>
-                      </span>
-                      <select 
-                        className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary appearance-none transition-shadow text-sm"
-                        value={loginAccount}
-                        onChange={(e) => setLoginAccount(e.target.value)}
-                      >
-                         {accounts.length === 0 ? (
-                           <option value="" disabled>暂无账号，请先创建</option>
-                         ) : (
-                           <>
-                             {accounts.map(a => <option key={a.id} value={a.label}>{a.label}</option>)}
-                           </>
-                         )}
-                      </select>
-                      <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-slate-400">
-                        <span className="material-icons-outlined text-lg">expand_more</span>
-                      </span>
-                    </div>
-
-                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      密码 <span className="block text-[10px] text-slate-400 font-normal">Password</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <span className="material-icons-outlined text-lg">lock</span>
-                      </span>
-                      <input 
-                        className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm" 
-                        placeholder="••••••••" 
-                        type="password"
-                        value={unlockPassword}
-                        onChange={(e) => setUnlockPassword(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-                      />
-                    </div>
-                    <div className="md:col-start-2 flex justify-end pt-1">
-                      <button 
-                        className="bg-primary hover:bg-[#06b6d4] text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md shadow-primary/20 transition-all hover:scale-[1.01] active:scale-95 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed" 
-                        type="button"
-                        onClick={handleUnlock}
-                        disabled={!loginAccount || !unlockPassword}
-                      >
-                        <span className="material-icons-outlined text-sm">login</span>
-                        登录
-                      </button>
-                    </div>
-                  </form>
-                </section>
-
-                <div className="relative py-2">
-                  <div aria-hidden="true" className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-border-light dark:border-slate-700"></div>
-                  </div>
-                  <div className="relative flex justify-center">
-                    <span className="bg-surface-light dark:bg-surface-dark px-2 text-[10px] text-slate-400 uppercase tracking-wider">
-                      Or Initialize
-                    </span>
-                  </div>
-                </div>
-
-                <section>
-                  <div className="flex items-center gap-2 mb-4 text-slate-900 dark:text-white border-l-4 border-primary pl-3">
-                    <h2 className="text-lg font-semibold">创建账号</h2>
-                    <span className="text-xs font-normal text-slate-500 dark:text-slate-400">(Initialize New Vault)</span>
-                  </div>
-                  <form className="grid grid-cols-1 md:grid-cols-[90px_1fr] gap-y-4 gap-x-4 items-center">
-                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      名称 <span className="block text-[10px] text-slate-400 font-normal">Name</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <span className="material-icons-outlined text-lg">badge</span>
-                      </span>
-                      <input 
-                        className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm" 
-                        placeholder="例如: 个人" 
-                        type="text"
-                        value={createLabel}
-                        onChange={(e) => setCreateLabel(e.target.value)}
-                      />
-                    </div>
-
-                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      密码 <span className="block text-[10px] text-slate-400 font-normal">Password</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <span className="material-icons-outlined text-lg">vpn_key</span>
-                      </span>
-                      <input 
-                        className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm" 
-                        placeholder="设置密码" 
-                        type="password"
-                        value={createPassword}
-                        onChange={(e) => setCreatePassword(e.target.value)}
-                      />
-                    </div>
-
-                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      确认密码 <span className="block text-[10px] text-slate-400 font-normal">Confirm</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <span className="material-icons-outlined text-lg">check_circle_outline</span>
-                      </span>
-                      <input 
-                        className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm" 
-                        placeholder="再次输入密码" 
-                        type="password"
-                        value={createPasswordConfirm}
-                        onChange={(e) => setCreatePasswordConfirm(e.target.value)}
-                      />
-                    </div>
-
-                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      数据目录 <span className="block text-[10px] text-slate-400 font-normal">Data Dir</span>
-                    </label>
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                          <span className="material-icons-outlined text-lg">folder</span>
-                        </span>
-                        <input 
-                          className="w-full pl-9 pr-3 py-2 bg-slate-100 dark:bg-slate-800/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-500 dark:text-slate-400 focus:ring-0 focus:border-slate-600 cursor-not-allowed text-xs" 
-                          readOnly 
-                          type="text" 
-                          value={createDataRootDir || "默认: 应用数据目录"}
-                        />
-                      </div>
-                      <button 
-                        className="px-3 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg border border-transparent text-xs font-medium transition-colors flex items-center gap-1 shrink-0" 
-                        type="button"
-                        onClick={chooseDataRootDir}
-                        disabled={isChoosingDataRootDir}
-                      >
-                        <span className="material-icons-outlined text-base">folder_open</span>
-                        <span>{isChoosingDataRootDir ? "..." : "选择..."}</span>
-                      </button>
-                    </div>
-
-                    <div className="md:col-start-2 flex justify-end pt-1">
-                      <button 
-                        className="bg-transparent border border-primary text-primary hover:bg-primary hover:text-white px-5 py-2 rounded-lg text-sm font-medium transition-all hover:shadow-md hover:shadow-primary/20 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed" 
-                        type="button"
-                        onClick={handleCreateAccount}
-                        disabled={!createLabel || !createPassword || createPassword !== createPasswordConfirm}
-                      >
-                        <span className="material-icons-outlined text-sm">add_circle_outline</span>
-                        创建
-                      </button>
-                    </div>
-                  </form>
-                </section>
-              </>
-            )}
-
-            {error && (
-              <div className="mt-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 flex items-start gap-3">
-                <span className="material-icons-outlined text-red-500 dark:text-red-400 shrink-0 text-base">error_outline</span>
-                <div className="text-xs">
-                  <p className="font-medium text-red-800 dark:text-red-300">System Error</p>
-                  <p className="text-red-600 dark:text-red-400 font-mono mt-0.5">{error}</p>
-                </div>
-              </div>
-            )}
-            
-            {!hasDesktopApi && !error && (
-               <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3">
-                <span className="material-icons-outlined text-blue-500 dark:text-blue-400 shrink-0 text-base">info</span>
-                <div className="text-xs">
-                  <p className="font-medium text-blue-800 dark:text-blue-300">Environment Info</p>
-                  <p className="text-blue-600 dark:text-blue-400 font-mono mt-0.5">
-                     {isElectron
-                        ? "Electron detected, but preload API is missing."
-                        : "Browser Mode: Desktop backend not loaded."}
-                  </p>
-                </div>
-              </div>
-            )}
-
+      <main className="content">
+        {state.kind === "unlocked" ? (
+          <div className="relative z-10 w-full">
+            <Dashboard account={state.account} onLock={handleLock} />
           </div>
-        </div>
+        ) : (
+          <div className="authLayout">
+            <div className="card authCard">
+              <div className="p-6 space-y-6">
+                {state.kind === "loading" ? (
+                  <div className="text-center py-10 text-slate-500 dark:text-slate-400 text-sm">
+                    加载中...
+                  </div>
+                ) : (
+                  <>
+                    <section>
+                      <div className="flex items-center gap-2 mb-4 text-slate-900 dark:text-white border-l-4 border-primary pl-3">
+                        <h2 className="text-lg font-semibold">登录</h2>
+                        <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                          （已有账号）
+                        </span>
+                      </div>
+                      <form className="grid grid-cols-1 md:grid-cols-[90px_1fr] gap-y-4 gap-x-4 items-center">
+                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                          账号
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            用于登录
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                            <span className="material-icons-outlined text-lg">
+                              account_circle
+                            </span>
+                          </span>
+                          <select
+                            className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary appearance-none transition-shadow text-sm"
+                            value={loginAccount}
+                            onChange={(e) => setLoginAccount(e.target.value)}
+                          >
+                            {accounts.length === 0 ? (
+                              <option value="" disabled>
+                                暂无账号，请先创建
+                              </option>
+                            ) : (
+                              <>
+                                {accounts.map((a) => (
+                                  <option key={a.id} value={a.label}>
+                                    {a.label}
+                                  </option>
+                                ))}
+                              </>
+                            )}
+                          </select>
+                          <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-slate-400">
+                            <span className="material-icons-outlined text-lg">
+                              expand_more
+                            </span>
+                          </span>
+                        </div>
 
-        <div className="absolute bottom-2 text-center w-full text-[10px] text-slate-400 dark:text-slate-600 z-0">
-          © 2026 MyTrader Professional Workstation.
-        </div>
+                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                          密码
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            登录密码
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                            <span className="material-icons-outlined text-lg">lock</span>
+                          </span>
+                          <input
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            placeholder="******"
+                            type="password"
+                            value={unlockPassword}
+                            onChange={(e) => setUnlockPassword(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+                          />
+                        </div>
+                        <div className="md:col-start-2 flex justify-end pt-1">
+                          <button
+                            className="bg-primary hover:bg-[#06b6d4] text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md shadow-primary/20 transition-all hover:scale-[1.01] active:scale-95 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            type="button"
+                            onClick={handleUnlock}
+                            disabled={!loginAccount || !unlockPassword}
+                          >
+                            <span className="material-icons-outlined text-sm">login</span>
+                            登录
+                          </button>
+                        </div>
+                      </form>
+                    </section>
+
+                    <div className="relative py-2">
+                      <div aria-hidden="true" className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-border-light dark:border-slate-700"></div>
+                      </div>
+                      <div className="relative flex justify-center">
+                        <span className="bg-surface-light dark:bg-surface-dark px-2 text-[10px] text-slate-400 uppercase tracking-wider">
+                          或创建账号
+                        </span>
+                      </div>
+                    </div>
+
+                    <section>
+                      <div className="flex items-center gap-2 mb-4 text-slate-900 dark:text-white border-l-4 border-primary pl-3">
+                        <h2 className="text-lg font-semibold">创建账号</h2>
+                        <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                          （新建）
+                        </span>
+                      </div>
+                      <form className="grid grid-cols-1 md:grid-cols-[90px_1fr] gap-y-4 gap-x-4 items-center">
+                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                          名称
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            账号名称
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                            <span className="material-icons-outlined text-lg">badge</span>
+                          </span>
+                          <input
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            placeholder="例如：个人"
+                            type="text"
+                            value={createLabel}
+                            onChange={(e) => setCreateLabel(e.target.value)}
+                          />
+                        </div>
+
+                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                          密码
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            设置密码
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                            <span className="material-icons-outlined text-lg">vpn_key</span>
+                          </span>
+                          <input
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            placeholder="设置密码"
+                            type="password"
+                            value={createPassword}
+                            onChange={(e) => setCreatePassword(e.target.value)}
+                          />
+                        </div>
+
+                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                          确认密码
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            再次确认
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                            <span className="material-icons-outlined text-lg">
+                              check_circle_outline
+                            </span>
+                          </span>
+                          <input
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            placeholder="再次输入密码"
+                            type="password"
+                            value={createPasswordConfirm}
+                            onChange={(e) => setCreatePasswordConfirm(e.target.value)}
+                          />
+                        </div>
+
+                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                          数据目录
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            数据存放
+                          </span>
+                        </label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                              <span className="material-icons-outlined text-lg">folder</span>
+                            </span>
+                            <input
+                              className="w-full pl-9 pr-3 py-2 bg-slate-100 dark:bg-slate-800/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-500 dark:text-slate-400 focus:ring-0 focus:border-slate-600 cursor-not-allowed text-xs"
+                              readOnly
+                              type="text"
+                              value={createDataRootDir || "默认：应用数据目录"}
+                            />
+                          </div>
+                          <button
+                            className="px-3 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg border border-transparent text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                            type="button"
+                            onClick={chooseDataRootDir}
+                            disabled={isChoosingDataRootDir}
+                          >
+                            <span className="material-icons-outlined text-base">
+                              folder_open
+                            </span>
+                            <span>{isChoosingDataRootDir ? "..." : "选择..."}</span>
+                          </button>
+                        </div>
+
+                        <div className="md:col-start-2 flex justify-end pt-1">
+                          <button
+                            className="bg-transparent border border-primary text-primary hover:bg-primary hover:text-white px-5 py-2 rounded-lg text-sm font-medium transition-all hover:shadow-md hover:shadow-primary/20 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            type="button"
+                            onClick={handleCreateAccount}
+                            disabled={
+                              !createLabel ||
+                              !createPassword ||
+                              createPassword !== createPasswordConfirm
+                            }
+                          >
+                            <span className="material-icons-outlined text-sm">
+                              add_circle_outline
+                            </span>
+                            创建
+                          </button>
+                        </div>
+                      </form>
+                    </section>
+                  </>
+                )}
+
+                {error && (
+                  <div className="mt-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 flex items-start gap-3">
+                    <span className="material-icons-outlined text-red-500 dark:text-red-400 shrink-0 text-base">
+                      error_outline
+                    </span>
+                    <div className="text-xs">
+                      <p className="font-medium text-red-800 dark:text-red-300">
+                        系统错误
+                      </p>
+                      <p className="text-red-600 dark:text-red-400 font-mono mt-0.5">
+                        {error}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {!hasDesktopApi && !error && (
+                  <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3">
+                    <span className="material-icons-outlined text-blue-500 dark:text-blue-400 shrink-0 text-base">
+                      info
+                    </span>
+                    <div className="text-xs">
+                      <p className="font-medium text-blue-800 dark:text-blue-300">
+                        环境信息
+                      </p>
+                      <p className="text-blue-600 dark:text-blue-400 font-mono mt-0.5">
+                        {isElectron
+                          ? "检测到 Electron，但 preload API 不可用。"
+                          : "浏览器模式：未加载桌面端后端。"}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
-    </>
+      <footer className="footer">(c) 2026 MyTrader 专业交易工作台。</footer>
+    </div>
   );
 }

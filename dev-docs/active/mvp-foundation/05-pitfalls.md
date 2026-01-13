@@ -1,4 +1,4 @@
-# 05 Pitfalls (do not repeat)
+﻿# 05 Pitfalls (do not repeat)
 
 This file exists to prevent repeating mistakes within this task.
 
@@ -35,3 +35,10 @@ This file exists to prevent repeating mistakes within this task.
 - What was tried: 反复 `pnpm start`，前端始终拿不到 `window.mytrader`。
 - Fix/workaround: 在 `apps/backend/tsup.config.ts` 增加 `noExternal: ["@mytrader/shared"]`，将共享常量打包进 preload/main，避免运行时 `require("@mytrader/shared")`。
 - Prevention: preload 尽量只依赖 `electron` 内置能力；如必须用共享常量，确保打包进 preload（或在 preload 内内联常量）。
+
+### 2026-01-14 - sql.js WASM asset missing at runtime
+- Symptom: sql.js initialization fails because `sql-wasm.wasm` cannot be found.
+- Root cause: tsup bundles JS but does not copy the WASM asset into `apps/backend/dist/`.
+- What was tried: running the app after `pnpm build` without copying the WASM file.
+- Fix/workaround: add `scripts/copy-sql-wasm.mjs` and run it via `tsup` `onSuccess` to copy `sql-wasm.wasm` into `dist/`; configure `locateFile` to point at the copied asset.
+- Prevention: verify `apps/backend/dist/sql-wasm.wasm` exists after build and before packaging.

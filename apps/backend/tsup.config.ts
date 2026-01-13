@@ -11,6 +11,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   dts: false,
-  external: ["electron", "@vscode/sqlite3"],
-  noExternal: ["@mytrader/shared"]
+  external: ["electron"],
+  noExternal: ["@mytrader/shared"],
+  onSuccess: "node scripts/copy-sql-wasm.mjs"
 });

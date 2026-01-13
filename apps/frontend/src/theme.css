@@ -74,7 +74,7 @@
   --mt-btn-secondary-border-hover: rgba(232, 234, 237, 0.18);
 }
 
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: light-disabled) {
   :root {
     --mt-bg: #f5f7fb;
     --mt-bg-1: #eef2f7;

@@ -1,8 +1,8 @@
-# 03 Implementation Notes
+﻿# 03 Implementation Notes
 
 ## Status
 - Current status: in_progress
-- Last updated: 2026-01-12
+- Last updated: 2026-01-14
 
 ## What changed
 - Added Electron + React (Vite) scaffold for MVP foundation.
@@ -18,6 +18,12 @@
 - 新增 `ui_login.md` 作为登录/创建账号界面的 UI 规范，并对主题色/按钮样式/光晕效果做了进一步对齐。
 - 对登录页排版做二次打磨：统一全局字体尺度，登录按钮/输入高度对齐，表单动作区按参考图右对齐到输入列，卡片宽度更接近 `max-w-3xl`。
 - 增加 `pnpm start`：修复环境变量 `ELECTRON_RUN_AS_NODE=1` 导致 Electron 以 Node 模式启动的问题，并为 `@mytrader/shared` 统一为 CommonJS 输出以兼容 main/preload 的 `require`。
+- Added business DB schema migration for portfolios, positions, and risk limits.
+- Added market cache DB with daily price storage and ingestion helpers.
+- Implemented portfolio snapshot (valuation, exposures, risk warnings) over latest market prices.
+- Implemented CSV import for holdings and daily prices, plus Tushare daily ingestion.
+- Added IPC APIs + frontend dashboard for portfolio/positions/risk/market workflows.
+- Switched SQLite driver to `sql.js` (WASM) and added a build-time copy step for `sql-wasm.wasm`.
 
 ## Files/modules touched (high level)
 - apps/backend/*
@@ -30,9 +36,9 @@
 - Decision: MVP UI is Chinese-only
   - Rationale: target users and workflow are Chinese-first; reduce i18n complexity in MVP.
   - Alternatives considered: add i18n framework and multi-language support.
-- Decision: use `@vscode/sqlite3` as the SQLite driver in Electron main process
-  - Rationale: reduce native-module friction vs `better-sqlite3` under mixed Node/Electron toolchains; aligns with Electron usage patterns.
-  - Alternatives considered: `better-sqlite3` (+ electron-rebuild), Node `node:sqlite` (runtime/version constraints).
+- Decision: use `sql.js` as the SQLite driver in Electron main process
+  - Rationale: avoid native build friction on Windows; keep the main process dependency pure JS with a predictable WASM asset.
+  - Alternatives considered: `@vscode/sqlite3` (native binding), `better-sqlite3` (+ electron-rebuild), Node `node:sqlite` (runtime/version constraints).
 - Decision: account-scoped business DBs + shared market cache
   - Rationale: strong isolation with minimal data duplication
   - Alternatives considered: single shared DB with account_id partitioning
@@ -45,13 +51,23 @@
 - Decision: CSV import includes holdings + daily prices + volume; no trade ledger in MVP
   - Rationale: supports valuation and risk without trade-level reconstruction
   - Alternatives considered: full trade-ledger import
+- Decision: CSV columns are explicit and minimal
+  - Holdings CSV: `symbol`, `name`, `asset_class`, `market`, `currency`, `quantity`, `cost`, `open_date`
+  - Prices CSV: `symbol`, `trade_date`, `open`, `high`, `low`, `close`, `volume`
+- Decision: risk exposure is derived from latest close prices
+  - Rationale: deterministic valuation source and reproducible risk snapshots
+  - Limit types: `position_weight`, `asset_class_weight`
+- Decision: Tushare token loaded from `MYTRADER_TUSHARE_TOKEN` env var
+  - Rationale: avoids storing secrets in repo; easy local override
 
 ## Deviations from plan
 - None.
 
 ## Known issues / follow-ups
 - Define the initial ETF whitelist (names/tickers) and map to official source fields.
-- Specify CSV column names and validation rules for holdings/prices/volume.
+- Add CSV templates/examples in docs for user onboarding.
+- Manual smoke checks for portfolio/risk/market flows still pending.
+- Confirm `sql-wasm.wasm` is copied to `apps/backend/dist/` and bundled with the Electron app.
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

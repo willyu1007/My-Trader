@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@mytrader/shared": "workspace:*",
-    "@vscode/sqlite3": "5.1.10-vscode"
+    "sql.js": "^1.11.0"
   },
   "devDependencies": {
     "electron": "^30.0.0",

@@ -2,7 +2,7 @@
 
 ## Status
 - State: in_progress
-- Next step: Manual smoke check Milestone 1 (create/lock/unlock + DB files), then start portfolio/position schema (Milestone 2)
+- Next step: Run manual smoke checks for portfolio/risk/market flows and record verification results
 
 ## Goal
 Deliver a local-first MVP with account-isolated storage and the agreed priority order: portfolio, risk, market data, opinions, backtest.
@@ -21,7 +21,7 @@ Deliver a local-first MVP with account-isolated storage and the agreed priority 
 
 ## Acceptance criteria (high level)
 - [x] Account index + per-account DBs created on login; only one account open at a time
-- [ ] Portfolio/position CRUD with risk exposures and limit warnings
-- [ ] Official-source + CSV import for A-share and common ETF daily data
+- [x] Portfolio/position CRUD with risk exposures and limit warnings (pending verification)
+- [x] Official-source + CSV import for A-share and common ETF daily data (pending verification/token)
 - [ ] Opinions/journal CRUD with tags and search
 - [ ] Daily backtest with fees/taxes and saved runs
