@@ -44,16 +44,16 @@
 
   --mt-btn-bg: linear-gradient(
     180deg,
-    rgba(232, 234, 237, 0.1),
-    rgba(232, 234, 237, 0.06)
+    rgba(232, 234, 237, 0.2),
+    rgba(232, 234, 237, 0.12)
   );
   --mt-btn-bg-hover: linear-gradient(
     180deg,
-    rgba(232, 234, 237, 0.14),
-    rgba(232, 234, 237, 0.08)
+    rgba(232, 234, 237, 0.28),
+    rgba(232, 234, 237, 0.16)
   );
-  --mt-btn-border: var(--mt-border-strong);
-  --mt-btn-border-hover: rgba(8, 145, 178, 0.35);
+  --mt-btn-border: rgba(232, 234, 237, 0.24);
+  --mt-btn-border-hover: rgba(8, 145, 178, 0.55);
 
   --mt-btn-primary-bg: linear-gradient(
     180deg,
@@ -68,10 +68,10 @@
   --mt-btn-primary-border: rgba(8, 145, 178, 0.55);
   --mt-btn-primary-border-hover: rgba(8, 145, 178, 0.75);
 
-  --mt-btn-secondary-bg: rgba(232, 234, 237, 0.08);
-  --mt-btn-secondary-bg-hover: rgba(232, 234, 237, 0.12);
-  --mt-btn-secondary-border: rgba(232, 234, 237, 0.12);
-  --mt-btn-secondary-border-hover: rgba(232, 234, 237, 0.18);
+  --mt-btn-secondary-bg: rgba(232, 234, 237, 0.14);
+  --mt-btn-secondary-bg-hover: rgba(232, 234, 237, 0.22);
+  --mt-btn-secondary-border: rgba(232, 234, 237, 0.2);
+  --mt-btn-secondary-border-hover: rgba(232, 234, 237, 0.3);
 }
 
 @media (prefers-color-scheme: light-disabled) {
@@ -100,7 +100,11 @@
       radial-gradient(900px 700px at 100% 0%, rgba(8, 145, 178, 0.1), transparent 60%),
       var(--mt-bg);
 
-    --mt-btn-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.92));
+    --mt-btn-bg: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 1),
+      rgba(241, 245, 249, 0.92)
+    );
     --mt-btn-bg-hover: linear-gradient(
       180deg,
       rgba(255, 255, 255, 1),

@@ -64,6 +64,74 @@ const riskLimitTypeLabels: Record<RiskLimitType, string> = {
   asset_class_weight: "资产类别权重"
 };
 
+const navItems = [
+  {
+    key: "portfolio",
+    label: "投资组合",
+    meta: "概览",
+    description: "集中查看组合、持仓与估值变化。",
+    icon: "pie_chart"
+  },
+  {
+    key: "risk",
+    label: "风险管理",
+    meta: "敞口/限额",
+    description: "跟踪风险敞口、限额与预警。",
+    icon: "shield"
+  },
+  {
+    key: "market",
+    label: "市场行情",
+    meta: "数据/报价",
+    description: "导入行情与价格数据，更新估值。",
+    icon: "show_chart"
+  },
+  {
+    key: "opportunities",
+    label: "机会",
+    meta: "扫描/策略",
+    description: "聚合潜在机会与策略提示。",
+    icon: "lightbulb"
+  },
+  {
+    key: "backtest",
+    label: "回测",
+    meta: "历史验证",
+    description: "回测策略并对比历史表现。",
+    icon: "query_stats"
+  },
+  {
+    key: "insights",
+    label: "观点",
+    meta: "研究/复盘",
+    description: "记录观点、研究与复盘笔记。",
+    icon: "insights"
+  },
+  {
+    key: "alerts",
+    label: "提醒",
+    meta: "预警/到价",
+    description: "集中管理交易提醒与到价预警。",
+    icon: "notifications_active"
+  },
+  {
+    key: "other",
+    label: "其他",
+    meta: "工具箱",
+    description: "工具与实验功能入口。",
+    icon: "more_horiz"
+  },
+  {
+    key: "account",
+    label: "账号",
+    meta: "权限/锁定",
+    description: "账号信息、权限与锁定管理。",
+    icon: "manage_accounts"
+  }
+] as const;
+
+type WorkspaceView = (typeof navItems)[number]["key"];
+
 export function Dashboard({ account, onLock }: DashboardProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [activePortfolioId, setActivePortfolioId] = useState<string | null>(null);
@@ -71,6 +139,8 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<WorkspaceView>("portfolio");
+  const [isNavCollapsed, setIsNavCollapsed] = useState(false);
 
   const [portfolioName, setPortfolioName] = useState("");
   const [portfolioBaseCurrency, setPortfolioBaseCurrency] = useState("CNY");
@@ -385,626 +455,596 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   }, [snapshot, ingestStartDate, ingestEndDate, loadSnapshot]);
 
   return (
-    <div className="dashboard">
-      <section className="panel">
-        <div className="panelHeader">
-          <div>
-            <h2 className="panelTitle">账号</h2>
-            <p className="muted">当前账号：{account.label}</p>
-          </div>
-          <button className="btn btn-secondary btn-sm" onClick={onLock}>
-            锁定
+    <div className="flex h-full bg-white dark:bg-[#0B0E14] overflow-hidden">
+      {/* Sidebar */}
+      <aside 
+        className={`${
+          isNavCollapsed ? "w-16" : "w-40"
+        } flex-shrink-0 bg-[#0f172a] border-r border-slate-800 flex flex-col transition-all duration-300 z-20`}
+      >
+        <div className="flex items-center justify-between p-2 border-b border-slate-800 h-10">
+          <p className={`text-xs font-semibold text-slate-400 ${isNavCollapsed ? "hidden" : "block"}`}>
+            导航
+          </p>
+          <button
+            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            type="button"
+            onClick={() => setIsNavCollapsed((prev) => !prev)}
+            aria-label={isNavCollapsed ? "展开导航" : "收起导航"}
+          >
+            <span className="material-icons-outlined text-lg">
+              {isNavCollapsed ? "chevron_right" : "chevron_left"}
+            </span>
           </button>
         </div>
-      </section>
+        
+        {/* Account info moved to global top bar */}
 
-      <section className="panel">
-        <div className="panelHeader">
-          <div>
-            <h2 className="panelTitle">组合</h2>
-            <p className="muted">管理组合并设置当前使用组合。</p>
-          </div>
-        </div>
-        <div className="panelBody">
-          <div className="stack">
-            <div className="formRowWide">
-              <label className="formLabel">当前组合</label>
-              <div className="inline">
-                <select
-                  value={activePortfolioId ?? ""}
-                  onChange={(event) => setActivePortfolioId(event.target.value)}
-                >
-                  <option value="" disabled>
-                    请选择组合
-                  </option>
-                  {portfolios.map((portfolio) => (
-                    <option key={portfolio.id} value={portfolio.id}>
-                      {portfolio.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  type="button"
-                  onClick={() => loadPortfolios(activePortfolioId)}
-                >
-                  刷新
-                </button>
-              </div>
-            </div>
-
-            <div className="formRowWide">
-              <label className="formLabel">重命名</label>
-              <div className="inline">
-                <input
-                  type="text"
-                  value={portfolioRename}
-                  onChange={(event) => setPortfolioRename(event.target.value)}
-                  placeholder="组合名称"
-                />
-                <button
-                  className="btn btn-secondary btn-sm"
-                  type="button"
-                  onClick={handleRenamePortfolio}
-                  disabled={!activePortfolio}
-                >
-                  更新
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  type="button"
-                  onClick={handleDeletePortfolio}
-                  disabled={!activePortfolio}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-
-            <div className="divider" />
-
-            <div className="formRowWide">
-              <label className="formLabel">新建组合</label>
-              <div className="inline">
-                <input
-                  type="text"
-                  value={portfolioName}
-                  onChange={(event) => setPortfolioName(event.target.value)}
-                  placeholder="例如：核心持仓"
-                />
-                <input
-                  type="text"
-                  value={portfolioBaseCurrency}
-                  onChange={(event) =>
-                    setPortfolioBaseCurrency(event.target.value)
+        <nav className="flex-1 overflow-y-auto p-2 space-y-1">
+          {navItems.map((item) => {
+            const isActive = item.key === activeView;
+            return (
+              <button
+                key={item.key}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 group
+                  ${isActive 
+                    ? "bg-primary text-white font-medium" 
+                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
                   }
-                  placeholder="基准币种"
-                />
-                <button
-                  className="btn btn-primary btn-sm"
-                  type="button"
-                  onClick={handleCreatePortfolio}
-                  disabled={!portfolioName.trim()}
-                >
-                  创建
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+                  ${isNavCollapsed ? "justify-center px-2" : ""}
+                `}
+                type="button"
+                onClick={() => setActiveView(item.key)}
+                title={item.label}
+              >
+                <span className={`material-icons-outlined ${isNavCollapsed ? "text-xl" : "text-lg"} ${isActive ? "text-white" : "text-slate-500 group-hover:text-slate-300"}`}>
+                  {item.icon}
+                </span>
+                {!isNavCollapsed && (
+                  <div className="flex flex-col items-start text-left leading-tight">
+                    <span>{item.label}</span>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
 
-      <section className="panel panelGrid">
-        <div className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2 className="panelTitle">持仓</h2>
-              <p className="muted">添加持仓，跟踪估值与盈亏。</p>
-            </div>
-          </div>
-          <div className="panelBody">
-            {isLoading && <p className="muted">正在加载组合数据...</p>}
-            {!isLoading && !activePortfolio && (
-              <p className="muted">请先创建组合。</p>
-            )}
-            {!isLoading && activePortfolio && !snapshot && (
-              <p className="muted">暂无估值快照。</p>
-            )}
-            {snapshot && (
-              <>
-                <div className="tableWrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>代码</th>
-                        <th>名称</th>
-                        <th>资产类别</th>
-                        <th>数量</th>
-                        <th>成本</th>
-                        <th>最新价</th>
-                        <th>市值</th>
-                        <th>盈亏</th>
-                        <th>权重</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {snapshot.positions.length === 0 ? (
-                        <tr>
-                          <td colSpan={10} className="muted">
-                            暂无持仓。
-                          </td>
-                        </tr>
-                      ) : (
-                        snapshot.positions.map((pos) => (
-                          <tr key={pos.position.id}>
-                            <td>{pos.position.symbol}</td>
-                            <td>{pos.position.name ?? "-"}</td>
-                            <td>{formatAssetClassLabel(pos.position.assetClass)}</td>
-                            <td>{formatNumber(pos.position.quantity)}</td>
-                            <td>{formatCurrency(pos.position.cost)}</td>
-                            <td>{formatCurrency(pos.latestPrice)}</td>
-                            <td>{formatCurrency(pos.marketValue)}</td>
-                            <td
-                              className={
-                                pos.pnl !== null && pos.pnl < 0 ? "textDanger" : ""
-                              }
-                            >
-                              {formatCurrency(pos.pnl)}
-                            </td>
-                            <td>
-                              {formatPct(
-                                snapshot.exposures.bySymbol.find(
-                                  (entry) => entry.key === pos.position.symbol
-                                )?.weight ?? 0
-                              )}
-                            </td>
-                            <td>
-                              <div className="inline">
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  type="button"
-                                  onClick={() => handleEditPosition(pos)}
-                                >
-                                  编辑
-                                </button>
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  type="button"
-                                  onClick={() =>
-                                    handleDeletePosition(pos.position.id)
-                                  }
-                                >
-                                  删除
-                                </button>
-                              </div>
-                            </td>
+      {/* Main Content */}
+      <section className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white dark:bg-[#0B0E14]">
+        {/* Top Navigation / Toolbar */}
+        <div className="h-10 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-3 flex-shrink-0 bg-white dark:bg-[#0B0E14]">
+           <div className="flex items-center gap-4">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                {navItems.find(n => n.key === activeView)?.label}
+              </h2>
+              {/* Optional: Breadcrumbs or View Switcher here */}
+           </div>
+           <div className="flex items-center gap-2">
+              {activeView === "account" && (
+                 <Button variant="secondary" size="sm" onClick={onLock} icon="lock">锁定</Button>
+              )}
+              {activeView === "portfolio" && (
+                 <Button variant="secondary" size="sm" onClick={() => loadPortfolios(activePortfolioId)} icon="refresh">刷新</Button>
+              )}
+           </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-0 scroll-smooth">
+          
+          {/* View: Account */}
+          {activeView === "account" && (
+            <Panel>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 max-w-4xl">
+                 <DescriptionItem label="当前账号" value={account.label} />
+                 <DescriptionItem label="账号 ID" value={<span className="font-mono text-xs">{account.id}</span>} />
+                 <DescriptionItem label="数据目录" value={<span className="font-mono text-xs">{account.dataDir}</span>} />
+                 <DescriptionItem label="创建时间" value={formatDateTime(account.createdAt)} />
+                 <DescriptionItem label="最近登录" value={formatDateTime(account.lastLoginAt)} />
+              </div>
+            </Panel>
+          )}
+
+          {/* View: Portfolio */}
+          {activeView === "portfolio" && (
+            <>
+              <Panel>
+                <div className="space-y-6 max-w-5xl">
+                  {/* Selector & Actions */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormGroup label="切换组合">
+                        <Select
+                          value={activePortfolioId ?? ""}
+                          onChange={(e) => setActivePortfolioId(e.target.value)}
+                          options={[
+                            { value: "", label: "请选择组合", disabled: true },
+                            ...portfolios.map(p => ({ value: p.id, label: p.name }))
+                          ]}
+                          className="w-full"
+                        />
+                    </FormGroup>
+                    
+                    <FormGroup label="重命名当前组合">
+                       <div className="flex gap-2">
+                          <Input 
+                            value={portfolioRename}
+                            onChange={(e) => setPortfolioRename(e.target.value)}
+                            placeholder="组合名称"
+                            className="flex-1"
+                          />
+                          <Button variant="secondary" onClick={handleRenamePortfolio} disabled={!activePortfolio}>更新</Button>
+                          <Button variant="danger" onClick={handleDeletePortfolio} disabled={!activePortfolio}>删除</Button>
+                       </div>
+                    </FormGroup>
+                  </div>
+
+                  <div className="border-t border-slate-100 dark:border-slate-800" />
+                  
+                  {/* Create New */}
+                  <FormGroup label="新建组合">
+                    <div className="flex gap-2 items-center">
+                       <Input 
+                         value={portfolioName}
+                         onChange={(e) => setPortfolioName(e.target.value)}
+                         placeholder="例如：核心持仓"
+                         className="flex-[2]"
+                       />
+                       <Input 
+                         value={portfolioBaseCurrency}
+                         onChange={(e) => setPortfolioBaseCurrency(e.target.value)}
+                         placeholder="基准币种"
+                         className="flex-1"
+                       />
+                       <Button variant="primary" onClick={handleCreatePortfolio} disabled={!portfolioName.trim()} icon="add">创建</Button>
+                    </div>
+                  </FormGroup>
+                </div>
+              </Panel>
+
+              <Panel>
+                <h3 className="text-sm font-semibold mb-4 text-slate-800 dark:text-slate-200">持仓明细</h3>
+                
+                {isLoading && <EmptyState message="正在加载组合数据..." />}
+                {!isLoading && !activePortfolio && <EmptyState message="请先选择或创建组合。" />}
+                {!isLoading && activePortfolio && !snapshot && <EmptyState message="暂无估值快照。" />}
+                
+                {snapshot && (
+                  <>
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                       <SummaryCard label="总市值" value={formatCurrency(snapshot.totals.marketValue)} />
+                       <SummaryCard 
+                          label="总盈亏" 
+                          value={formatCurrency(snapshot.totals.pnl)} 
+                          trend={snapshot.totals.pnl >= 0 ? 'up' : 'down'}
+                        />
+                    </div>
+
+                    {/* Table */}
+                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 mb-6">
+                      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+                        <thead className="bg-slate-50 dark:bg-slate-900">
+                          <tr>
+                            {["代码", "名称", "类型", "数量", "成本", "现价", "市值", "盈亏", "权重", "操作"].map(h => (
+                              <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                                {h}
+                              </th>
+                            ))}
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="summaryRow">
-                  <span>总市值</span>
-                  <strong>{formatCurrency(snapshot.totals.marketValue)}</strong>
-                  <span>总盈亏</span>
-                  <strong
-                    className={
-                      snapshot.totals.pnl < 0 ? "textDanger" : undefined
-                    }
-                  >
-                    {formatCurrency(snapshot.totals.pnl)}
-                  </strong>
-                </div>
-              </>
-            )}
-
-            {activePortfolio && (
-              <>
-                <div className="divider" />
-                <h3 className="panelSubtitle">
-                  {positionForm.id ? "编辑持仓" : "新增持仓"}
-                </h3>
-                <div className="stack">
-                  <div className="formRowWide">
-                    <label className="formLabel">代码</label>
-                    <input
-                      type="text"
-                      value={positionForm.symbol}
-                      onChange={(event) =>
-                        setPositionForm((prev) => ({
-                          ...prev,
-                          symbol: event.target.value
-                        }))
-                      }
-                      placeholder="例如：600519.SH"
-                    />
-                  </div>
-                  <div className="formRowWide">
-                    <label className="formLabel">名称</label>
-                    <input
-                      type="text"
-                      value={positionForm.name}
-                      onChange={(event) =>
-                        setPositionForm((prev) => ({
-                          ...prev,
-                          name: event.target.value
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="formRowWide">
-                    <label className="formLabel">资产类别</label>
-                    <select
-                      value={positionForm.assetClass}
-                      onChange={(event) =>
-                        setPositionForm((prev) => ({
-                          ...prev,
-                          assetClass: event.target.value as AssetClass
-                        }))
-                      }
-                    >
-                      <option value="stock">股票</option>
-                      <option value="etf">ETF</option>
-                      <option value="cash">现金</option>
-                    </select>
-                  </div>
-                  <div className="formRowWide">
-                    <label className="formLabel">市场 / 币种</label>
-                    <div className="inline">
-                      <input
-                        type="text"
-                        value={positionForm.market}
-                        onChange={(event) =>
-                          setPositionForm((prev) => ({
-                            ...prev,
-                            market: event.target.value
-                          }))
-                        }
-                        placeholder="CN"
-                      />
-                      <input
-                        type="text"
-                        value={positionForm.currency}
-                        onChange={(event) =>
-                          setPositionForm((prev) => ({
-                            ...prev,
-                            currency: event.target.value
-                          }))
-                        }
-                        placeholder="CNY"
-                      />
+                        </thead>
+                        <tbody className="bg-white dark:bg-[#0B0E14] divide-y divide-slate-200 dark:divide-slate-800">
+                          {snapshot.positions.length === 0 ? (
+                            <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">暂无持仓</td></tr>
+                          ) : (
+                            snapshot.positions.map((pos) => (
+                              <tr key={pos.position.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+                                <td className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 font-mono">{pos.position.symbol}</td>
+                                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">{pos.position.name ?? "-"}</td>
+                                <td className="px-4 py-2 text-sm text-slate-500">
+                                   <Badge>{formatAssetClassLabel(pos.position.assetClass)}</Badge>
+                                </td>
+                                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 font-mono text-right">{formatNumber(pos.position.quantity)}</td>
+                                <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">{formatCurrency(pos.position.cost)}</td>
+                                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 font-mono text-right">{formatCurrency(pos.latestPrice)}</td>
+                                <td className="px-4 py-2 text-sm text-slate-900 dark:text-slate-100 font-medium font-mono text-right">{formatCurrency(pos.marketValue)}</td>
+                                <td className={`px-4 py-2 text-sm font-mono text-right ${pos.pnl && pos.pnl < 0 ? "text-red-500" : "text-emerald-500"}`}>
+                                  {formatCurrency(pos.pnl)}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">
+                                  {formatPct(
+                                    snapshot.exposures.bySymbol.find(e => e.key === pos.position.symbol)?.weight ?? 0
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-right">
+                                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => handleEditPosition(pos)} className="p-1 text-slate-400 hover:text-primary transition-colors" title="编辑">
+                                       <span className="material-icons-outlined text-base">edit</span>
+                                    </button>
+                                    <button onClick={() => handleDeletePosition(pos.position.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors" title="删除">
+                                       <span className="material-icons-outlined text-base">delete</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
                     </div>
-                  </div>
-                  <div className="formRowWide">
-                    <label className="formLabel">数量 / 成本</label>
-                    <div className="inline">
-                      <input
-                        type="number"
-                        value={positionForm.quantity}
-                        onChange={(event) =>
-                          setPositionForm((prev) => ({
-                            ...prev,
-                            quantity: event.target.value
-                          }))
-                        }
-                        placeholder="数量"
-                      />
-                      <input
-                        type="number"
-                        value={positionForm.cost}
-                        onChange={(event) =>
-                          setPositionForm((prev) => ({
-                            ...prev,
-                            cost: event.target.value
-                          }))
-                        }
-                        placeholder="成本价"
-                      />
+
+                    {/* Edit Form */}
+                    <div className="bg-slate-50 dark:bg-slate-900/50 p-4 border-t border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                          <span className="material-icons-outlined text-primary text-base">edit_note</span>
+                          {positionForm.id ? "编辑持仓" : "新增持仓"}
+                        </h3>
+                        {positionForm.id && (
+                             <Button variant="secondary" size="sm" onClick={handleCancelEditPosition}>取消编辑</Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <FormGroup label="代码">
+                           <Input 
+                             value={positionForm.symbol} 
+                             onChange={(e) => setPositionForm(p => ({ ...p, symbol: e.target.value }))}
+                             placeholder="例如: 600519.SH"
+                           />
+                        </FormGroup>
+                        <FormGroup label="名称">
+                           <Input 
+                             value={positionForm.name} 
+                             onChange={(e) => setPositionForm(p => ({ ...p, name: e.target.value }))}
+                             placeholder="可选"
+                           />
+                        </FormGroup>
+                        <FormGroup label="资产类别">
+                           <Select
+                             value={positionForm.assetClass}
+                             onChange={(e) => setPositionForm(p => ({ ...p, assetClass: e.target.value as AssetClass }))}
+                             options={Object.entries(assetClassLabels).map(([v, l]) => ({ value: v, label: l }))}
+                           />
+                        </FormGroup>
+                        <FormGroup label="市场 / 币种">
+                           <div className="flex gap-2">
+                             <Input 
+                               value={positionForm.market} 
+                               onChange={(e) => setPositionForm(p => ({ ...p, market: e.target.value }))}
+                               placeholder="CN"
+                             />
+                             <Input 
+                               value={positionForm.currency} 
+                               onChange={(e) => setPositionForm(p => ({ ...p, currency: e.target.value }))}
+                               placeholder="CNY"
+                             />
+                           </div>
+                        </FormGroup>
+                        <FormGroup label="数量">
+                           <Input 
+                             type="number"
+                             value={positionForm.quantity} 
+                             onChange={(e) => setPositionForm(p => ({ ...p, quantity: e.target.value }))}
+                             placeholder="0"
+                           />
+                        </FormGroup>
+                        <FormGroup label="成本单价">
+                           <Input 
+                             type="number"
+                             value={positionForm.cost} 
+                             onChange={(e) => setPositionForm(p => ({ ...p, cost: e.target.value }))}
+                             placeholder="0.00"
+                           />
+                        </FormGroup>
+                        <FormGroup label="建仓日期">
+                           <Input 
+                             type="date"
+                             value={positionForm.openDate} 
+                             onChange={(e) => setPositionForm(p => ({ ...p, openDate: e.target.value }))}
+                           />
+                        </FormGroup>
+                        <div className="flex items-end">
+                           <Button variant="primary" onClick={handleSubmitPosition} className="w-full">
+                             {positionForm.id ? "保存更改" : "添加持仓"}
+                           </Button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="formRowWide">
-                    <label className="formLabel">建仓日期</label>
-                    <input
-                      type="date"
-                      value={positionForm.openDate}
-                      onChange={(event) =>
-                        setPositionForm((prev) => ({
-                          ...prev,
-                          openDate: event.target.value
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="actions">
-                    {positionForm.id && (
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        type="button"
-                        onClick={handleCancelEditPosition}
-                      >
-                        取消
-                      </button>
-                    )}
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={handleSubmitPosition}
-                    >
-                      {positionForm.id ? "更新" : "新增"}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+                  </>
+                )}
+              </Panel>
+            </>
+          )}
 
-        <div className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2 className="panelTitle">风险与敞口</h2>
-              <p className="muted">跟踪集中度并执行风险限额。</p>
-            </div>
-          </div>
-          <div className="panelBody">
-            {!snapshot && <p className="muted">暂无风险数据。</p>}
-            {snapshot && (
-              <>
-                <div className="panelSubgroup">
-                  <h3 className="panelSubtitle">按资产类别敞口</h3>
-                  {snapshot.exposures.byAssetClass.length === 0 ? (
-                    <p className="muted">暂无敞口数据。</p>
-                  ) : (
-                    <ul className="list">
-                      {snapshot.exposures.byAssetClass.map((entry) => (
-                        <li key={entry.key} className="listRow">
-                          <span>{formatAssetClassLabel(entry.key)}</span>
-                          <span>{formatPct(entry.weight)}</span>
-                          <span>{formatCurrency(entry.marketValue)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div className="panelSubgroup">
-                  <h3 className="panelSubtitle">风险限额</h3>
-                  {snapshot.riskLimits.length === 0 ? (
-                    <p className="muted">尚未配置限额。</p>
-                  ) : (
-                    <ul className="list">
-                      {snapshot.riskLimits.map((limit) => (
-                        <li key={limit.id} className="listRow">
-                          <span>
-                            {formatRiskLimitTypeLabel(limit.limitType)} / {limit.target}
+          {/* View: Risk */}
+          {activeView === "risk" && (
+            <Panel>
+              {!snapshot ? <EmptyState message="暂无风险数据。" /> : (
+                <div className="space-y-8 max-w-6xl">
+                  {/* Exposure Table */}
+                  <section>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 pl-1">资产敞口分布</h3>
+                    <div className="overflow-hidden border border-slate-200 dark:border-slate-800">
+                      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+                         <thead className="bg-slate-50 dark:bg-slate-900">
+                           <tr>
+                             <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">资产类别</th>
+                             <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">权重</th>
+                             <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">市值</th>
+                           </tr>
+                         </thead>
+                         <tbody className="bg-white dark:bg-[#0B0E14] divide-y divide-slate-200 dark:divide-slate-800">
+                           {snapshot.exposures.byAssetClass.map(e => (
+                             <tr key={e.key}>
+                               <td className="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">{formatAssetClassLabel(e.key)}</td>
+                               <td className="px-4 py-2 text-sm text-right font-mono text-slate-600 dark:text-slate-400">{formatPct(e.weight)}</td>
+                               <td className="px-4 py-2 text-sm text-right font-mono text-slate-900 dark:text-white">{formatCurrency(e.marketValue)}</td>
+                             </tr>
+                           ))}
+                         </tbody>
+                      </table>
+                    </div>
+                  </section>
+                  
+                  {/* Risk Limits */}
+                  <section>
+                     <div className="flex justify-between items-center mb-3 px-1">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">限额监控</h3>
+                        {snapshot.riskWarnings.length > 0 && (
+                          <span className="text-xs font-medium text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
+                            {snapshot.riskWarnings.length} 个预警
                           </span>
-                          <span>{formatPct(limit.threshold)}</span>
-                          <span className="inline">
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              type="button"
-                              onClick={() => handleEditRiskLimit(limit)}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              type="button"
-                              onClick={() => handleDeleteRiskLimit(limit.id)}
-                            >
-                              删除
-                            </button>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                        )}
+                     </div>
+                     <div className="space-y-4">
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                         {snapshot.riskLimits.map(limit => (
+                           <div key={limit.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
+                              <div className="flex justify-between items-start mb-2">
+                                 <div>
+                                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{formatRiskLimitTypeLabel(limit.limitType)}</div>
+                                    <div className="font-medium text-slate-900 dark:text-white mt-1 text-lg">{limit.target}</div>
+                                 </div>
+                                 <div className="text-xl font-mono font-light text-slate-700 dark:text-slate-300">{formatPct(limit.threshold)}</div>
+                              </div>
+                              <div className="flex justify-end gap-3 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                                 <button onClick={() => handleEditRiskLimit(limit)} className="text-xs font-medium text-slate-500 hover:text-primary transition-colors">编辑</button>
+                                 <button onClick={() => handleDeleteRiskLimit(limit.id)} className="text-xs font-medium text-slate-500 hover:text-red-500 transition-colors">删除</button>
+                              </div>
+                           </div>
+                         ))}
+                         {/* Add New Limit Form */}
+                         <div className="bg-slate-50 dark:bg-slate-900/30 border border-dashed border-slate-300 dark:border-slate-700 p-4 flex flex-col gap-3">
+                           <div className="text-xs font-bold text-slate-400 uppercase text-center">{riskForm.id ? "编辑限额" : "新增限额"}</div>
+                           <Select 
+                              value={riskForm.limitType} 
+                              onChange={(e) => setRiskForm(p => ({ ...p, limitType: e.target.value as RiskLimitType }))}
+                              options={Object.entries(riskLimitTypeLabels).map(([v, l]) => ({ value: v, label: l }))}
+                              className="text-xs"
+                           />
+                           <Input 
+                              value={riskForm.target} 
+                              onChange={(e) => setRiskForm(p => ({ ...p, target: e.target.value }))}
+                              placeholder="目标 (如 600519)"
+                              className="text-xs"
+                           />
+                           <Input 
+                              type="number"
+                              value={riskForm.thresholdPct} 
+                              onChange={(e) => setRiskForm(p => ({ ...p, thresholdPct: e.target.value }))}
+                              placeholder="阈值 %"
+                              className="text-xs"
+                           />
+                           <div className="flex gap-2 mt-auto pt-2">
+                              <Button variant="primary" size="sm" onClick={handleSubmitRiskLimit} className="w-full">{riskForm.id ? "保存" : "添加"}</Button>
+                              {riskForm.id && <Button variant="secondary" size="sm" onClick={handleCancelRiskEdit}>取消</Button>}
+                           </div>
+                         </div>
+                       </div>
+                     </div>
+                  </section>
                 </div>
+              )}
+            </Panel>
+          )}
 
-                <div className="panelSubgroup">
-                  <h3 className="panelSubtitle">
-                    {riskForm.id ? "编辑限额" : "新增限额"}
-                  </h3>
-                  <div className="stack">
-                    <div className="formRowWide">
-                      <label className="formLabel">类型</label>
-                      <select
-                        value={riskForm.limitType}
-                        onChange={(event) =>
-                          setRiskForm((prev) => ({
-                            ...prev,
-                            limitType: event.target.value as RiskLimitType
-                          }))
-                        }
-                      >
-                        <option value="position_weight">持仓权重</option>
-                        <option value="asset_class_weight">
-                          资产类别权重
-                        </option>
-                      </select>
-                    </div>
-                    <div className="formRowWide">
-                      <label className="formLabel">目标</label>
-                      <input
-                        type="text"
-                        value={riskForm.target}
-                        onChange={(event) =>
-                          setRiskForm((prev) => ({
-                            ...prev,
-                            target: event.target.value
-                          }))
-                        }
-                        placeholder="代码或资产类别"
-                      />
-                    </div>
-                    <div className="formRowWide">
-                      <label className="formLabel">阈值（%）</label>
-                      <input
-                        type="number"
-                        value={riskForm.thresholdPct}
-                        onChange={(event) =>
-                          setRiskForm((prev) => ({
-                            ...prev,
-                            thresholdPct: event.target.value
-                          }))
-                        }
-                        placeholder="例如：20"
-                      />
-                    </div>
-                    <div className="actions">
-                      {riskForm.id && (
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          type="button"
-                          onClick={handleCancelRiskEdit}
-                        >
-                          取消
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-primary btn-sm"
-                        type="button"
-                        onClick={handleSubmitRiskLimit}
-                      >
-                        {riskForm.id ? "更新" : "新增"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+          {/* View: Market */}
+          {activeView === "market" && (
+            <Panel>
+               <div className="mb-6 bg-blue-50 dark:bg-blue-900/10 border-l-4 border-blue-500 p-3 text-sm text-blue-800 dark:text-blue-300">
+                  最新行情日期：<span className="font-mono font-medium">{snapshot?.priceAsOf ?? "--"}</span>
+               </div>
+               
+               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl">
+                  <section className="space-y-4">
+                     <h3 className="font-bold text-slate-900 dark:text-white">CSV 导入</h3>
+                     <FormGroup label="持仓 CSV">
+                        <div className="flex gap-2">
+                          <Input value={holdingsCsvPath ?? ""} readOnly className="flex-1 text-xs font-mono" />
+                          <Button variant="secondary" onClick={() => handleChooseCsv("holdings")}>选择</Button>
+                          <Button variant="primary" onClick={handleImportHoldings} disabled={!holdingsCsvPath || !activePortfolio}>导入</Button>
+                        </div>
+                     </FormGroup>
+                     <FormGroup label="价格 CSV">
+                        <div className="flex gap-2">
+                          <Input value={pricesCsvPath ?? ""} readOnly className="flex-1 text-xs font-mono" />
+                          <Button variant="secondary" onClick={() => handleChooseCsv("prices")}>选择</Button>
+                          <Button variant="primary" onClick={handleImportPrices} disabled={!pricesCsvPath}>导入</Button>
+                        </div>
+                     </FormGroup>
+                  </section>
 
-                <div className="panelSubgroup">
-                  <h3 className="panelSubtitle">预警</h3>
-                  {snapshot.riskWarnings.length === 0 ? (
-                    <p className="muted">暂无预警。</p>
-                  ) : (
-                    <ul className="list">
-                      {snapshot.riskWarnings.map((warning) => (
-                        <li key={warning.limitId} className="listRow warningRow">
-                          <span>{warning.message}</span>
-                          <span>{formatPct(warning.actual)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+                  <section className="space-y-4">
+                     <h3 className="font-bold text-slate-900 dark:text-white">Tushare 拉取</h3>
+                     <FormGroup label="日期范围">
+                        <div className="flex gap-2 items-center">
+                           <Input type="date" value={ingestStartDate} onChange={(e) => setIngestStartDate(e.target.value)} />
+                           <span className="text-slate-400">-</span>
+                           <Input type="date" value={ingestEndDate} onChange={(e) => setIngestEndDate(e.target.value)} />
+                        </div>
+                     </FormGroup>
+                     <div className="pt-2">
+                        <Button variant="primary" onClick={handleIngestTushare} disabled={!snapshot || snapshot.positions.length === 0} className="w-full">
+                           开始拉取
+                        </Button>
+                        <p className="mt-2 text-xs text-slate-500">使用当前持仓代码拉取。请先设置 MYTRADER_TUSHARE_TOKEN。</p>
+                     </div>
+                  </section>
+               </div>
+            </Panel>
+          )}
+
+          {/* Placeholders */}
+          {["opportunities", "backtest", "insights", "alerts", "other"].includes(activeView) && (
+            <PlaceholderPanel 
+              title={navItems.find(n => n.key === activeView)?.label ?? ""}
+              description={navItems.find(n => n.key === activeView)?.description ?? ""}
+            />
+          )}
+
         </div>
 
-        <div className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2 className="panelTitle">行情数据</h2>
-              <p className="muted">
-                通过 CSV 导入或 Tushare 拉取更新估值。
-              </p>
-            </div>
-          </div>
-          <div className="panelBody">
-            <div className="panelSubgroup">
-              <p className="muted">
-                最新行情日期：{snapshot?.priceAsOf ?? "--"}
-              </p>
-            </div>
-
-            <div className="panelSubgroup">
-              <h3 className="panelSubtitle">CSV 导入</h3>
-              <div className="stack">
-                <div className="formRowWide">
-                  <label className="formLabel">持仓 CSV</label>
-                  <div className="inline">
-                    <input type="text" value={holdingsCsvPath ?? ""} readOnly />
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      onClick={() => handleChooseCsv("holdings")}
-                    >
-                      选择
-                    </button>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={handleImportHoldings}
-                      disabled={!holdingsCsvPath || !activePortfolio}
-                    >
-                      导入
-                    </button>
-                  </div>
-                </div>
-                <div className="formRowWide">
-                  <label className="formLabel">价格 CSV</label>
-                  <div className="inline">
-                    <input type="text" value={pricesCsvPath ?? ""} readOnly />
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      onClick={() => handleChooseCsv("prices")}
-                    >
-                      选择
-                    </button>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={handleImportPrices}
-                      disabled={!pricesCsvPath}
-                    >
-                      导入
-                    </button>
-                  </div>
-                </div>
+        {/* Global Notifications */}
+        {(error || notice) && (
+           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
+              <div className={`px-4 py-3 rounded-lg shadow-lg border flex items-center gap-3 ${
+                 error 
+                 ? "bg-red-50 dark:bg-red-900 border-red-200 dark:border-red-800 text-red-800 dark:text-red-100" 
+                 : "bg-emerald-50 dark:bg-emerald-900 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-100"
+              }`}>
+                 <span className="material-icons-outlined">{error ? "error" : "check_circle"}</span>
+                 <span className="text-sm font-medium">{error ?? notice}</span>
+                 <button onClick={() => { setError(null); setNotice(null); }} className="ml-2 opacity-60 hover:opacity-100">
+                    <span className="material-icons-outlined text-sm">close</span>
+                 </button>
               </div>
-            </div>
-
-            <div className="panelSubgroup">
-              <h3 className="panelSubtitle">Tushare 拉取</h3>
-              <div className="stack">
-                <div className="formRowWide">
-                  <label className="formLabel">日期范围</label>
-                  <div className="inline">
-                    <input
-                      type="date"
-                      value={ingestStartDate}
-                      onChange={(event) => setIngestStartDate(event.target.value)}
-                    />
-                    <input
-                      type="date"
-                      value={ingestEndDate}
-                      onChange={(event) => setIngestEndDate(event.target.value)}
-                    />
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={handleIngestTushare}
-                      disabled={!snapshot || snapshot.positions.length === 0}
-                    >
-                      拉取
-                    </button>
-                  </div>
-                </div>
-                <p className="muted">
-                  使用当前持仓代码拉取。请先设置 MYTRADER_TUSHARE_TOKEN。
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+           </div>
+        )}
       </section>
-
-      {(error || notice) && (
-        <div className={`alert ${error ? "alert-error" : "alert-info"}`}>
-          <div className="alertIcon">!</div>
-          <div className="alertBody">
-            <div className="alertTitle">{error ? "错误" : "提示"}</div>
-            <div className="alertMessage">{error ?? notice}</div>
-          </div>
-        </div>
-      )}
     </div>
   );
+}
+
+// --- UI Components ---
+
+function Panel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-transparent mb-4 last:mb-0">
+      <div className="px-4 py-3">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function PlaceholderPanel({ title, description }: { title: string, description: string }) {
+   return (
+      <Panel>
+         <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+            <span className="material-icons-outlined text-5xl mb-4 opacity-30">construction</span>
+            <h3 className="text-lg font-medium text-slate-600 dark:text-slate-300 mb-2">{title}</h3>
+            <p className="text-sm opacity-80">{description}</p>
+            <p className="text-xs mt-4 opacity-50">该模块为占位视图，将在后续版本逐步实现。</p>
+         </div>
+      </Panel>
+   )
+}
+
+function FormGroup({ label, children }: { label: string, children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
+function Input({ className, ...props }: InputProps) {
+  return (
+    <input 
+      className={`block w-full rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-1.5 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 placeholder:text-slate-400 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${className}`}
+      {...props}
+    />
+  );
+}
+
+interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  options: { value: string, label: string, disabled?: boolean }[];
+}
+function Select({ className, options, ...props }: SelectProps) {
+  return (
+    <select
+      className={`block w-full rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-1.5 pl-3 pr-10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 ${className}`}
+      {...props}
+    >
+      {options.map(opt => (
+        <option key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</option>
+      ))}
+    </select>
+  );
+}
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'danger';
+  size?: 'sm' | 'md';
+  icon?: string;
+}
+function Button({ children, variant = 'secondary', size = 'md', icon, className, ...props }: ButtonProps) {
+  const baseClass = "inline-flex items-center justify-center rounded font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed";
+  
+  const variants = {
+    primary: "bg-primary hover:bg-[#06b6d4] text-white border border-transparent shadow-sm focus:ring-primary",
+    secondary: "bg-slate-100/90 dark:bg-slate-700/80 border border-slate-200 dark:border-slate-500 text-slate-800 dark:text-slate-100 hover:bg-slate-200/90 dark:hover:bg-slate-600/80 focus:ring-slate-400",
+    danger: "bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-600 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-900/40 focus:ring-red-500"
+  };
+  
+  const sizes = {
+    sm: "px-2.5 py-1.5 text-xs",
+    md: "px-4 py-2 text-sm"
+  };
+
+  return (
+    <button 
+      className={`${baseClass} ${variants[variant]} ${sizes[size]} ${className}`}
+      {...props}
+    >
+      {icon && <span className={`material-icons-outlined ${size === 'sm' ? 'text-sm mr-1.5' : 'text-base mr-2'}`}>{icon}</span>}
+      {children}
+    </button>
+  );
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/10">
+      {children}
+    </span>
+  );
+}
+
+function SummaryCard({ label, value, trend }: { label: string, value: string, trend?: 'up' | 'down' }) {
+  return (
+    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-200 dark:border-slate-800">
+       <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
+       <div className={`text-xl font-bold font-mono ${
+          trend === 'up' ? 'text-green-600 dark:text-green-500' : 
+          trend === 'down' ? 'text-red-600 dark:text-red-500' : 
+          'text-slate-900 dark:text-white'
+       }`}>
+          {value}
+       </div>
+    </div>
+  )
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-8 text-slate-400 bg-slate-50/50 dark:bg-slate-900/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-800">
+      <span className="material-icons-outlined text-3xl mb-2 opacity-50">inbox</span>
+      <p className="text-sm">{message}</p>
+    </div>
+  )
 }
 
 function formatNumber(value: number | null, digits = 2): string {
@@ -1035,6 +1075,13 @@ function formatRiskLimitTypeLabel(value: RiskLimitType): string {
   return riskLimitTypeLabels[value] ?? value;
 }
 
+function formatDateTime(value: number | null): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString("zh-CN");
+}
+
 function toUserErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message || "未知错误。";
   if (typeof error === "string") return error;
@@ -1052,4 +1099,13 @@ function formatInputDate(date: Date): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function DescriptionItem({ label, value }: { label: string, value: React.ReactNode }) {
+  return (
+    <div className="flex justify-between py-2 border-b border-slate-50 dark:border-slate-800 last:border-0">
+      <span className="text-sm text-slate-500">{label}</span>
+      <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{value}</span>
+    </div>
+  )
 }
