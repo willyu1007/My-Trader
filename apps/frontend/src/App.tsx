@@ -31,6 +31,7 @@ function toUserErrorMessage(error: unknown) {
 export function App() {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
+  const [activePortfolioName, setActivePortfolioName] = useState<string | null>(null);
   const hasDesktopApi = Boolean(window.mytrader);
   const isElectron = navigator.userAgent.toLowerCase().includes("electron");
   const isDev = import.meta.env.DEV;
@@ -234,7 +235,12 @@ export function App() {
         </div>
         <div className="flex items-center gap-3">
           {state.kind === "unlocked" && (
-            <div className="text-xs text-slate-600 dark:text-slate-300 font-medium px-2 border-l border-slate-200 dark:border-slate-800">
+            <div className="text-xs text-slate-600 dark:text-slate-300 font-medium">
+              组合：{activePortfolioName ?? "--"}
+            </div>
+          )}
+          {state.kind === "unlocked" && (
+            <div className="text-xs text-slate-600 dark:text-slate-300 font-medium px-2 border-l border-slate-200 dark:border-border-dark">
               {state.account.label}
             </div>
           )}
@@ -244,7 +250,11 @@ export function App() {
       <main className="content flex-1 flex flex-col min-h-0 overflow-hidden">
         {state.kind === "unlocked" ? (
           <div className="relative z-10 w-full h-full">
-            <Dashboard account={state.account} onLock={handleLock} />
+            <Dashboard
+              account={state.account}
+              onLock={handleLock}
+              onActivePortfolioChange={(portfolio) => setActivePortfolioName(portfolio.name)}
+            />
           </div>
         ) : (
           <div className="authLayout flex-1 flex items-start md:items-center justify-center bg-background-light dark:bg-background-dark p-4 overflow-y-auto">
@@ -277,7 +287,7 @@ export function App() {
                             </span>
                           </span>
                           <select
-                            className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary appearance-none transition-shadow text-sm"
+                            className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary appearance-none transition-shadow text-sm"
                             value={loginAccount}
                             onChange={(e) => setLoginAccount(e.target.value)}
                           >
@@ -313,7 +323,7 @@ export function App() {
                             <span className="material-icons-outlined text-lg">lock</span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
                             placeholder="******"
                             type="password"
                             value={unlockPassword}
@@ -337,7 +347,7 @@ export function App() {
 
                     <div className="relative py-2">
                       <div aria-hidden="true" className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-border-light dark:border-slate-700"></div>
+                        <div className="w-full border-t border-border-light dark:border-border-dark"></div>
                       </div>
                       <div className="relative flex justify-center">
                         <span className="bg-surface-light dark:bg-surface-dark px-2 text-[10px] text-slate-400 uppercase tracking-wider">
@@ -365,7 +375,7 @@ export function App() {
                             <span className="material-icons-outlined text-lg">badge</span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
                             placeholder="例如：个人"
                             type="text"
                             value={createLabel}
@@ -384,7 +394,7 @@ export function App() {
                             <span className="material-icons-outlined text-lg">vpn_key</span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
                             placeholder="设置密码"
                             type="password"
                             value={createPassword}
@@ -405,7 +415,7 @@ export function App() {
                             </span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
                             placeholder="再次输入密码"
                             type="password"
                             value={createPasswordConfirm}
@@ -425,14 +435,14 @@ export function App() {
                               <span className="material-icons-outlined text-lg">folder</span>
                             </span>
                             <input
-                              className="w-full pl-9 pr-3 py-2 bg-slate-100 dark:bg-slate-800/50 border border-border-light dark:border-slate-700 rounded-lg text-slate-500 dark:text-slate-400 focus:ring-0 focus:border-slate-600 cursor-not-allowed text-xs"
+                            className="w-full pl-9 pr-3 py-2 bg-slate-100 dark:bg-background-dark border border-border-light dark:border-border-dark rounded-lg text-slate-500 dark:text-slate-400 focus:ring-0 focus:border-border-dark cursor-not-allowed text-xs"
                               readOnly
                               type="text"
                               value={createDataRootDir || "默认：应用数据目录"}
                             />
                           </div>
                           <button
-                            className="px-3 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg border border-transparent text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                            className="px-3 py-2 bg-slate-200 dark:bg-surface-dark hover:bg-slate-300 dark:hover:bg-background-dark/80 text-slate-700 dark:text-slate-200 rounded-lg border border-transparent text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
                             type="button"
                             onClick={chooseDataRootDir}
                             disabled={isChoosingDataRootDir}

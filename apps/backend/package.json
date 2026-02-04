@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@mytrader/shared": "workspace:*",
+    "@duckdb/duckdb-wasm": "^1.28.1",
     "sql.js": "^1.11.0"
   },
   "devDependencies": {

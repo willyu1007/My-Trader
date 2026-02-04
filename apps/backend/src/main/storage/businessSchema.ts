@@ -2,7 +2,7 @@ import { all, exec, get, run } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await exec(db, "pragma foreign_keys = on;");
@@ -270,6 +270,75 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
       `
         create unique index if not exists portfolio_instruments_portfolio_symbol
         on portfolio_instruments (portfolio_id, symbol);
+      `
+    );
+
+    await run(
+      db,
+      `insert or replace into app_meta (key, value) values (?, ?)`,
+      ["schema_version", String(currentVersion)]
+    );
+  }
+
+  if (currentVersion < 5) {
+    currentVersion = 5;
+
+    await exec(
+      db,
+      `
+        create table if not exists watchlist_items (
+          id text primary key not null,
+          symbol text not null,
+          name text,
+          group_name text,
+          note text,
+          created_at integer not null,
+          updated_at integer not null
+        );
+      `
+    );
+    await exec(
+      db,
+      `
+        create unique index if not exists watchlist_items_symbol
+        on watchlist_items (symbol);
+      `
+    );
+
+    await exec(
+      db,
+      `
+        create table if not exists instrument_tags (
+          id text primary key not null,
+          symbol text not null,
+          tag text not null,
+          created_at integer not null,
+          updated_at integer not null
+        );
+      `
+    );
+    await exec(
+      db,
+      `
+        create unique index if not exists instrument_tags_symbol_tag
+        on instrument_tags (symbol, tag);
+      `
+    );
+    await exec(
+      db,
+      `
+        create index if not exists instrument_tags_tag
+        on instrument_tags (tag, symbol);
+      `
+    );
+
+    await exec(
+      db,
+      `
+        create table if not exists market_settings (
+          key text primary key not null,
+          value_json text not null
+        );
       `
     );
 

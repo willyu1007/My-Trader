@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,14 +10,22 @@ import type {
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
+  GetDailyBarsInput,
+  GetQuotesInput,
+  GetTagMembersInput,
+  GetTagSeriesInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
   CreatePositionInput,
   CreateRiskLimitInput,
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
+  ListTagsInput,
+  MarketTargetsConfig,
   PortfolioPerformanceRangeInput,
+  SearchInstrumentsInput,
   TushareIngestInput,
+  UpsertWatchlistItemInput,
   UpdateLedgerEntryInput,
   UpdatePortfolioInput,
   UpdatePositionInput,
@@ -33,6 +41,11 @@ import {
   stopAutoIngest,
   triggerAutoIngest
 } from "../market/autoIngest";
+import {
+  startMarketIngestScheduler,
+  stopMarketIngestScheduler,
+  triggerMarketIngest
+} from "../market/marketIngestScheduler";
 import {
   createPortfolio,
   deletePortfolio,
@@ -65,19 +78,57 @@ import {
 import { ensureAccountDataLayout } from "../storage/paths";
 import { close, exec, openSqliteDatabase } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
+import {
+  getResolvedTushareToken,
+  setTushareToken
+} from "../storage/marketTokenRepository";
 import { getPortfolioSnapshot } from "../services/portfolioService";
 import { buildPortfolioPerformanceRange } from "../services/performanceService";
 import {
   importHoldingsCsv,
   importPricesCsv,
-  ingestTushare
+  ingestTushare,
+  syncTushareInstrumentCatalog,
+  searchInstrumentCatalog,
+  getInstrumentCatalogProfile,
+  getMarketDailyBars,
+  getMarketQuotes,
+  getMarketTagMembers,
+  getMarketTagSeries,
+  seedMarketDemoData,
+  listMarketTags
 } from "../services/marketService";
 import { config } from "../config";
+import {
+  getMarketTargetsConfig,
+  listTempTargetSymbols,
+  removeTempTargetSymbol,
+  setMarketTargetsConfig,
+  touchTempTargetSymbol
+} from "../storage/marketSettingsRepository";
+import {
+  addInstrumentTag,
+  listInstrumentTags,
+  removeInstrumentTag
+} from "../storage/instrumentTagRepository";
+import {
+  listWatchlistItems,
+  removeWatchlistItem,
+  upsertWatchlistItem
+} from "../storage/watchlistRepository";
+import { previewTargets } from "../market/targetsService";
+import { listIngestRuns } from "../market/ingestRunsRepository";
+import {
+  runTargetsIngest,
+  runUniverseIngest
+} from "../market/marketIngestRunner";
+import { getMarketProvider } from "../market/providers";
 
 let accountIndexDb: AccountIndexDb | null = null;
 let activeAccount: AccountSummary | null = null;
 let activeBusinessDb: SqliteDatabase | null = null;
 let marketCacheDb: SqliteDatabase | null = null;
+let activeAnalysisDbPath: string | null = null;
 
 function requireActiveBusinessDb(): SqliteDatabase {
   if (!activeBusinessDb) throw new Error("当前账号未解锁。");
@@ -199,8 +250,10 @@ export async function registerIpcHandlers() {
 
       if (activeBusinessDb) {
         stopAutoIngest();
+        stopMarketIngestScheduler();
         await close(activeBusinessDb);
         activeBusinessDb = null;
+        activeAnalysisDbPath = null;
       }
 
       activeBusinessDb = await openSqliteDatabase(layout.businessDbPath);
@@ -208,8 +261,10 @@ export async function registerIpcHandlers() {
       await ensureBusinessSchema(activeBusinessDb);
 
       activeAccount = unlocked;
+      activeAnalysisDbPath = layout.analysisDbPath;
       const marketDb = requireMarketCacheDb();
       startAutoIngest(activeBusinessDb, marketDb);
+      startMarketIngestScheduler(activeBusinessDb, marketDb, layout.analysisDbPath);
       return unlocked;
     }
   );
@@ -217,10 +272,12 @@ export async function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.ACCOUNT_LOCK, async () => {
     if (activeBusinessDb) {
       stopAutoIngest();
+      stopMarketIngestScheduler();
       await close(activeBusinessDb);
       activeBusinessDb = null;
     }
     activeAccount = null;
+    activeAnalysisDbPath = null;
   });
 
   ipcMain.handle(IPC_CHANNELS.PORTFOLIO_LIST, async () => {
@@ -524,13 +581,327 @@ export async function registerIpcHandlers() {
   ipcMain.handle(
     IPC_CHANNELS.MARKET_INGEST_TUSHARE,
     async (_event, input: TushareIngestInput) => {
+      const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       if (!input.items.length) {
         throw new Error("至少需要一个代码才能拉取。");
       }
-      return await ingestTushare(marketDb, input);
+      const resolved = await getResolvedTushareToken(businessDb);
+      return await ingestTushare(marketDb, input, resolved.token);
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_SYNC_INSTRUMENT_CATALOG,
+    async () => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const resolved = await getResolvedTushareToken(businessDb);
+      return await syncTushareInstrumentCatalog(marketDb, resolved.token);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_SEARCH_INSTRUMENTS,
+    async (_event, input: SearchInstrumentsInput) => {
+      const marketDb = requireMarketCacheDb();
+      const query = input.query?.trim() ?? "";
+      const limit = input.limit ?? 50;
+      if (!query) return [];
+      return await searchInstrumentCatalog(marketDb, query, limit ?? 50);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_GET_INSTRUMENT_PROFILE,
+    async (_event, symbol: string) => {
+      const marketDb = requireMarketCacheDb();
+      const key = symbol?.trim() ?? "";
+      if (!key) return null;
+      return await getInstrumentCatalogProfile(marketDb, key);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_GET_TARGETS,
+    async () => {
+      const businessDb = requireActiveBusinessDb();
+      return await getMarketTargetsConfig(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_SET_TARGETS,
+    async (_event, input: MarketTargetsConfig) => {
+      const businessDb = requireActiveBusinessDb();
+      await setMarketTargetsConfig(businessDb, input);
+      void triggerAutoIngest("positions");
+      return await getMarketTargetsConfig(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_PREVIEW_TARGETS,
+    async () => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await previewTargets({ businessDb, marketDb });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_WATCHLIST_LIST,
+    async () => {
+      const businessDb = requireActiveBusinessDb();
+      return await listWatchlistItems(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_WATCHLIST_UPSERT,
+    async (_event, input: UpsertWatchlistItemInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const item = await upsertWatchlistItem(businessDb, input);
+      void triggerAutoIngest("positions");
+      return item;
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_WATCHLIST_REMOVE,
+    async (_event, symbol: string) => {
+      const businessDb = requireActiveBusinessDb();
+      await removeWatchlistItem(businessDb, symbol);
+      void triggerAutoIngest("positions");
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TAGS_LIST,
+    async (_event, symbol: string) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listInstrumentTags(businessDb, symbol);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TAGS_ADD,
+    async (_event, symbol: string, tag: string) => {
+      const businessDb = requireActiveBusinessDb();
+      await addInstrumentTag(businessDb, symbol, tag);
+      void triggerAutoIngest("positions");
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TAGS_REMOVE,
+    async (_event, symbol: string, tag: string) => {
+      const businessDb = requireActiveBusinessDb();
+      await removeInstrumentTag(businessDb, symbol, tag);
+      void triggerAutoIngest("positions");
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_LIST_TAGS,
+    async (_event, input: ListTagsInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await listMarketTags(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_GET_TAG_MEMBERS,
+    async (_event, input: GetTagMembersInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await getMarketTagMembers(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_GET_TAG_SERIES,
+    async (_event, input: GetTagSeriesInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await getMarketTagSeries(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_GET_QUOTES,
+    async (_event, input: GetQuotesInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const resolved = await getResolvedTushareToken(businessDb);
+      return await getMarketQuotes(marketDb, input, resolved.token);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_GET_DAILY_BARS,
+    async (_event, input: GetDailyBarsInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const resolved = await getResolvedTushareToken(businessDb);
+      return await getMarketDailyBars(marketDb, input, resolved.token);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_SEED_DEMO_DATA, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const marketDb = requireMarketCacheDb();
+    return await seedMarketDemoData(businessDb, marketDb, input ?? null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TOKEN_GET_STATUS, async () => {
+    const businessDb = requireActiveBusinessDb();
+    const resolved = await getResolvedTushareToken(businessDb);
+    return { source: resolved.source, configured: Boolean(resolved.token) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TOKEN_SET, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const token = typeof input?.token === "string" ? input.token : null;
+    await setTushareToken(businessDb, token);
+    const resolved = await getResolvedTushareToken(businessDb);
+    return { source: resolved.source, configured: Boolean(resolved.token) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TOKEN_TEST, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const resolved = await getResolvedTushareToken(businessDb);
+    const override =
+      typeof input?.token === "string" ? input.token.trim() : "";
+    const token = override || resolved.token;
+    if (!token) {
+      throw new Error("未配置 Tushare token。请先保存，或在输入框中填入 token 再测试。");
+    }
+    const provider = getMarketProvider("tushare");
+    await provider.testToken(token);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_PROVIDER_OPEN, async (_event, input) => {
+    const provider =
+      typeof input?.provider === "string" ? input.provider.trim() : "";
+    if (!provider) throw new Error("provider is required.");
+    const urlMap: Record<string, string> = {
+      tushare: "https://tushare.pro"
+    };
+    const url = urlMap[provider];
+    if (!url) throw new Error(`unknown provider: ${provider}`);
+    await shell.openExternal(url);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_RUNS_LIST, async (_event, input) => {
+    const marketDb = requireMarketCacheDb();
+    const limit =
+      input && typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? input.limit
+        : 100;
+    const runs = await listIngestRuns(marketDb, limit);
+    return runs.map((row) => ({
+      id: row.id,
+      scope: row.scope,
+      mode: row.mode,
+      status: row.status,
+      asOfTradeDate: row.as_of_trade_date,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      symbolCount: row.symbol_count,
+      inserted: row.inserted,
+      updated: row.updated,
+      errors: row.errors,
+      errorMessage: row.error_message,
+      meta: row.meta_json ? safeParseJsonObject(row.meta_json) : null
+    }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_TRIGGER, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const marketDb = requireMarketCacheDb();
+    const resolved = await getResolvedTushareToken(businessDb);
+    const scope = input?.scope;
+    if (!scope || (scope !== "targets" && scope !== "universe" && scope !== "both")) {
+      throw new Error("scope must be targets/universe/both.");
+    }
+    if (scope === "both") {
+      await triggerMarketIngest("manual");
+      return;
+    }
+    if (scope === "targets") {
+      await runTargetsIngest({
+        businessDb,
+        marketDb,
+        token: resolved.token,
+        mode: "manual",
+        meta: { schedule: "manual" }
+      });
+      return;
+    }
+    if (!activeAnalysisDbPath) {
+      throw new Error("analysis.duckdb 尚未初始化。");
+    }
+    await runUniverseIngest({
+      businessDb,
+      marketDb,
+      analysisDbPath: activeAnalysisDbPath,
+      token: resolved.token,
+      mode: "manual",
+      meta: { schedule: "manual", windowYears: 3 }
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST, async () => {
+    const businessDb = requireActiveBusinessDb();
+    const items = await listTempTargetSymbols(businessDb);
+    return items.map((item) => ({
+      symbol: item.symbol,
+      expiresAt: item.expiresAt,
+      updatedAt: item.updatedAt
+    }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_TOUCH, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const symbol = typeof input?.symbol === "string" ? input.symbol : "";
+    const ttlDaysRaw = input?.ttlDays;
+    const ttlDays =
+      typeof ttlDaysRaw === "number" && Number.isFinite(ttlDaysRaw) ? ttlDaysRaw : 7;
+    const items = await touchTempTargetSymbol(businessDb, symbol, ttlDays);
+    return items.map((item) => ({
+      symbol: item.symbol,
+      expiresAt: item.expiresAt,
+      updatedAt: item.updatedAt
+    }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_REMOVE, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const symbol = typeof input?.symbol === "string" ? input.symbol : "";
+    const items = await removeTempTargetSymbol(businessDb, symbol);
+    return items.map((item) => ({
+      symbol: item.symbol,
+      expiresAt: item.expiresAt,
+      updatedAt: item.updatedAt
+    }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_PROMOTE, async (_event, input) => {
+    const businessDb = requireActiveBusinessDb();
+    const symbol = typeof input?.symbol === "string" ? input.symbol.trim() : "";
+    if (!symbol) throw new Error("symbol 不能为空。");
+
+    const current = await getMarketTargetsConfig(businessDb);
+    const next = current.explicitSymbols.includes(symbol)
+      ? current
+      : { ...current, explicitSymbols: [...current.explicitSymbols, symbol] };
+    await setMarketTargetsConfig(businessDb, next);
+    await removeTempTargetSymbol(businessDb, symbol);
+    void triggerAutoIngest("positions");
+    return await getMarketTargetsConfig(businessDb);
+  });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -542,6 +913,16 @@ const PERFORMANCE_RANGES = new Set([
   "YTD",
   "ALL"
 ]);
+
+function safeParseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 async function normalizeLedgerEntryInput(
   businessDb: SqliteDatabase,

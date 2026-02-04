@@ -242,6 +242,149 @@ export interface UpdateRiskLimitInput extends CreateRiskLimitInput {
 
 export type MarketDataSource = "tushare" | "csv";
 
+export type MarketProviderId = "tushare";
+
+export type InstrumentKind = "stock" | "fund";
+
+export interface InstrumentProfileSummary {
+  provider: MarketProviderId;
+  kind: InstrumentKind;
+  symbol: string;
+  name: string | null;
+  assetClass: AssetClass | null;
+  market: string | null;
+  currency: string | null;
+  tags: string[];
+}
+
+export interface InstrumentProfile extends InstrumentProfileSummary {
+  providerData: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SearchInstrumentsInput {
+  query: string;
+  limit?: number | null;
+}
+
+export type WatchlistItemId = string;
+
+export interface WatchlistItem {
+  id: WatchlistItemId;
+  symbol: string;
+  name: string | null;
+  groupName: string | null;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UpsertWatchlistItemInput {
+  symbol: string;
+  name?: string | null;
+  groupName?: string | null;
+  note?: string | null;
+}
+
+export interface MarketTargetsConfig {
+  includeHoldings: boolean;
+  includeRegistryAutoIngest: boolean;
+  includeWatchlist: boolean;
+  portfolioIds: PortfolioId[] | null;
+  explicitSymbols: string[];
+  tagFilters: string[];
+}
+
+export interface ResolvedTargetSymbol {
+  symbol: string;
+  reasons: string[];
+}
+
+export interface PreviewTargetsResult {
+  config: MarketTargetsConfig;
+  symbols: ResolvedTargetSymbol[];
+}
+
+export type TagSource = "provider" | "user" | "watchlist";
+
+export interface TagSummary {
+  tag: string;
+  source: TagSource;
+  memberCount: number;
+}
+
+export interface ListTagsInput {
+  query?: string | null;
+  limit?: number | null;
+}
+
+export interface GetTagMembersInput {
+  tag: string;
+  limit?: number | null;
+}
+
+export interface GetTagSeriesInput {
+  tag: string;
+  startDate: string;
+  endDate: string;
+  memberLimit?: number | null;
+}
+
+export interface MarketTagSeriesPoint {
+  date: string;
+  value: number | null;
+  includedCount: number;
+  totalCount: number;
+  weightSum: number | null;
+}
+
+export interface MarketTagSeriesResult {
+  tag: string;
+  startDate: string;
+  endDate: string;
+  memberCount: number;
+  usedMemberCount: number;
+  truncated: boolean;
+  base: number;
+  weight: "prev_circ_mv_fallback_current";
+  points: MarketTagSeriesPoint[];
+}
+
+export interface MarketQuote {
+  symbol: string;
+  tradeDate: string | null;
+  close: number | null;
+  prevTradeDate: string | null;
+  prevClose: number | null;
+  change: number | null;
+  changePct: number | null;
+  circMv: number | null;
+  circMvDate: string | null;
+}
+
+export interface GetQuotesInput {
+  symbols: string[];
+}
+
+export interface MarketDailyBar {
+  date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+  netMfVol?: number | null;
+  netMfAmount?: number | null;
+}
+
+export interface GetDailyBarsInput {
+  symbol: string;
+  startDate: string;
+  endDate: string;
+  includeMoneyflow?: boolean;
+}
+
 export interface ImportHoldingsCsvInput {
   portfolioId: PortfolioId;
   filePath: string;
@@ -257,6 +400,24 @@ export interface MarketImportResult {
   updated: number;
   skipped: number;
   warnings: string[];
+}
+
+export interface SeedMarketDemoDataResult {
+  symbols: string[];
+  tags: string[];
+  watchlistGroup: string;
+  tradeDateCount: number;
+  pricesInserted: number;
+  dailyBasicsInserted: number;
+  dailyMoneyflowsInserted: number;
+  instrumentProfilesInserted: number;
+  instrumentProfilesUpdated: number;
+  warnings: string[];
+}
+
+export interface SeedMarketDemoDataInput {
+  portfolioId?: PortfolioId | null;
+  seedHoldings?: boolean;
 }
 
 export interface TushareIngestItem {
@@ -339,6 +500,73 @@ export interface LedgerEntry {
   deletedAt: number | null;
 }
 
+export type IngestRunScope = "targets" | "universe";
+export type IngestRunMode = "daily" | "bootstrap" | "manual" | "on_demand";
+export type IngestRunStatus =
+  | "running"
+  | "success"
+  | "partial"
+  | "failed"
+  | "canceled";
+
+export interface MarketIngestRun {
+  id: string;
+  scope: IngestRunScope;
+  mode: IngestRunMode;
+  status: IngestRunStatus;
+  asOfTradeDate: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  symbolCount: number | null;
+  inserted: number | null;
+  updated: number | null;
+  errors: number | null;
+  errorMessage: string | null;
+  meta: Record<string, unknown> | null;
+}
+
+export interface ListIngestRunsInput {
+  limit?: number | null;
+}
+
+export type MarketTokenSource = "env" | "local" | "none";
+
+export interface MarketTokenStatus {
+  source: MarketTokenSource;
+  configured: boolean;
+}
+
+export interface SetMarketTokenInput {
+  token: string | null;
+}
+
+export interface TestMarketTokenInput {
+  token?: string | null;
+}
+
+export interface OpenMarketProviderInput {
+  provider: string;
+}
+
+export interface TriggerMarketIngestInput {
+  scope: "targets" | "universe" | "both";
+}
+
+export interface TempTargetSymbol {
+  symbol: string;
+  expiresAt: number;
+  updatedAt: number;
+}
+
+export interface TouchTempTargetSymbolInput {
+  symbol: string;
+  ttlDays?: number | null;
+}
+
+export interface RemoveTempTargetSymbolInput {
+  symbol: string;
+}
+
 export interface CreateLedgerEntryInput {
   portfolioId: PortfolioId;
   accountKey?: string | null;
@@ -406,6 +634,36 @@ export interface MyTraderApi {
     importHoldingsCsv(input: ImportHoldingsCsvInput): Promise<MarketImportResult>;
     importPricesCsv(input: ImportPricesCsvInput): Promise<MarketImportResult>;
     ingestTushare(input: TushareIngestInput): Promise<MarketImportResult>;
+    syncInstrumentCatalog(): Promise<MarketImportResult>;
+    searchInstruments(
+      input: SearchInstrumentsInput
+    ): Promise<InstrumentProfileSummary[]>;
+    getInstrumentProfile(symbol: string): Promise<InstrumentProfile | null>;
+    getTargets(): Promise<MarketTargetsConfig>;
+    setTargets(config: MarketTargetsConfig): Promise<MarketTargetsConfig>;
+    previewTargets(): Promise<PreviewTargetsResult>;
+    listWatchlist(): Promise<WatchlistItem[]>;
+    upsertWatchlistItem(input: UpsertWatchlistItemInput): Promise<WatchlistItem>;
+    removeWatchlistItem(symbol: string): Promise<void>;
+    listInstrumentTags(symbol: string): Promise<string[]>;
+    addInstrumentTag(symbol: string, tag: string): Promise<void>;
+    removeInstrumentTag(symbol: string, tag: string): Promise<void>;
+    listTags(input: ListTagsInput): Promise<TagSummary[]>;
+    getTagMembers(input: GetTagMembersInput): Promise<string[]>;
+    getTagSeries(input: GetTagSeriesInput): Promise<MarketTagSeriesResult>;
+    getQuotes(input: GetQuotesInput): Promise<MarketQuote[]>;
+    getDailyBars(input: GetDailyBarsInput): Promise<MarketDailyBar[]>;
+    seedDemoData(input?: SeedMarketDemoDataInput): Promise<SeedMarketDemoDataResult>;
+    getTokenStatus(): Promise<MarketTokenStatus>;
+    setToken(input: SetMarketTokenInput): Promise<MarketTokenStatus>;
+    testToken(input?: TestMarketTokenInput): Promise<void>;
+    openProviderHomepage(input: OpenMarketProviderInput): Promise<void>;
+    listIngestRuns(input?: ListIngestRunsInput): Promise<MarketIngestRun[]>;
+    triggerIngest(input: TriggerMarketIngestInput): Promise<void>;
+    listTempTargets(): Promise<TempTargetSymbol[]>;
+    touchTempTarget(input: TouchTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
+    removeTempTarget(input: RemoveTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
+    promoteTempTarget(input: RemoveTempTargetSymbolInput): Promise<MarketTargetsConfig>;
   };
 }
 
@@ -435,5 +693,33 @@ export const IPC_CHANNELS = {
   MARKET_CHOOSE_CSV_FILE: "market:chooseCsvFile",
   MARKET_IMPORT_HOLDINGS_CSV: "market:importHoldingsCsv",
   MARKET_IMPORT_PRICES_CSV: "market:importPricesCsv",
-  MARKET_INGEST_TUSHARE: "market:ingestTushare"
+  MARKET_INGEST_TUSHARE: "market:ingestTushare",
+  MARKET_SYNC_INSTRUMENT_CATALOG: "market:syncInstrumentCatalog",
+  MARKET_SEARCH_INSTRUMENTS: "market:searchInstruments",
+  MARKET_GET_INSTRUMENT_PROFILE: "market:getInstrumentProfile",
+  MARKET_GET_TARGETS: "market:getTargets",
+  MARKET_SET_TARGETS: "market:setTargets",
+  MARKET_PREVIEW_TARGETS: "market:previewTargets",
+  MARKET_WATCHLIST_LIST: "market:watchlist:list",
+  MARKET_WATCHLIST_UPSERT: "market:watchlist:upsert",
+  MARKET_WATCHLIST_REMOVE: "market:watchlist:remove",
+  MARKET_TAGS_LIST: "market:tags:list",
+  MARKET_TAGS_ADD: "market:tags:add",
+  MARKET_TAGS_REMOVE: "market:tags:remove",
+  MARKET_LIST_TAGS: "market:listTags",
+  MARKET_GET_TAG_MEMBERS: "market:getTagMembers",
+  MARKET_GET_TAG_SERIES: "market:getTagSeries",
+  MARKET_GET_QUOTES: "market:getQuotes",
+  MARKET_GET_DAILY_BARS: "market:getDailyBars",
+  MARKET_SEED_DEMO_DATA: "market:seedDemoData",
+  MARKET_TOKEN_GET_STATUS: "market:token:getStatus",
+  MARKET_TOKEN_SET: "market:token:set",
+  MARKET_TOKEN_TEST: "market:token:test",
+  MARKET_PROVIDER_OPEN: "market:provider:open",
+  MARKET_INGEST_RUNS_LIST: "market:ingestRuns:list",
+  MARKET_INGEST_TRIGGER: "market:ingest:trigger",
+  MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",
+  MARKET_TEMP_TARGETS_TOUCH: "market:targetsTemp:touch",
+  MARKET_TEMP_TARGETS_REMOVE: "market:targetsTemp:remove",
+  MARKET_TEMP_TARGETS_PROMOTE: "market:targetsTemp:promote"
 } as const;

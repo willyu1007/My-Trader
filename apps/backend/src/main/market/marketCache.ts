@@ -70,6 +70,181 @@ export async function ensureMarketCacheSchema(
       on daily_prices (symbol, trade_date);
     `
   );
+
+  await exec(
+    db,
+    `
+      create table if not exists instrument_profiles (
+        symbol text primary key not null,
+        provider text not null,
+        kind text not null,
+        name text,
+        asset_class text,
+        market text,
+        currency text,
+        tags_json text not null,
+        provider_data_json text not null,
+        created_at integer not null,
+        updated_at integer not null
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists instrument_profiles_name
+      on instrument_profiles (name);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists instrument_profile_tags (
+        tag text not null,
+        symbol text not null,
+        primary key (tag, symbol)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists instrument_profile_tags_tag
+      on instrument_profile_tags (tag, symbol);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists instrument_profile_tags_symbol
+      on instrument_profile_tags (symbol, tag);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists daily_basics (
+        symbol text not null,
+        trade_date text not null,
+        circ_mv real,
+        total_mv real,
+        source text not null,
+        ingested_at integer not null,
+        primary key (symbol, trade_date)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists daily_basics_symbol_date
+      on daily_basics (symbol, trade_date);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists daily_basics_date_symbol
+      on daily_basics (trade_date, symbol);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists daily_moneyflows (
+        symbol text not null,
+        trade_date text not null,
+        net_mf_vol real,
+        net_mf_amount real,
+        source text not null,
+        ingested_at integer not null,
+        primary key (symbol, trade_date)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists daily_moneyflows_symbol_date
+      on daily_moneyflows (symbol, trade_date);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists daily_moneyflows_date_symbol
+      on daily_moneyflows (trade_date, symbol);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists trading_calendar (
+        market text not null,
+        date text not null,
+        is_open integer not null,
+        source text not null,
+        ingested_at integer not null,
+        primary key (market, date)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists trading_calendar_market_date
+      on trading_calendar (market, date);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists ingest_runs (
+        id text primary key not null,
+        scope text not null,
+        mode text not null,
+        status text not null,
+        as_of_trade_date text,
+        started_at integer not null,
+        finished_at integer,
+        symbol_count integer,
+        inserted integer,
+        updated integer,
+        errors integer,
+        error_message text,
+        meta_json text
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists ingest_runs_started_at
+      on ingest_runs (started_at desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists ingest_runs_scope_status
+      on ingest_runs (scope, status, started_at desc);
+    `
+  );
 }
 
 async function ensureColumn(

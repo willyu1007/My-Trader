@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 import type {
   AccountSummary,
@@ -10,14 +18,25 @@ import type {
   CreatePositionInput,
   CreateRiskLimitInput,
   DataQualityLevel,
+  InstrumentProfile,
+  InstrumentProfileSummary,
+  InstrumentKind,
   LedgerEntry,
   LedgerEntryMeta,
   LedgerEventType,
   LedgerSide,
   LedgerSource,
+  MarketTargetsConfig,
+  MarketQuote,
+  MarketDailyBar,
   MarketDataQuality,
+  MarketIngestRun,
+  MarketTagSeriesResult,
+  MarketTokenStatus,
+  TempTargetSymbol,
   PerformanceMethod,
   PerformanceRangeKey,
+  PreviewTargetsResult,
   Portfolio,
   PortfolioPerformanceRangeResult,
   PortfolioPerformanceSeries,
@@ -25,12 +44,15 @@ import type {
   PositionValuation,
   RiskLimit,
   RiskSeriesMetrics,
-  RiskLimitType
+  RiskLimitType,
+  TagSummary,
+  WatchlistItem
 } from "@mytrader/shared";
 
 interface DashboardProps {
   account: AccountSummary;
   onLock: () => Promise<void>;
+  onActivePortfolioChange?: (portfolio: { id: string | null; name: string | null }) => void;
 }
 
 interface PositionFormState {
@@ -81,6 +103,20 @@ interface LedgerFormState {
 
 type LedgerFilter = "all" | LedgerEventType;
 type CorporateActionKindUi = CorporateActionKind | "dividend";
+type MarketScope = "tags" | "holdings" | "search";
+type MarketChartRangeKey =
+  | "1D"
+  | "1W"
+  | "1M"
+  | "3M"
+  | "6M"
+  | "YTD"
+  | "1Y"
+  | "2Y"
+  | "5Y"
+  | "10Y";
+
+type MarketFilterMarket = "all" | "CN";
 
 const emptyPositionForm: PositionFormState = {
   symbol: "",
@@ -133,13 +169,18 @@ const ledgerSideLabels: Record<LedgerSide, string> = {
 
 const ledgerSourceLabels: Record<LedgerSource, string> = {
   manual: "手动",
-  csv: "CSV",
+  csv: "文件导入",
   broker_import: "券商导入",
   system: "系统"
 };
 
 const DEFAULT_LEDGER_START_DATE = "2000-01-01";
 const DEFAULT_LEDGER_END_DATE = "2099-12-31";
+
+const MARKET_EXPLORER_WIDTH_STORAGE_KEY = "mytrader:market:explorerWidth";
+const MARKET_EXPLORER_DEFAULT_WIDTH = 240;
+const MARKET_EXPLORER_MIN_WIDTH = 220;
+const MARKET_EXPLORER_MAX_WIDTH = 520;
 
 const corporateActionKindLabels: Record<CorporateActionKindUi, string> = {
   split: "拆股",
@@ -246,7 +287,9 @@ const portfolioTabs = [
 ] as const;
 
 const otherTabs = [
-  { key: "data-import", label: "\u6570\u636e\u5bfc\u5165" }
+  { key: "data-management", label: "数据管理", icon: "settings_suggest" },
+  { key: "data-status", label: "数据状态", icon: "monitoring" },
+  { key: "test", label: "测试", icon: "science" }
 ] as const;
 
 const performanceRanges = [
@@ -258,6 +301,18 @@ const performanceRanges = [
   { key: "ALL", label: "\u5168\u90e8" }
 ] as const;
 
+const marketChartRanges = [
+  { key: "1W", label: "1周" },
+  { key: "1M", label: "1个月" },
+  { key: "3M", label: "3个月" },
+  { key: "6M", label: "6个月" },
+  { key: "YTD", label: "年初至今" },
+  { key: "1Y", label: "1年" },
+  { key: "2Y", label: "2年" },
+  { key: "5Y", label: "5年" },
+  { key: "10Y", label: "10年" }
+] as const;
+
 const CONTRIBUTION_TOP_N = 5;
 const HHI_WARN_THRESHOLD = 0.25;
 
@@ -266,7 +321,7 @@ type OtherTab = (typeof otherTabs)[number]["key"];
 type WorkspaceView = (typeof navItems)[number]["key"];
 type PortfolioTab = (typeof portfolioTabs)[number]["key"];
 
-export function Dashboard({ account, onLock }: DashboardProps) {
+export function Dashboard({ account, onLock, onActivePortfolioChange }: DashboardProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [activePortfolioId, setActivePortfolioId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
@@ -274,8 +329,10 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<WorkspaceView>("portfolio");
-  const [otherTab, setOtherTab] = useState<OtherTab>("data-import");
+  const [otherTab, setOtherTab] = useState<OtherTab>("data-management");
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
+  const navCollapsedBeforeMarketRef = useRef<boolean | null>(null);
+  const navAutoCollapsedActiveRef = useRef(false);
   const [portfolioTab, setPortfolioTab] = useState<PortfolioTab>("overview");
   const [performanceRange, setPerformanceRange] = useState<PerformanceRangeKey>(
     "1Y"
@@ -316,17 +373,518 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
   const [holdingsCsvPath, setHoldingsCsvPath] = useState<string | null>(null);
   const [pricesCsvPath, setPricesCsvPath] = useState<string | null>(null);
-  const [ingestStartDate, setIngestStartDate] = useState(
-    formatInputDate(daysAgo(30))
+
+  const marketSearchTimerRef = useRef<number | null>(null);
+  const marketSearchRequestIdRef = useRef(0);
+
+  const [marketCatalogSyncing, setMarketCatalogSyncing] = useState(false);
+  const [marketCatalogSyncSummary, setMarketCatalogSyncSummary] = useState<
+    string | null
+  >(null);
+
+  const [marketSearchQuery, setMarketSearchQuery] = useState("");
+  const [marketSearchResults, setMarketSearchResults] = useState<
+    InstrumentProfileSummary[]
+  >([]);
+  const [marketSearchLoading, setMarketSearchLoading] = useState(false);
+
+  const [marketScope, setMarketScope] = useState<MarketScope>("holdings");
+  const [marketExplorerWidth, setMarketExplorerWidth] = useState<number>(() => {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return MARKET_EXPLORER_DEFAULT_WIDTH;
+    }
+    try {
+      const raw = window.localStorage.getItem(MARKET_EXPLORER_WIDTH_STORAGE_KEY);
+      const value = raw ? Number(raw) : NaN;
+      if (!Number.isFinite(value)) return MARKET_EXPLORER_DEFAULT_WIDTH;
+      return clampNumber(value, MARKET_EXPLORER_MIN_WIDTH, MARKET_EXPLORER_MAX_WIDTH);
+    } catch {
+      return MARKET_EXPLORER_DEFAULT_WIDTH;
+    }
+  });
+  const marketExplorerResizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const [marketTags, setMarketTags] = useState<TagSummary[]>([]);
+  const [marketTagsLoading, setMarketTagsLoading] = useState(false);
+  const [marketTagPickerOpen, setMarketTagPickerOpen] = useState(false);
+  const [marketTagPickerQuery, setMarketTagPickerQuery] = useState("");
+
+  const [marketSelectedTag, setMarketSelectedTag] = useState<string | null>(null);
+  const [marketTagMembers, setMarketTagMembers] = useState<string[]>([]);
+  const [marketTagMembersLoading, setMarketTagMembersLoading] = useState(false);
+
+  const [marketFiltersOpen, setMarketFiltersOpen] = useState(false);
+  const [marketFilterMarket, setMarketFilterMarket] =
+    useState<MarketFilterMarket>("all");
+  const [marketFilterAssetClasses, setMarketFilterAssetClasses] = useState<
+    AssetClass[]
+  >([]);
+  const [marketFilterKinds, setMarketFilterKinds] = useState<InstrumentKind[]>(
+    []
   );
-  const [ingestEndDate, setIngestEndDate] = useState(
-    formatInputDate(new Date())
+
+  const [marketQuotesBySymbol, setMarketQuotesBySymbol] = useState<
+    Record<string, MarketQuote>
+  >({});
+  const [marketQuotesLoading, setMarketQuotesLoading] = useState(false);
+
+  const [marketChartRange, setMarketChartRange] =
+    useState<MarketChartRangeKey>("6M");
+  const [marketChartBars, setMarketChartBars] = useState<MarketDailyBar[]>([]);
+  const [marketChartLoading, setMarketChartLoading] = useState(false);
+  const [marketVolumeMode, setMarketVolumeMode] = useState<
+    "volume" | "moneyflow"
+  >("volume");
+
+  const [marketDemoSeeding, setMarketDemoSeeding] = useState(false);
+
+  const marketTagSeriesRequestIdRef = useRef(0);
+  const [marketTagSeriesResult, setMarketTagSeriesResult] =
+    useState<MarketTagSeriesResult | null>(null);
+  const [marketTagSeriesBars, setMarketTagSeriesBars] = useState<
+    MarketDailyBar[]
+  >([]);
+  const [marketTagSeriesLoading, setMarketTagSeriesLoading] = useState(false);
+  const [marketTagSeriesError, setMarketTagSeriesError] = useState<string | null>(
+    null
   );
+  const [marketTagChartHoverDate, setMarketTagChartHoverDate] = useState<
+    string | null
+  >(null);
+  const [marketTagChartHoverPrice, setMarketTagChartHoverPrice] = useState<
+    number | null
+  >(null);
+
+  const [marketInstrumentDetailsOpen, setMarketInstrumentDetailsOpen] =
+    useState(false);
+  const [marketTagMembersModalOpen, setMarketTagMembersModalOpen] =
+    useState(false);
+  const [marketTokenStatus, setMarketTokenStatus] =
+    useState<MarketTokenStatus | null>(null);
+  const [marketTokenDraft, setMarketTokenDraft] = useState("");
+  const [marketTokenProvider, setMarketTokenProvider] = useState("tushare");
+  const [marketTokenSaving, setMarketTokenSaving] = useState(false);
+  const [marketTokenTesting, setMarketTokenTesting] = useState(false);
+  const [marketIngestRuns, setMarketIngestRuns] = useState<MarketIngestRun[]>([]);
+  const [marketIngestRunsLoading, setMarketIngestRunsLoading] = useState(false);
+  const [marketIngestTriggering, setMarketIngestTriggering] = useState(false);
+
+  const latestMarketIngestRun = useMemo(() => {
+    if (marketIngestRuns.length === 0) return null;
+    return marketIngestRuns.reduce((latest, candidate) =>
+      candidate.startedAt > latest.startedAt ? candidate : latest
+    );
+  }, [marketIngestRuns]);
+
+  const [marketSelectedSymbol, setMarketSelectedSymbol] = useState<string | null>(
+    null
+  );
+  const [marketSelectedProfile, setMarketSelectedProfile] =
+    useState<InstrumentProfile | null>(null);
+  const [marketSelectedUserTags, setMarketSelectedUserTags] = useState<string[]>(
+    []
+  );
+  const [marketUserTagDraft, setMarketUserTagDraft] = useState("");
+  const [marketShowProviderData, setMarketShowProviderData] = useState(false);
+
+  const [marketWatchlistItems, setMarketWatchlistItems] = useState<
+    WatchlistItem[]
+  >([]);
+  const [marketWatchlistLoading, setMarketWatchlistLoading] = useState(false);
+  const [marketWatchlistGroupDraft, setMarketWatchlistGroupDraft] = useState("");
+
+  const [marketTargetsConfig, setMarketTargetsConfig] =
+    useState<MarketTargetsConfig>(() => ({
+      includeHoldings: true,
+      includeRegistryAutoIngest: true,
+      includeWatchlist: true,
+      portfolioIds: null,
+      explicitSymbols: [],
+      tagFilters: []
+    }));
+  const [marketTargetsPreview, setMarketTargetsPreview] =
+    useState<PreviewTargetsResult | null>(null);
+  const [marketTargetsLoading, setMarketTargetsLoading] = useState(false);
+  const [marketTargetsSaving, setMarketTargetsSaving] = useState(false);
+  const [marketTargetsSymbolDraft, setMarketTargetsSymbolDraft] = useState("");
+  const [marketTargetsTagDraft, setMarketTargetsTagDraft] = useState("");
+  const [marketTempTargets, setMarketTempTargets] = useState<TempTargetSymbol[]>([]);
+  const [marketTempTargetsLoading, setMarketTempTargetsLoading] = useState(false);
+
+  const autoIngestScopeValue = useMemo(() => {
+    const { includeHoldings, includeWatchlist, includeRegistryAutoIngest } =
+      marketTargetsConfig;
+    if (includeHoldings && includeWatchlist && includeRegistryAutoIngest) {
+      return "holdings+watchlist+registry";
+    }
+    if (includeHoldings && includeWatchlist && !includeRegistryAutoIngest) {
+      return "holdings+watchlist";
+    }
+    if (includeHoldings && !includeWatchlist && includeRegistryAutoIngest) {
+      return "holdings+registry";
+    }
+    if (!includeHoldings && includeWatchlist && includeRegistryAutoIngest) {
+      return "watchlist+registry";
+    }
+    if (includeHoldings && !includeWatchlist && !includeRegistryAutoIngest) {
+      return "holdings";
+    }
+    if (!includeHoldings && includeWatchlist && !includeRegistryAutoIngest) {
+      return "watchlist";
+    }
+    if (!includeHoldings && !includeWatchlist && includeRegistryAutoIngest) {
+      return "registry";
+    }
+    return "holdings+watchlist+registry";
+  }, [marketTargetsConfig]);
+
+  const handleChangeAutoIngestScope = useCallback((value: string) => {
+    const next = {
+      includeHoldings: false,
+      includeWatchlist: false,
+      includeRegistryAutoIngest: false
+    };
+    switch (value) {
+      case "holdings+watchlist+registry":
+        next.includeHoldings = true;
+        next.includeWatchlist = true;
+        next.includeRegistryAutoIngest = true;
+        break;
+      case "holdings+watchlist":
+        next.includeHoldings = true;
+        next.includeWatchlist = true;
+        break;
+      case "holdings+registry":
+        next.includeHoldings = true;
+        next.includeRegistryAutoIngest = true;
+        break;
+      case "watchlist+registry":
+        next.includeWatchlist = true;
+        next.includeRegistryAutoIngest = true;
+        break;
+      case "holdings":
+        next.includeHoldings = true;
+        break;
+      case "watchlist":
+        next.includeWatchlist = true;
+        break;
+      case "registry":
+        next.includeRegistryAutoIngest = true;
+        break;
+      default:
+        next.includeHoldings = true;
+        next.includeWatchlist = true;
+        next.includeRegistryAutoIngest = true;
+    }
+    setMarketTargetsConfig((prev) => ({
+      ...prev,
+      ...next
+    }));
+  }, []);
+
+  const [marketChartHoverDate, setMarketChartHoverDate] = useState<string | null>(
+    null
+  );
+  const [marketChartHoverPrice, setMarketChartHoverPrice] = useState<
+    number | null
+  >(null);
+
+  useEffect(() => {
+    setMarketChartHoverDate(null);
+    setMarketChartHoverPrice(null);
+  }, [marketSelectedSymbol]);
+
+  useEffect(() => {
+    setMarketTagChartHoverDate(null);
+    setMarketTagChartHoverPrice(null);
+  }, [marketSelectedTag, marketChartRange]);
 
   const activePortfolio = useMemo(
     () => portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null,
     [portfolios, activePortfolioId]
   );
+
+  useEffect(() => {
+    if (!onActivePortfolioChange) return;
+    onActivePortfolioChange({
+      id: activePortfolio?.id ?? null,
+      name: activePortfolio?.name ?? null
+    });
+  }, [activePortfolio?.id, activePortfolio?.name, onActivePortfolioChange]);
+
+  const marketHoldingsSymbols = useMemo(() => {
+    if (!snapshot) return [];
+    return snapshot.positions
+      .filter((pos) => pos.position.assetClass !== "cash")
+      .map((pos) => pos.position.symbol)
+      .filter(Boolean);
+  }, [snapshot]);
+
+  const marketHoldingsMetaBySymbol = useMemo(() => {
+    const map = new Map<
+      string,
+      { assetClass: AssetClass | null; market: string | null }
+    >();
+    snapshot?.positions.forEach((pos) => {
+      if (pos.position.assetClass === "cash") return;
+      const symbol = pos.position.symbol;
+      if (!symbol) return;
+      map.set(symbol, {
+        assetClass: pos.position.assetClass ?? null,
+        market: pos.position.market ?? null
+      });
+    });
+    return map;
+  }, [snapshot]);
+
+  const marketHoldingsSymbolsFiltered = useMemo(() => {
+    return marketHoldingsSymbols.filter((symbol) => {
+      const meta = marketHoldingsMetaBySymbol.get(symbol) ?? null;
+      if (marketFilterMarket !== "all") {
+        if (!meta?.market || meta.market !== marketFilterMarket) return false;
+      }
+      if (marketFilterAssetClasses.length > 0) {
+        if (!meta?.assetClass) return false;
+        if (!marketFilterAssetClasses.includes(meta.assetClass)) return false;
+      }
+      return true;
+    });
+  }, [
+    marketFilterAssetClasses,
+    marketFilterMarket,
+    marketHoldingsMetaBySymbol,
+    marketHoldingsSymbols
+  ]);
+
+  const marketSelectedQuote = useMemo(() => {
+    if (!marketSelectedSymbol) return null;
+    return marketQuotesBySymbol[marketSelectedSymbol] ?? null;
+  }, [marketQuotesBySymbol, marketSelectedSymbol]);
+
+  const marketBarsByDate = useMemo(() => {
+    const map = new Map<string, MarketDailyBar>();
+    marketChartBars.forEach((bar) => {
+      map.set(bar.date, bar);
+    });
+    return map;
+  }, [marketChartBars]);
+
+  const marketActiveVolume = useMemo(() => {
+    if (!marketChartHoverDate) return null;
+    const bar = marketBarsByDate.get(marketChartHoverDate) ?? null;
+    return bar?.volume ?? null;
+  }, [marketBarsByDate, marketChartHoverDate]);
+
+  const marketActiveMoneyflowVol = useMemo(() => {
+    if (!marketChartHoverDate) return null;
+    const bar = marketBarsByDate.get(marketChartHoverDate) ?? null;
+    const value = bar?.netMfVol ?? null;
+    return value !== null && Number.isFinite(value) ? value : null;
+  }, [marketBarsByDate, marketChartHoverDate]);
+
+  const marketActiveMoneyflowRatio = useMemo(() => {
+    if (!marketChartHoverDate) return null;
+    const bar = marketBarsByDate.get(marketChartHoverDate) ?? null;
+    const volume = bar?.volume ?? null;
+    const mf = bar?.netMfVol ?? null;
+    if (
+      volume === null ||
+      !Number.isFinite(volume) ||
+      volume <= 0 ||
+      mf === null ||
+      !Number.isFinite(mf)
+    ) {
+      return null;
+    }
+    return Math.abs(mf) / volume;
+  }, [marketBarsByDate, marketChartHoverDate]);
+
+  const marketNameBySymbol = useMemo(() => {
+    const map = new Map<string, string>();
+    snapshot?.positions.forEach((pos) => {
+      const symbol = pos.position.symbol;
+      if (symbol) map.set(symbol, pos.position.name ?? symbol);
+    });
+    marketWatchlistItems.forEach((item) => {
+      map.set(item.symbol, item.name ?? item.symbol);
+    });
+    marketSearchResults.forEach((item) => {
+      map.set(item.symbol, item.name ?? item.symbol);
+    });
+    if (marketSelectedProfile) {
+      map.set(
+        marketSelectedProfile.symbol,
+        marketSelectedProfile.name ?? marketSelectedProfile.symbol
+      );
+    }
+    return map;
+  }, [marketSearchResults, marketSelectedProfile, marketWatchlistItems, snapshot]);
+
+  const marketListFilter = marketSearchQuery.trim().toLowerCase();
+  const marketEffectiveScope: MarketScope =
+    marketListFilter.length > 0 ? "search" : marketScope;
+  const marketCollectionSelectValue = useMemo(() => {
+    if (marketScope === "holdings") return "builtin:holdings";
+    if (marketScope === "tags") {
+      if (marketSelectedTag === "watchlist:all") return "builtin:watchlist";
+      if (marketSelectedTag) return `tag:${marketSelectedTag}`;
+    }
+    return "builtin:holdings";
+  }, [marketScope, marketSelectedTag]);
+
+  const marketSearchResultsFiltered = useMemo(() => {
+    return marketSearchResults.filter((item) => {
+      if (marketFilterMarket !== "all") {
+        if (!item.market || item.market !== marketFilterMarket) return false;
+      }
+      if (marketFilterKinds.length > 0) {
+        if (!marketFilterKinds.includes(item.kind)) return false;
+      }
+      if (marketFilterAssetClasses.length > 0) {
+        if (!item.assetClass) return false;
+        if (!marketFilterAssetClasses.includes(item.assetClass)) return false;
+      }
+      return true;
+    });
+  }, [marketFilterAssetClasses, marketFilterKinds, marketFilterMarket, marketSearchResults]);
+
+  const marketCurrentListSymbols = useMemo(() => {
+    if (marketEffectiveScope === "holdings") return marketHoldingsSymbolsFiltered;
+    if (marketEffectiveScope === "search")
+      return marketSearchResults.map((item) => item.symbol);
+    if (marketEffectiveScope === "tags") return marketSelectedTag ? marketTagMembers : [];
+    return [];
+  }, [
+    marketHoldingsSymbolsFiltered,
+    marketEffectiveScope,
+    marketSearchResults,
+    marketSelectedTag,
+    marketTagMembers
+  ]);
+
+  const marketFilteredListSymbols = useMemo(() => {
+    if (!marketListFilter || marketEffectiveScope === "search") return marketCurrentListSymbols;
+    return marketCurrentListSymbols.filter((symbol) => {
+      const name = marketNameBySymbol.get(symbol) ?? "";
+      return (
+        symbol.toLowerCase().includes(marketListFilter) ||
+        name.toLowerCase().includes(marketListFilter)
+      );
+    });
+  }, [marketCurrentListSymbols, marketListFilter, marketNameBySymbol, marketEffectiveScope]);
+
+  const marketSelectedTagAggregate = useMemo(() => {
+    if (!marketSelectedTag) return null;
+    return computeTagAggregate(marketTagMembers, marketQuotesBySymbol);
+  }, [marketQuotesBySymbol, marketSelectedTag, marketTagMembers]);
+
+  const marketSelectedTagSeriesReturnPct = useMemo(() => {
+    const closes = marketTagSeriesBars
+      .map((bar) => bar.close)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    if (closes.length < 2) return null;
+    const first = closes[0];
+    const last = closes[closes.length - 1];
+    if (first === 0) return null;
+    return (last - first) / first;
+  }, [marketTagSeriesBars]);
+
+  const marketSelectedTagSeriesTone = useMemo(() => {
+    return getCnChangeTone(marketSelectedTagSeriesReturnPct);
+  }, [marketSelectedTagSeriesReturnPct]);
+
+  const marketTagSeriesLatestCoverageLabel = useMemo(() => {
+    const points = marketTagSeriesResult?.points ?? [];
+    if (points.length === 0) return "--";
+    const last = points[points.length - 1];
+    return `覆盖 ${last.includedCount}/${last.totalCount}`;
+  }, [marketTagSeriesResult]);
+
+  const marketFiltersActiveCount = useMemo(() => {
+    let count = 0;
+    if (marketFilterMarket !== "all") count += 1;
+    if (marketFilterAssetClasses.length > 0) count += 1;
+    if (marketFilterKinds.length > 0) count += 1;
+    return count;
+  }, [marketFilterAssetClasses, marketFilterKinds, marketFilterMarket]);
+
+  const marketLatestBar = useMemo(() => {
+    for (let idx = marketChartBars.length - 1; idx >= 0; idx -= 1) {
+      const bar = marketChartBars[idx];
+      if (bar.close !== null) return bar;
+    }
+    return null;
+  }, [marketChartBars]);
+
+  const marketChartHasEnoughData = useMemo(() => {
+    let count = 0;
+    for (const bar of marketChartBars) {
+      const close = bar.close;
+      if (close !== null && Number.isFinite(close)) count += 1;
+      if (count >= 2) return true;
+    }
+    return false;
+  }, [marketChartBars]);
+
+  const marketRangeSummary = useMemo(() => {
+    const closes = marketChartBars
+      .map((bar) => bar.close)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const highs = marketChartBars
+      .map((bar) => bar.high)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const lows = marketChartBars
+      .map((bar) => bar.low)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const volumes = marketChartBars
+      .map((bar) => bar.volume)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+
+    const firstClose = closes.length > 0 ? closes[0] : null;
+    const lastClose = closes.length > 0 ? closes[closes.length - 1] : null;
+    const rangeReturn =
+      firstClose !== null && lastClose !== null && firstClose !== 0
+        ? (lastClose - firstClose) / firstClose
+        : null;
+
+    const rangeHigh = highs.length > 0 ? Math.max(...highs) : null;
+    const rangeLow = lows.length > 0 ? Math.min(...lows) : null;
+    const avgVolume =
+      volumes.length > 0
+        ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length
+        : null;
+
+    return { rangeHigh, rangeLow, avgVolume, rangeReturn };
+  }, [marketChartBars]);
+
+  const marketSelectedPositionValuation = useMemo(() => {
+    if (!snapshot || !marketSelectedSymbol) return null;
+    return (
+      snapshot.positions.find((pos) => pos.position.symbol === marketSelectedSymbol) ??
+      null
+    );
+  }, [marketSelectedSymbol, snapshot]);
+
+  const marketHoldingUnitCost = useMemo(() => {
+    if (!marketSelectedSymbol) return null;
+    const position = marketSelectedPositionValuation?.position ?? null;
+    if (!position || position.quantity <= 0) return null;
+
+    const direct = position.cost;
+    if (direct !== null && Number.isFinite(direct) && direct > 0) return direct;
+
+    const fifo = computeFifoUnitCost(ledgerEntries, marketSelectedSymbol);
+    if (fifo !== null && Number.isFinite(fifo) && fifo > 0) return fifo;
+    return null;
+  }, [ledgerEntries, marketSelectedPositionValuation, marketSelectedSymbol]);
+
+  const marketTargetPrice = useMemo(() => {
+    return parseTargetPriceFromTags(marketSelectedUserTags);
+  }, [marketSelectedUserTags]);
 
   const cashTotal = useMemo(() => {
     if (!snapshot) return 0;
@@ -542,6 +1100,73 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     setLedgerStartDate(DEFAULT_LEDGER_START_DATE);
     setLedgerEndDate(DEFAULT_LEDGER_END_DATE);
   }, [activePortfolio?.id, activePortfolio?.baseCurrency]);
+
+  useEffect(() => {
+    if (activeView === "market") {
+      if (!navAutoCollapsedActiveRef.current) {
+        navCollapsedBeforeMarketRef.current = isNavCollapsed;
+        navAutoCollapsedActiveRef.current = true;
+      }
+      setIsNavCollapsed(true);
+      return;
+    }
+
+    if (navAutoCollapsedActiveRef.current) {
+      navAutoCollapsedActiveRef.current = false;
+      const previous = navCollapsedBeforeMarketRef.current;
+      navCollapsedBeforeMarketRef.current = null;
+      if (previous !== null) setIsNavCollapsed(previous);
+    }
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView === "market") return;
+    setMarketInstrumentDetailsOpen(false);
+    setMarketTagMembersModalOpen(false);
+  }, [activeView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(
+        MARKET_EXPLORER_WIDTH_STORAGE_KEY,
+        String(marketExplorerWidth)
+      );
+    } catch {
+      // ignore
+    }
+  }, [marketExplorerWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleMove = (event: PointerEvent) => {
+      const state = marketExplorerResizeRef.current;
+      if (!state) return;
+      const delta = event.clientX - state.startX;
+      const nextWidth = clampNumber(
+        state.startWidth + delta,
+        MARKET_EXPLORER_MIN_WIDTH,
+        MARKET_EXPLORER_MAX_WIDTH
+      );
+      setMarketExplorerWidth(nextWidth);
+    };
+
+    const stop = () => {
+      if (!marketExplorerResizeRef.current) return;
+      marketExplorerResizeRef.current = null;
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      document.body.style.userSelect = "";
+    };
+  }, []);
 
   useEffect(() => {
     if (activeView === "portfolio") {
@@ -915,7 +1540,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     }
 
     if ((ledgerForm.source === "csv" || ledgerForm.source === "broker_import") && sequence === null) {
-      setError("CSV/券商导入需要填写排序序号。");
+      setError("文件/券商导入需要填写排序序号。");
       return;
     }
 
@@ -1102,28 +1727,774 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     setNotice(`行情导入：新增 ${result.inserted} 条，跳过 ${result.skipped} 条。`);
   }, [pricesCsvPath, activePortfolio, loadSnapshot]);
 
-  const handleIngestTushare = useCallback(async () => {
-    if (!window.mytrader || !snapshot) return;
+  const refreshMarketWatchlist = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketWatchlistLoading(true);
+    try {
+      const items = await window.mytrader.market.listWatchlist();
+      setMarketWatchlistItems(items);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketWatchlistLoading(false);
+    }
+  }, []);
+
+  const refreshMarketTags = useCallback(async (query: string) => {
+    if (!window.mytrader) return;
+    setMarketTagsLoading(true);
+    try {
+      const tags = await window.mytrader.market.listTags({
+        query: query.trim() ? query.trim() : null,
+        limit: 200
+      });
+      setMarketTags(tags);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      setMarketTags([]);
+    } finally {
+      setMarketTagsLoading(false);
+    }
+  }, []);
+
+  const resetMarketFilters = useCallback(() => {
+    setMarketFilterMarket("all");
+    setMarketFilterAssetClasses([]);
+    setMarketFilterKinds([]);
+  }, []);
+
+  const loadMarketQuotes = useCallback(async (symbols: string[]) => {
+    if (!window.mytrader) return;
+    const unique = Array.from(new Set(symbols.map((s) => s.trim()).filter(Boolean)));
+    if (unique.length === 0) return;
+
+    setMarketQuotesLoading(true);
+    try {
+      const quotes = await window.mytrader.market.getQuotes({ symbols: unique });
+      setMarketQuotesBySymbol((prev) => {
+        const next = { ...prev };
+        quotes.forEach((quote) => {
+          next[quote.symbol] = quote;
+        });
+        return next;
+      });
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketQuotesLoading(false);
+    }
+  }, []);
+
+  const refreshMarketTargets = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketTargetsLoading(true);
+    try {
+      const config = await window.mytrader.market.getTargets();
+      setMarketTargetsConfig(config);
+      const preview = await window.mytrader.market.previewTargets();
+      setMarketTargetsPreview(preview);
+      setMarketTempTargetsLoading(true);
+      const temp = await window.mytrader.market.listTempTargets();
+      setMarketTempTargets(temp);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTempTargetsLoading(false);
+      setMarketTargetsLoading(false);
+    }
+  }, []);
+
+  const refreshMarketTokenStatus = useCallback(async () => {
+    if (!window.mytrader) return;
+    try {
+      const status = await window.mytrader.market.getTokenStatus();
+      setMarketTokenStatus(status);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, []);
+
+  const handleOpenMarketProvider = useCallback(async () => {
+    if (!window.mytrader) return;
+    try {
+      await window.mytrader.market.openProviderHomepage({
+        provider: marketTokenProvider
+      });
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, [marketTokenProvider]);
+
+  const refreshMarketIngestRuns = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketIngestRunsLoading(true);
+    try {
+      const runs = await window.mytrader.market.listIngestRuns({ limit: 100 });
+      setMarketIngestRuns(runs);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      setMarketIngestRuns([]);
+    } finally {
+      setMarketIngestRunsLoading(false);
+    }
+  }, []);
+
+  const handleSaveMarketToken = useCallback(async () => {
+    if (!window.mytrader) return;
     setError(null);
     setNotice(null);
-    const items = snapshot.positions
-      .filter((pos) => pos.position.assetClass !== "cash")
-      .map((pos) => ({
-        symbol: pos.position.symbol,
-        assetClass: pos.position.assetClass
-      }));
-    if (!items.length) {
-      setNotice("当前组合没有可拉取行情的标的。");
+    setMarketTokenSaving(true);
+    try {
+      const token = marketTokenDraft.trim();
+      const status = await window.mytrader.market.setToken({
+        token: token ? token : null
+      });
+      setMarketTokenStatus(status);
+      setMarketTokenDraft("");
+      setNotice(token ? "令牌已保存（本地加密存储）。" : "本地令牌已清除。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTokenSaving(false);
+    }
+  }, [marketTokenDraft]);
+
+  const handleClearMarketToken = useCallback(async () => {
+    if (!window.mytrader) return;
+    setError(null);
+    setNotice(null);
+    setMarketTokenSaving(true);
+    try {
+      const status = await window.mytrader.market.setToken({ token: null });
+      setMarketTokenStatus(status);
+      setMarketTokenDraft("");
+      setNotice("本地令牌已清除。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTokenSaving(false);
+    }
+  }, []);
+
+  const handleTestMarketToken = useCallback(async () => {
+    if (!window.mytrader) return;
+    setError(null);
+    setNotice(null);
+    setMarketTokenTesting(true);
+    try {
+      const token = marketTokenDraft.trim() || null;
+      await window.mytrader.market.testToken({ token });
+      setNotice("连接测试成功。");
+      await refreshMarketTokenStatus();
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTokenTesting(false);
+    }
+  }, [marketTokenDraft, refreshMarketTokenStatus]);
+
+  const handleTriggerMarketIngest = useCallback(
+    async (scope: "targets" | "universe" | "both") => {
+      if (!window.mytrader) return;
+      setError(null);
+      setNotice(null);
+      setMarketIngestTriggering(true);
+      try {
+        await window.mytrader.market.triggerIngest({ scope });
+        setNotice("拉取任务已执行完成。");
+        await refreshMarketIngestRuns();
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+        await refreshMarketIngestRuns();
+      } finally {
+        setMarketIngestTriggering(false);
+      }
+    },
+    [refreshMarketIngestRuns]
+  );
+
+  const handleSyncInstrumentCatalog = useCallback(async () => {
+    if (!window.mytrader) return;
+    setError(null);
+    setNotice(null);
+    setMarketCatalogSyncing(true);
+    try {
+      const result = await window.mytrader.market.syncInstrumentCatalog();
+      setMarketCatalogSyncSummary(
+        `标的库已同步：新增 ${result.inserted}，更新 ${result.updated}。`
+      );
+      await refreshMarketTargets();
+      setNotice(`标的库同步完成：新增 ${result.inserted}，更新 ${result.updated}。`);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketCatalogSyncing(false);
+    }
+  }, [refreshMarketTargets]);
+
+  const handleSelectInstrument = useCallback(async (symbol: string) => {
+    if (!window.mytrader) return;
+    const key = symbol.trim();
+    if (!key) return;
+    setMarketInstrumentDetailsOpen(false);
+    setMarketTagMembersModalOpen(false);
+    setMarketSelectedSymbol(key);
+    setMarketSelectedProfile(null);
+    setMarketSelectedUserTags([]);
+    setMarketShowProviderData(false);
+    setMarketChartHoverDate(null);
+    setMarketChartHoverPrice(null);
+    setMarketChartLoading(true);
+    setError(null);
+    try {
+      const profile = await window.mytrader.market.getInstrumentProfile(key);
+      setMarketSelectedProfile(profile);
+      const tags = await window.mytrader.market.listInstrumentTags(key);
+      setMarketSelectedUserTags(tags);
+      await loadMarketQuotes([key]);
+
+      if (profile) {
+        const preview = await window.mytrader.market.previewTargets();
+        const entry = preview.symbols.find((item) => item.symbol === key) ?? null;
+        const isTempOnly = entry?.reasons?.includes("temp:search") ?? false;
+
+        if (!entry || isTempOnly) {
+          const temp = await window.mytrader.market.touchTempTarget({ symbol: key });
+          setMarketTempTargets(temp);
+          const refreshed = await window.mytrader.market.previewTargets();
+          setMarketTargetsPreview(refreshed);
+          if (!entry) {
+            setNotice(`已临时加入目标池：${key}（7天后自动清理，可在「数据管理」转为长期）。`);
+          }
+        }
+      }
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      setMarketChartLoading(false);
+    }
+  }, [loadMarketQuotes]);
+
+  const handleSelectTag = useCallback(
+    async (tag: string) => {
+      if (!window.mytrader) return;
+      const key = tag.trim();
+      if (!key) return;
+
+      setMarketInstrumentDetailsOpen(false);
+      setMarketTagMembersModalOpen(false);
+      setMarketSelectedTag(key);
+      setMarketSelectedSymbol(null);
+      setMarketSelectedProfile(null);
+      setMarketSelectedUserTags([]);
+      setMarketShowProviderData(false);
+      setMarketTagMembers([]);
+      setMarketChartBars([]);
+
+      setError(null);
+      setMarketTagMembersLoading(true);
+      try {
+        const members = await window.mytrader.market.getTagMembers({
+          tag: key,
+          limit: 5000
+        });
+        setMarketTagMembers(members);
+        await loadMarketQuotes(members);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      } finally {
+        setMarketTagMembersLoading(false);
+      }
+    },
+    [loadMarketQuotes]
+  );
+
+  const handleSeedMarketDemoData = useCallback(async () => {
+    if (!window.mytrader) return;
+    setError(null);
+    setNotice(null);
+    setMarketDemoSeeding(true);
+    try {
+      const result = await window.mytrader.market.seedDemoData({
+        portfolioId: activePortfolioId,
+        seedHoldings: true
+      });
+      await refreshMarketWatchlist();
+      await refreshMarketTags("demo");
+      if (activePortfolioId) {
+        await loadSnapshot(activePortfolioId);
+      }
+      setMarketScope("tags");
+      await handleSelectTag("demo:all");
+      setNotice(
+        `已注入示例数据：${result.symbols.length} 个标的，${result.tradeDateCount} 个交易日。${
+          result.warnings.length ? `（${result.warnings.join("；")}）` : ""
+        }`
+      );
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketDemoSeeding(false);
+    }
+  }, [
+    activePortfolioId,
+    handleSelectTag,
+    loadSnapshot,
+    refreshMarketTags,
+    refreshMarketWatchlist
+  ]);
+
+  const handleAddUserTag = useCallback(async () => {
+    if (!window.mytrader || !marketSelectedSymbol) return;
+    const tag = marketUserTagDraft.trim();
+    if (!tag) return;
+    if (!tag.includes(":")) {
+      setError("标签必须符合 namespace:value，例如 user:核心 或 theme:AI。");
       return;
     }
-    const result = await window.mytrader.market.ingestTushare({
-      items,
-      startDate: ingestStartDate,
-      endDate: ingestEndDate || null
+    setError(null);
+    setNotice(null);
+    try {
+      await window.mytrader.market.addInstrumentTag(marketSelectedSymbol, tag);
+      setMarketUserTagDraft("");
+      const tags = await window.mytrader.market.listInstrumentTags(
+        marketSelectedSymbol
+      );
+      setMarketSelectedUserTags(tags);
+      setNotice("标签已添加。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, [marketSelectedSymbol, marketUserTagDraft]);
+
+  const handleRemoveUserTag = useCallback(
+    async (tag: string) => {
+      if (!window.mytrader || !marketSelectedSymbol) return;
+      const key = tag.trim();
+      if (!key) return;
+      setError(null);
+      setNotice(null);
+      try {
+        await window.mytrader.market.removeInstrumentTag(
+          marketSelectedSymbol,
+          key
+        );
+        const tags = await window.mytrader.market.listInstrumentTags(
+          marketSelectedSymbol
+        );
+        setMarketSelectedUserTags(tags);
+        setNotice("标签已移除。");
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      }
+    },
+    [marketSelectedSymbol]
+  );
+
+  const handleAddSelectedToWatchlist = useCallback(async () => {
+    if (!window.mytrader || !marketSelectedProfile) return;
+    const groupName = marketWatchlistGroupDraft.trim();
+    setError(null);
+    setNotice(null);
+    try {
+      await window.mytrader.market.upsertWatchlistItem({
+        symbol: marketSelectedProfile.symbol,
+        name: marketSelectedProfile.name ?? null,
+        groupName: groupName ? groupName : null
+      });
+      await refreshMarketWatchlist();
+      setNotice("已加入自选列表。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, [marketSelectedProfile, marketWatchlistGroupDraft, refreshMarketWatchlist]);
+
+  const handleRemoveWatchlistItem = useCallback(
+    async (symbol: string) => {
+      if (!window.mytrader) return;
+      const key = symbol.trim();
+      if (!key) return;
+      setError(null);
+      setNotice(null);
+      try {
+        await window.mytrader.market.removeWatchlistItem(key);
+        await refreshMarketWatchlist();
+        setNotice("已从自选列表移除。");
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      }
+    },
+    [refreshMarketWatchlist]
+  );
+
+  const handleAddTargetSymbol = useCallback(() => {
+    const symbol = marketTargetsSymbolDraft.trim();
+    if (!symbol) return;
+    setMarketTargetsConfig((prev) => {
+      if (prev.explicitSymbols.includes(symbol)) return prev;
+      return { ...prev, explicitSymbols: [...prev.explicitSymbols, symbol] };
     });
-    await loadSnapshot(snapshot.portfolio.id);
-    setNotice(`行情拉取：新增 ${result.inserted} 条。`);
-  }, [snapshot, ingestStartDate, ingestEndDate, loadSnapshot]);
+    setMarketTargetsSymbolDraft("");
+  }, [marketTargetsSymbolDraft]);
+
+  const handleRemoveTargetSymbol = useCallback((symbol: string) => {
+    const key = symbol.trim();
+    if (!key) return;
+    setMarketTargetsConfig((prev) => ({
+      ...prev,
+      explicitSymbols: prev.explicitSymbols.filter((item) => item !== key)
+    }));
+  }, []);
+
+  const handleAddTargetTag = useCallback(
+    (raw?: string) => {
+      const tag = (raw ?? marketTargetsTagDraft).trim();
+      if (!tag) return;
+      setMarketTargetsConfig((prev) => {
+        if (prev.tagFilters.includes(tag)) return prev;
+        return { ...prev, tagFilters: [...prev.tagFilters, tag] };
+      });
+      if (raw === undefined) setMarketTargetsTagDraft("");
+    },
+    [marketTargetsTagDraft]
+  );
+
+  const handleRemoveTargetTag = useCallback((tag: string) => {
+    const key = tag.trim();
+    if (!key) return;
+    setMarketTargetsConfig((prev) => ({
+      ...prev,
+      tagFilters: prev.tagFilters.filter((item) => item !== key)
+    }));
+  }, []);
+
+  const handleRemoveTempTarget = useCallback(
+    async (symbol: string) => {
+      if (!window.mytrader) return;
+      const key = symbol.trim();
+      if (!key) return;
+      setError(null);
+      setNotice(null);
+      setMarketTempTargetsLoading(true);
+      try {
+        const next = await window.mytrader.market.removeTempTarget({ symbol: key });
+        setMarketTempTargets(next);
+        const preview = await window.mytrader.market.previewTargets();
+        setMarketTargetsPreview(preview);
+        setNotice(`已移除临时标的：${key}`);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      } finally {
+        setMarketTempTargetsLoading(false);
+      }
+    },
+    []
+  );
+
+  const handlePromoteTempTarget = useCallback(
+    async (symbol: string) => {
+      if (!window.mytrader) return;
+      const key = symbol.trim();
+      if (!key) return;
+      setError(null);
+      setNotice(null);
+      setMarketTempTargetsLoading(true);
+      setMarketTargetsSaving(true);
+      try {
+        const saved = await window.mytrader.market.promoteTempTarget({ symbol: key });
+        setMarketTargetsConfig(saved);
+        const preview = await window.mytrader.market.previewTargets();
+        setMarketTargetsPreview(preview);
+        const temp = await window.mytrader.market.listTempTargets();
+        setMarketTempTargets(temp);
+        setNotice(`已转为长期目标：${key}`);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      } finally {
+        setMarketTargetsSaving(false);
+        setMarketTempTargetsLoading(false);
+      }
+    },
+    []
+  );
+
+  const handleSaveTargets = useCallback(async () => {
+    if (!window.mytrader) return;
+    setError(null);
+    setNotice(null);
+    setMarketTargetsSaving(true);
+    try {
+      const saved = await window.mytrader.market.setTargets(marketTargetsConfig);
+      setMarketTargetsConfig(saved);
+      const preview = await window.mytrader.market.previewTargets();
+      setMarketTargetsPreview(preview);
+      setNotice("目标池已保存。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTargetsSaving(false);
+    }
+  }, [marketTargetsConfig]);
+
+  const handleMarketExplorerResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      marketExplorerResizeRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: marketExplorerWidth
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      document.body.style.userSelect = "none";
+    },
+    [marketExplorerWidth]
+  );
+
+  const handleMarketExplorerResizeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = event.shiftKey ? 32 : 16;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setMarketExplorerWidth((prev) =>
+          clampNumber(
+            prev - step,
+            MARKET_EXPLORER_MIN_WIDTH,
+            MARKET_EXPLORER_MAX_WIDTH
+          )
+        );
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setMarketExplorerWidth((prev) =>
+          clampNumber(
+            prev + step,
+            MARKET_EXPLORER_MIN_WIDTH,
+            MARKET_EXPLORER_MAX_WIDTH
+          )
+        );
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (!window.mytrader) return;
+    refreshMarketWatchlist().catch(() => undefined);
+    refreshMarketTags("").catch(() => undefined);
+  }, [activeView, refreshMarketTags, refreshMarketWatchlist]);
+
+  useEffect(() => {
+    if (activeView !== "other") return;
+    if (!window.mytrader) return;
+
+    if (otherTab === "data-management") {
+      refreshMarketTokenStatus().catch(() => undefined);
+      refreshMarketTargets().catch(() => undefined);
+      refreshMarketIngestRuns().catch(() => undefined);
+      return;
+    }
+
+    if (otherTab === "data-status") {
+      refreshMarketTokenStatus().catch(() => undefined);
+      refreshMarketIngestRuns().catch(() => undefined);
+    }
+  }, [
+    activeView,
+    otherTab,
+    refreshMarketIngestRuns,
+    refreshMarketTargets,
+    refreshMarketTokenStatus
+  ]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (!marketTagPickerOpen) return;
+    if (!window.mytrader) return;
+    void refreshMarketTags(marketTagPickerQuery);
+  }, [activeView, marketTagPickerOpen, marketTagPickerQuery, refreshMarketTags]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (!window.mytrader) return;
+    const query = marketSearchQuery.trim();
+    if (!query) {
+      setMarketSearchResults([]);
+      setMarketSearchLoading(false);
+      return;
+    }
+
+    setMarketSearchLoading(true);
+    const requestId = marketSearchRequestIdRef.current + 1;
+    marketSearchRequestIdRef.current = requestId;
+
+    if (marketSearchTimerRef.current !== null) {
+      window.clearTimeout(marketSearchTimerRef.current);
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const results = await window.mytrader!.market.searchInstruments({
+            query,
+            limit: 50
+          });
+          if (marketSearchRequestIdRef.current !== requestId) return;
+          setMarketSearchResults(results);
+        } catch (err) {
+          if (marketSearchRequestIdRef.current !== requestId) return;
+          setError(toUserErrorMessage(err));
+          setMarketSearchResults([]);
+        } finally {
+          if (marketSearchRequestIdRef.current === requestId) {
+            setMarketSearchLoading(false);
+          }
+        }
+      })();
+    }, 250);
+
+    marketSearchTimerRef.current = timer;
+    return () => window.clearTimeout(timer);
+  }, [activeView, marketSearchQuery]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (marketEffectiveScope !== "holdings") return;
+    void loadMarketQuotes(marketHoldingsSymbolsFiltered);
+  }, [activeView, loadMarketQuotes, marketEffectiveScope, marketHoldingsSymbolsFiltered]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (marketEffectiveScope !== "search") return;
+    void loadMarketQuotes(marketSearchResultsFiltered.map((item) => item.symbol));
+  }, [activeView, loadMarketQuotes, marketEffectiveScope, marketSearchResultsFiltered]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (!window.mytrader) return;
+    if (!marketSelectedSymbol) return;
+
+    const quote = marketQuotesBySymbol[marketSelectedSymbol];
+    const endDate = quote?.tradeDate ?? formatInputDate(new Date());
+    const { startDate, endDate: resolvedEndDate } = resolveMarketChartDateRange(
+      marketChartRange,
+      endDate
+    );
+
+    setMarketChartLoading(true);
+    void (async () => {
+      try {
+        const bars = await window.mytrader!.market.getDailyBars({
+          symbol: marketSelectedSymbol,
+          startDate,
+          endDate: resolvedEndDate,
+          includeMoneyflow: marketVolumeMode === "moneyflow"
+        });
+        setMarketChartBars(bars);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+        setMarketChartBars([]);
+      } finally {
+        setMarketChartLoading(false);
+      }
+    })();
+  }, [
+    activeView,
+    marketChartRange,
+    marketQuotesBySymbol,
+    marketSelectedSymbol,
+    marketVolumeMode
+  ]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (!window.mytrader) return;
+    if (marketEffectiveScope !== "tags") {
+      setMarketTagSeriesError(null);
+      setMarketTagSeriesResult(null);
+      setMarketTagSeriesBars([]);
+      setMarketTagSeriesLoading(false);
+      return;
+    }
+    if (!marketSelectedTag || marketSelectedSymbol) {
+      setMarketTagSeriesError(null);
+      setMarketTagSeriesResult(null);
+      setMarketTagSeriesBars([]);
+      setMarketTagSeriesLoading(false);
+      return;
+    }
+
+    const endDate = snapshot?.priceAsOf ?? formatInputDate(new Date());
+    const { startDate, endDate: resolvedEndDate } = resolveMarketChartDateRange(
+      marketChartRange,
+      endDate
+    );
+
+    const requestId = (marketTagSeriesRequestIdRef.current += 1);
+    setMarketTagSeriesLoading(true);
+    setMarketTagSeriesError(null);
+    void (async () => {
+      try {
+        const result = await window.mytrader!.market.getTagSeries({
+          tag: marketSelectedTag,
+          startDate,
+          endDate: resolvedEndDate,
+          memberLimit: 300
+        });
+        if (marketTagSeriesRequestIdRef.current !== requestId) return;
+        setMarketTagSeriesResult(result);
+        setMarketTagSeriesBars(
+          result.points.map((point) => ({
+            date: point.date,
+            open: null,
+            high: null,
+            low: null,
+            close: point.value,
+            volume: null
+          }))
+        );
+      } catch (err) {
+        if (marketTagSeriesRequestIdRef.current !== requestId) return;
+        setMarketTagSeriesError(toUserErrorMessage(err));
+        setMarketTagSeriesResult(null);
+        setMarketTagSeriesBars([]);
+      } finally {
+        if (marketTagSeriesRequestIdRef.current !== requestId) return;
+        setMarketTagSeriesLoading(false);
+      }
+    })();
+  }, [
+    activeView,
+    marketChartRange,
+    marketEffectiveScope,
+    marketSelectedSymbol,
+    marketSelectedTag,
+    snapshot?.priceAsOf
+  ]);
+
+  useEffect(() => {
+    if (activeView !== "market") return;
+    if (marketSelectedSymbol || marketSelectedTag) return;
+    if (marketSearchQuery.trim()) return;
+
+    if (marketHoldingsSymbolsFiltered.length > 0) {
+      setMarketScope("holdings");
+      return;
+    }
+
+    if (marketWatchlistItems.length > 0) {
+      setMarketScope("tags");
+      void handleSelectTag("watchlist:all");
+    }
+  }, [
+    activeView,
+    handleSelectTag,
+    marketHoldingsSymbolsFiltered,
+    marketSearchQuery,
+    marketSelectedSymbol,
+    marketSelectedTag,
+    marketWatchlistItems.length
+  ]);
 
   return (
     <div className="flex h-full bg-white/90 dark:bg-background-dark/80 backdrop-blur-xl overflow-hidden">
@@ -1138,7 +2509,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
             导航
           </p>
           <button
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-background-dark/80 transition-colors"
             type="button"
             onClick={() => setIsNavCollapsed((prev) => !prev)}
             aria-label={isNavCollapsed ? "展开导航" : "收起导航"}
@@ -1160,7 +2531,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 group
                   ${isActive 
                     ? "bg-primary text-white font-medium" 
-                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-background-dark/80 hover:text-slate-900 dark:hover:text-white"
                   }
                   ${isNavCollapsed ? "justify-center px-2" : ""}
                 `}
@@ -1186,11 +2557,17 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       <section className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white/85 dark:bg-background-dark/70 backdrop-blur-lg">
         {/* Top Navigation / Toolbar */}
         <div className="h-10 border-b border-border-light dark:border-border-dark flex items-center justify-between px-3 flex-shrink-0 bg-white/85 dark:bg-background-dark/75 backdrop-blur-lg">
-           <div className="flex items-center gap-4">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                {navItems.find(n => n.key === activeView)?.label}
+           <div className="flex items-baseline gap-3 min-w-0">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">
+                {activeView === "other" && otherTab === "data-status"
+                  ? "数据状态"
+                  : navItems.find(n => n.key === activeView)?.label}
               </h2>
-              {/* Optional: Breadcrumbs or View Switcher here */}
+              {activeView === "market" && (
+                <span className="relative top-[1px] text-xs font-mono text-slate-500 dark:text-slate-400">
+                  {snapshot?.priceAsOf ?? "--"}
+                </span>
+              )}
            </div>
            <div className="flex items-center gap-2">
               {activeView === "account" && (
@@ -1210,11 +2587,11 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                      isActive
-                        ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-slate-900/60"
-                        : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                    }`}
+	                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
+	                      isActive
+	                        ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
+	                        : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
+	                    }`}
                     onClick={() => setPortfolioTab(tab.key)}
                   >
                     <span className="material-icons-outlined text-base">{tab.icon}</span>
@@ -1226,7 +2603,11 @@ export function Dashboard({ account, onLock }: DashboardProps) {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-0 scroll-smooth">
+        <div
+          className={`flex-1 p-0 scroll-smooth ${
+            activeView === "market" ? "overflow-hidden" : "overflow-y-auto"
+          }`}
+        >
           
           {/* View: Account */}
           {activeView === "account" && (
@@ -1265,13 +2646,13 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                           <SummaryCard label="行情更新" value={snapshot.priceAsOf ?? "--"} />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                          <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
                             <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">数据状态</div>
                             <p className="text-sm text-slate-700 dark:text-slate-300">
                               {snapshot.priceAsOf ? `价格更新至 ${snapshot.priceAsOf}` : "暂无行情数据"}
                             </p>
                           </div>
-                          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                          <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
                             <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">风险提示</div>
                             <p className="text-sm text-slate-700 dark:text-slate-300">
                               {snapshot.riskWarnings.length > 0
@@ -1279,7 +2660,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                                 : "暂无触发预警"}
                             </p>
                           </div>
-                          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                          <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
                             <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">快速动作</div>
                             <p className="text-sm text-slate-700 dark:text-slate-300">刷新行情 / 导入流水</p>
                           </div>
@@ -1322,7 +2703,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         </FormGroup>
                       </div>
 
-                      <div className="border-t border-slate-100 dark:border-slate-800" />
+                      <div className="border-t border-slate-100 dark:border-border-dark" />
 
                       <FormGroup label="新建组合">
                         <div className="flex gap-2 items-center">
@@ -1363,9 +2744,9 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
                   {snapshot && (
                     <>
-                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 mb-6">
-                        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-                          <thead className="bg-slate-50 dark:bg-slate-900">
+                      <div className="overflow-x-auto border border-slate-200 dark:border-border-dark mb-6">
+                        <table className="min-w-full divide-y divide-slate-200 dark:divide-border-dark">
+                          <thead className="bg-slate-50 dark:bg-background-dark">
                             <tr>
                               {["代码", "名称", "类型", "数量", "成本", "现价", "市值", "盈亏", "权重", "操作"].map((h) => (
                                 <th
@@ -1388,7 +2769,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                               snapshot.positions.map((pos) => (
                                 <tr
                                   key={pos.position.id}
-                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group"
+                                  className="hover:bg-slate-50 dark:hover:bg-background-dark/70 transition-colors group"
                                 >
                                   <td className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 font-mono">
                                     {pos.position.symbol}
@@ -1449,7 +2830,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         </table>
                       </div>
 
-                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 border-t border-slate-200 dark:border-slate-800">
+                      <div className="bg-slate-50 dark:bg-background-dark p-4 border-t border-slate-200 dark:border-border-dark">
                         <div className="flex items-center justify-between mb-4">
                           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
                             <span className="material-icons-outlined text-primary text-base">edit_note</span>
@@ -1556,7 +2937,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                             className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                               isActive
                                 ? "bg-primary text-white border-primary"
-                                : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                                : "bg-white dark:bg-surface-dark text-slate-500 dark:text-slate-300 border-slate-200 dark:border-border-dark hover:text-slate-900 dark:hover:text-white"
                             }`}
                             onClick={() => setPerformanceRange(range.key)}
                           >
@@ -1611,13 +2992,21 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         />
                       </div>
 
-                      {dataQuality && <DataQualityCard quality={dataQuality} />}
-
-                      {performance.reason && (
-                        <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4 text-sm text-slate-600 dark:text-slate-300">
-                          {performance.reason}
-                        </div>
+                      {dataQuality && (
+                        <DataQualityCard
+                          quality={dataQuality}
+                          onOpenMarketDataStatus={() => {
+                            setActiveView("other");
+                            setOtherTab("data-status");
+                          }}
+                        />
                       )}
+
+	                      {performance.reason && (
+	                        <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4 text-sm text-slate-600 dark:text-slate-300">
+	                          {performance.reason}
+	                        </div>
+	                      )}
 
                       {performanceSeries ? (
                         <PerformanceChart series={performanceSeries} />
@@ -1676,9 +3065,9 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         <EmptyState message="暂无贡献数据。" />
                       )}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
-                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">TWR</div>
+	                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+	                        <div className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+	                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">TWR</div>
                           <DescriptionItem
                             label="区间"
                             value={formatDateRange(
@@ -1697,8 +3086,8 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                             )}
                           />
                         </div>
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
-                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">MWR</div>
+	                        <div className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+	                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">MWR</div>
                           <DescriptionItem
                             label="区间"
                             value={formatDateRange(
@@ -1725,8 +3114,8 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
               {portfolioTab === "trades" && (
                 <Panel>
-                  <div className="mb-2 rounded-none border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 overflow-hidden">
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-slate-700">
+	                  <div className="mb-2 rounded-none border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-surface-dark overflow-hidden">
+	                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-border-dark">
                       <div className="flex items-center gap-2">
                         <span className="material-icons-outlined text-base text-primary">
                           swap_horiz
@@ -1765,7 +3154,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                           className="text-[11px] w-40 rounded-none border-0 !bg-transparent dark:!bg-transparent text-primary focus:ring-0 focus:border-transparent pl-2 pr-6"
                           disabled={!activePortfolio}
                         />
-                        <span className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
+                        <span className="h-4 w-px bg-slate-200 dark:bg-border-dark" />
                         <span>
                           筛选结果 {filteredLedgerEntries.length} / {ledgerEntries.length}
                         </span>
@@ -1825,7 +3214,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                   )}
 
                   {activePortfolio && (isLedgerFormOpen || Boolean(ledgerForm.id)) && (
-                    <div className="mb-3 bg-cyan-50/45 dark:bg-cyan-950/20 border border-slate-200 dark:border-slate-800 border-t-0 border-l-2 border-r-2 border-b-2 border-l-cyan-300 border-r-cyan-300 border-b-cyan-300 dark:border-l-cyan-800 dark:border-r-cyan-800 dark:border-b-cyan-800 rounded-none p-3">
+                    <div className="mb-3 bg-cyan-50/45 dark:bg-cyan-950/20 border border-slate-200 dark:border-border-dark border-t-0 border-l-2 border-r-2 border-b-2 border-l-cyan-300 border-r-cyan-300 border-b-cyan-300 dark:border-l-cyan-800 dark:border-r-cyan-800 dark:border-b-cyan-800 rounded-none p-3">
                       <LedgerForm
                         form={ledgerForm}
                         baseCurrency={activePortfolio.baseCurrency}
@@ -1871,7 +3260,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                             className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                               isActive
                                 ? "bg-primary text-white border-primary"
-                                : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                                : "bg-white dark:bg-surface-dark text-slate-500 dark:text-slate-300 border-slate-200 dark:border-border-dark hover:text-slate-900 dark:hover:text-white"
                             }`}
                             onClick={() => setPerformanceRange(range.key)}
                           >
@@ -1933,7 +3322,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         )}
                         {snapshot && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-4">
+                            <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200/80 dark:border-border-dark rounded-lg p-4">
                               <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">
                                 集中度 (HHI)
                               </div>
@@ -1973,9 +3362,9 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                   {/* Exposure Table */}
                   <section>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 pl-1">资产敞口分布</h3>
-                    <div className="overflow-hidden border border-slate-200 dark:border-slate-800">
-                      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-                         <thead className="bg-slate-50 dark:bg-slate-900">
+                    <div className="overflow-hidden border border-slate-200 dark:border-border-dark">
+                      <table className="min-w-full divide-y divide-slate-200 dark:divide-border-dark">
+                         <thead className="bg-slate-50 dark:bg-background-dark">
                            <tr>
                              <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">资产类别</th>
                              <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">权重</th>
@@ -2008,7 +3397,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                      <div className="space-y-4">
                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                          {snapshot.riskLimits.map(limit => (
-                           <div key={limit.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
+                           <div key={limit.id} className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark p-4 flex flex-col justify-between hover:border-slate-300 dark:hover:border-border-dark/80 transition-colors">
                               <div className="flex justify-between items-start mb-2">
                                  <div>
                                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{formatRiskLimitTypeLabel(limit.limitType)}</div>
@@ -2016,14 +3405,14 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                                  </div>
                                  <div className="text-xl font-mono font-light text-slate-700 dark:text-slate-300">{formatPct(limit.threshold)}</div>
                               </div>
-                              <div className="flex justify-end gap-3 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                              <div className="flex justify-end gap-3 mt-4 pt-3 border-t border-slate-100 dark:border-border-dark">
                                  <button onClick={() => handleEditRiskLimit(limit)} className="text-xs font-medium text-slate-500 hover:text-primary transition-colors">编辑</button>
                                  <button onClick={() => handleDeleteRiskLimit(limit.id)} className="text-xs font-medium text-slate-500 hover:text-red-500 transition-colors">删除</button>
                               </div>
                            </div>
                          ))}
                          {/* Add New Limit Form */}
-                         <div className="bg-slate-50 dark:bg-slate-900/30 border border-dashed border-slate-300 dark:border-slate-700 p-4 flex flex-col gap-3">
+                         <div className="bg-slate-50 dark:bg-background-dark border border-dashed border-slate-300 dark:border-border-dark p-4 flex flex-col gap-3">
                            <div className="text-xs font-bold text-slate-400 uppercase text-center">{riskForm.id ? "编辑限额" : "新增限额"}</div>
                            <Select 
                               value={riskForm.limitType} 
@@ -2059,17 +3448,1947 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
           {/* View: Market */}
           {activeView === "market" && (
-            <PlaceholderPanel 
-              title={navItems.find(n => n.key === activeView)?.label ?? ""}
-              description={navItems.find(n => n.key === activeView)?.description ?? ""}
-            />
+            <>
+              <div className="h-full min-h-0 flex">
+                {/* Explorer Sidebar */}
+                <aside
+                  className="flex-shrink-0 min-h-0 flex flex-col border-r border-border-light dark:border-border-dark bg-white/70 dark:bg-background-dark/65 backdrop-blur-lg"
+                  style={{ width: marketExplorerWidth }}
+                >
+                  <div className="pt-0 pb-0 border-b border-border-light dark:border-border-dark space-y-0">
+                    <div className="w-full rounded-none border border-slate-200 dark:border-border-dark bg-white/75 dark:bg-panel-dark/80 backdrop-blur shadow-sm dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_12px_rgba(0,0,0,0.35)] focus-within:border-primary/60">
+                      <div className="flex items-center px-0 bg-transparent dark:bg-white/5">
+                        <div className="flex-1 relative">
+                          <span className="material-icons-outlined absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-lg">
+                            search
+                          </span>
+                          <Input
+                            value={marketSearchQuery}
+                            onChange={(e) => setMarketSearchQuery(e.target.value)}
+                            placeholder="搜索标的（代码/名称）"
+                            className="pl-9 pr-2 !rounded-none !border-0 !bg-transparent dark:!bg-transparent shadow-none focus:ring-0 focus:border-transparent dark:placeholder:text-slate-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="relative border-t border-slate-200/70 dark:border-border-dark/70">
+                        <PopoverSelect
+                          value={marketCollectionSelectValue}
+                          onChangeValue={(value) => {
+                            setMarketSearchQuery("");
+                            setMarketSelectedSymbol(null);
+
+                            if (value === "builtin:holdings") {
+                              setMarketScope("holdings");
+                              setMarketSelectedTag(null);
+                              return;
+                            }
+
+                            if (value === "builtin:watchlist") {
+                              setMarketScope("tags");
+                              void handleSelectTag("watchlist:all");
+                              return;
+                            }
+
+                            if (value.startsWith("tag:")) {
+                              setMarketScope("tags");
+                              void handleSelectTag(value.slice("tag:".length));
+                            }
+                          }}
+                          options={[
+                            { value: "builtin:holdings", label: "持仓" },
+                            { value: "builtin:watchlist", label: "自选" },
+                            ...marketTags
+                              .filter(
+                                (tag) =>
+                                  !(
+                                    tag.source === "watchlist" &&
+                                    tag.tag === "watchlist:all"
+                                  )
+                              )
+                              .map((tag) => {
+                                const sourceLabel =
+                                  tag.source === "provider"
+                                    ? "提供方"
+                                    : tag.source === "user"
+                                      ? "用户"
+                                      : "自选";
+                                return {
+                                  value: `tag:${tag.tag}`,
+                                  label: `${sourceLabel}：${tag.tag}`
+                                };
+                              })
+                          ]}
+                          className="w-full"
+                          buttonClassName="!rounded-none !border-0 !bg-transparent dark:!bg-transparent !shadow-none hover:!bg-transparent dark:hover:!bg-transparent pl-9 pr-8"
+                        />
+
+                        <IconButton
+                          icon="filter_alt"
+                          label={
+                            marketFiltersActiveCount > 0
+                              ? `筛选（${marketFiltersActiveCount}）`
+                              : "筛选"
+                          }
+                          onClick={() => setMarketFiltersOpen(true)}
+                          size="sm"
+                          className="absolute right-0 top-0 z-10 h-6 w-6 rounded-none border-0 border-l border-slate-200/70 dark:border-border-dark/70"
+                        />
+                      </div>
+                    </div>
+
+                    {marketCatalogSyncSummary && marketSearchQuery.trim() && (
+                      <div className="px-3 text-[11px] text-slate-500 dark:text-slate-400">
+                        {marketCatalogSyncSummary}
+                      </div>
+                    )}
+
+                    {(marketWatchlistLoading || marketQuotesLoading) && (
+                      <div className="px-3 flex items-center justify-end text-[10px] leading-4 text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center gap-2">
+                          {marketWatchlistLoading && <span>自选更新中…</span>}
+                          {marketQuotesLoading && <span>报价加载中…</span>}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    {marketEffectiveScope === "search" && (
+                      <div className="py-2">
+                        {marketSearchLoading && (
+                          <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                            搜索中...
+                          </div>
+                        )}
+                        {!marketSearchLoading && marketSearchQuery.trim() === "" && (
+                          <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                            输入关键词开始搜索（如 600519 / 贵州茅台 / 510300）。
+                          </div>
+                        )}
+                        {!marketSearchLoading &&
+                          marketSearchQuery.trim() !== "" &&
+                          marketSearchResults.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                              <div className="flex items-center justify-between gap-2">
+                                <span>未找到匹配标的（需先同步标的库）。</span>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon="download"
+                                  onClick={handleSyncInstrumentCatalog}
+                                  disabled={marketCatalogSyncing}
+                                >
+                                  {marketCatalogSyncing ? "同步中" : "同步"}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                        {!marketSearchLoading &&
+                          marketSearchQuery.trim() !== "" &&
+                          marketSearchResults.length > 0 &&
+                          marketSearchResultsFiltered.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                              筛选后无结果。
+                            </div>
+                          )}
+
+                        {marketSearchResultsFiltered.map((item) => {
+                          const isActive = item.symbol === marketSelectedSymbol;
+                          const quote = marketQuotesBySymbol[item.symbol] ?? null;
+                          const tone = getCnChangeTone(quote?.changePct ?? null);
+                          return (
+                            <button
+                              key={item.symbol}
+                              type="button"
+                              onClick={() => handleSelectInstrument(item.symbol)}
+                              className={`w-full text-left px-3 py-2 border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0 transition-colors ${
+                                isActive
+                                  ? "bg-primary/10"
+                                  : "hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                                    {item.name ?? item.symbol}
+                                  </div>
+                                  <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                    {item.symbol}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="font-mono text-sm text-slate-900 dark:text-white">
+                                    {formatNumber(quote?.close ?? null, 2)}
+                                  </div>
+                                  <div
+                                    className={`font-mono text-[11px] ${getCnToneTextClass(tone)}`}
+                                  >
+                                    {formatSignedPctNullable(quote?.changePct ?? null)}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {marketEffectiveScope === "holdings" && (
+                      <div className="py-2">
+                        {!snapshot && (
+                          <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                            暂无组合数据。
+                          </div>
+                        )}
+                        {snapshot && marketHoldingsSymbols.length === 0 && (
+                          <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                            当前组合没有股票/ETF 持仓。
+                          </div>
+                        )}
+                        {snapshot &&
+                          marketHoldingsSymbols.length > 0 &&
+                          marketHoldingsSymbolsFiltered.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                              筛选后无结果。
+                            </div>
+                          )}
+                        {marketFilteredListSymbols.map((symbol) => {
+                          const isActive = symbol === marketSelectedSymbol;
+                          const quote = marketQuotesBySymbol[symbol] ?? null;
+                          const tone = getCnChangeTone(quote?.changePct ?? null);
+                          const name = marketNameBySymbol.get(symbol) ?? symbol;
+                          return (
+                            <button
+                              key={symbol}
+                              type="button"
+                              onClick={() => handleSelectInstrument(symbol)}
+                              className={`w-full text-left px-3 py-2 border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0 transition-colors ${
+                                isActive
+                                  ? "bg-primary/10"
+                                  : "hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                                    {name}
+                                  </div>
+                                  <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                    {symbol}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="font-mono text-sm text-slate-900 dark:text-white">
+                                    {formatNumber(quote?.close ?? null, 2)}
+                                  </div>
+                                  <div
+                                    className={`font-mono text-[11px] ${getCnToneTextClass(tone)}`}
+                                  >
+                                    {formatSignedPctNullable(quote?.changePct ?? null)}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {marketEffectiveScope === "tags" && (
+                      <div className="py-2">
+                        {!marketSelectedTag && (
+                          <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                            请选择一个集合（如 watchlist:all、industry:白酒）。
+                          </div>
+                        )}
+
+                        {marketSelectedTag && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setMarketSelectedSymbol(null)}
+                              className={`w-full text-left px-3 py-2 border-b border-slate-200/70 dark:border-border-dark/70 transition-colors ${
+                                marketSelectedSymbol === null
+                                  ? "bg-primary/10"
+                                  : "hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                                    整体（市值加权）
+                                  </div>
+                                  <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                    {marketSelectedTagAggregate
+                                      ? `覆盖 ${marketSelectedTagAggregate.includedCount}/${marketSelectedTagAggregate.totalCount}`
+                                      : "--"}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div
+                                    className={`font-mono text-sm ${getCnToneTextClass(
+                                      getCnChangeTone(
+                                        marketSelectedTagAggregate?.weightedChangePct ??
+                                          null
+                                      )
+                                    )}`}
+                                  >
+                                    {formatSignedPctNullable(
+                                      marketSelectedTagAggregate?.weightedChangePct ?? null
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    流通市值权重
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+
+                            {marketTagMembersLoading && (
+                              <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                                加载集合成分中...
+                              </div>
+                            )}
+
+                            {!marketTagMembersLoading &&
+                              marketFilteredListSymbols.map((symbol) => {
+                                const isActive = symbol === marketSelectedSymbol;
+                                const quote = marketQuotesBySymbol[symbol] ?? null;
+                                const tone = getCnChangeTone(quote?.changePct ?? null);
+                                const name = marketNameBySymbol.get(symbol) ?? symbol;
+                                const canRemove =
+                                  marketSelectedTag.startsWith("watchlist:");
+                                return (
+                                  <button
+                                    key={symbol}
+                                    type="button"
+                                    onClick={() => handleSelectInstrument(symbol)}
+                                    className={`w-full text-left px-3 py-2 border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0 transition-colors ${
+                                      isActive
+                                        ? "bg-primary/10"
+                                        : "hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                                          {name}
+                                        </div>
+                                        <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                          {symbol}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-start gap-2">
+                                        <div className="text-right">
+                                          <div className="font-mono text-sm text-slate-900 dark:text-white">
+                                            {formatNumber(quote?.close ?? null, 2)}
+                                          </div>
+                                          <div
+                                            className={`font-mono text-[11px] ${getCnToneTextClass(tone)}`}
+                                          >
+                                            {formatSignedPctNullable(
+                                              quote?.changePct ?? null
+                                            )}
+                                          </div>
+                                        </div>
+                                        {canRemove && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              void handleRemoveWatchlistItem(symbol);
+                                            }}
+                                            className="mt-0.5 text-slate-400 hover:text-red-500"
+                                            aria-label={`从自选移除 ${symbol}`}
+                                            title="从自选移除"
+                                          >
+                                            <span className="material-icons-outlined text-base">
+                                              close
+                                            </span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </aside>
+
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabIndex={0}
+                  onPointerDown={handleMarketExplorerResizePointerDown}
+                  onKeyDown={handleMarketExplorerResizeKeyDown}
+                  className="w-1 flex-shrink-0 cursor-col-resize bg-transparent hover:bg-primary/20 focus:bg-primary/25 focus:outline-none"
+                  title="拖拽调节宽度（←/→ 可微调）"
+                />
+
+                {/* Detail Workspace */}
+                <main className="flex-1 min-w-0 min-h-0 overflow-hidden bg-white/40 dark:bg-background-dark/40">
+                  {!marketSelectedSymbol &&
+                    !(marketEffectiveScope === "tags" && marketSelectedTag) && (
+                    <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400">
+                      请选择左侧列表中的标的或集合。
+                    </div>
+                  )}
+
+                  {marketEffectiveScope === "tags" && marketSelectedTag && !marketSelectedSymbol && (
+                    <div className="h-full min-h-0 flex flex-col">
+                      <div className="flex-shrink-0 border-b border-border-light dark:border-border-dark bg-white/70 dark:bg-background-dark/70 backdrop-blur-lg px-6 py-5">
+                        <div className="flex items-start justify-between gap-6">
+                          <div>
+                            <div className="text-3xl font-extrabold text-slate-900 dark:text-white">
+                              {marketSelectedTag}
+                            </div>
+                            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                              市值加权口径：流通市值（circ_mv）；缺价格/缺市值成分会被剔除并重归一化权重。
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <div
+                              className={`text-2xl font-mono font-semibold ${getCnToneTextClass(
+                                getCnChangeTone(
+                                  marketSelectedTagAggregate?.weightedChangePct ?? null
+                                )
+                              )}`}
+                            >
+                              {formatSignedPctNullable(
+                                marketSelectedTagAggregate?.weightedChangePct ?? null
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              {marketSelectedTagAggregate
+                                ? `覆盖 ${marketSelectedTagAggregate.includedCount}/${marketSelectedTagAggregate.totalCount}（剔除 ${marketSelectedTagAggregate.excludedCount}）`
+                                : "--"}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon="format_list_bulleted"
+                                onClick={() => setMarketTagMembersModalOpen(true)}
+                                disabled={marketTagMembersLoading || marketTagMembers.length === 0}
+                              >
+                                查看成分
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon="folder_open"
+                                onClick={() => setMarketTagPickerOpen(true)}
+                              >
+                                切换集合
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 min-h-0 px-6 py-4 space-y-4">
+                        <div className="rounded-xl border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/80 backdrop-blur p-4">
+                          <div className="flex items-start justify-between gap-6">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                                整体走势（派生指数，base=100）
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                权重口径：优先使用上一交易日 `circ_mv`，缺失时回退当日 `circ_mv`；缺价格/缺市值成分会被剔除并重归一化权重。
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <div
+                                className={`font-mono text-sm font-semibold ${getCnToneTextClass(
+                                  marketSelectedTagSeriesTone
+                                )}`}
+                              >
+                                {formatSignedPctNullable(marketSelectedTagSeriesReturnPct)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 relative group h-10 flex items-center justify-center">
+                            <div className="flex flex-col items-center gap-0.5 group-hover:opacity-0 transition-opacity">
+                              <div className="text-[13px] font-semibold text-slate-900 dark:text-white">
+                                {formatCnDate(
+                                  marketTagChartHoverDate ??
+                                    marketTagSeriesResult?.endDate ??
+                                    null
+                                )}
+                              </div>
+                              {marketTagChartHoverPrice !== null && (
+                                <div className="text-[14px] font-mono font-semibold text-primary">
+                                  {formatNumber(marketTagChartHoverPrice, 2)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-1 rounded-full bg-slate-100/80 dark:bg-black/40 backdrop-blur px-2 py-1">
+                                {marketChartRanges.map((item) => {
+                                  const isActive = marketChartRange === item.key;
+                                  return (
+                                    <button
+                                      key={item.key}
+                                      type="button"
+                                      className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                                        isActive
+                                          ? "bg-primary/20 text-primary dark:bg-white/20 dark:text-white"
+                                          : "text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
+                                      }`}
+                                      onClick={() =>
+                                        setMarketChartRange(item.key as MarketChartRangeKey)
+                                      }
+                                    >
+                                      {item.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="h-52 overflow-hidden">
+                            {marketTagSeriesLoading && (
+                              <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+                                加载中...
+                              </div>
+                            )}
+                            {!marketTagSeriesLoading && marketTagSeriesError && (
+                              <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+                                {marketTagSeriesError}
+                              </div>
+                            )}
+                            {!marketTagSeriesLoading &&
+                              !marketTagSeriesError &&
+                              marketTagSeriesBars.length === 0 && (
+                                <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+                                  暂无区间数据（需要 daily_prices + daily_basics/circ_mv）。
+                                </div>
+                              )}
+                            {!marketTagSeriesLoading &&
+                              !marketTagSeriesError &&
+                              marketTagSeriesBars.length > 0 && (
+                                <ChartErrorBoundary
+                                  resetKey={`tag-series:${marketSelectedTag}:${marketChartRange}`}
+                                >
+                                  <MarketAreaChart
+                                    bars={marketTagSeriesBars}
+                                    tone={marketSelectedTagSeriesTone}
+                                    onHoverDatumChange={(datum) => {
+                                      setMarketTagChartHoverDate(datum?.date ?? null);
+                                      setMarketTagChartHoverPrice(datum?.close ?? null);
+                                    }}
+                                  />
+                                </ChartErrorBoundary>
+                              )}
+                          </div>
+
+                          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                            <span>{marketTagSeriesLatestCoverageLabel}</span>
+                            {marketTagSeriesResult &&
+                              marketTagSeriesResult.usedMemberCount <
+                                marketTagSeriesResult.memberCount && (
+                                <span>
+                                  仅使用前 {marketTagSeriesResult.usedMemberCount}/
+                                  {marketTagSeriesResult.memberCount}
+                                  {marketTagSeriesResult.truncated ? "（总数已截断）" : ""}
+                                </span>
+                              )}
+                          </div>
+                        </div>
+
+                        {marketTagMembersLoading && (
+                          <div className="text-sm text-slate-500 dark:text-slate-400">
+                            加载中...
+                          </div>
+                        )}
+
+                        {!marketTagMembersLoading && marketTagMembers.length === 0 && (
+                          <div className="text-sm text-slate-500 dark:text-slate-400">
+                            暂无成分。
+                          </div>
+                        )}
+
+                        {!marketTagMembersLoading && marketTagMembers.length > 0 && (
+                          <div className="rounded-xl border border-slate-200 dark:border-border-dark overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead className="bg-white/80 dark:bg-background-dark/80 backdrop-blur">
+                                <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-border-dark">
+                                  <th className="text-left font-semibold px-4 py-2">
+                                    Symbol
+                                  </th>
+                                  <th className="text-right font-semibold px-4 py-2">
+                                    Price
+                                  </th>
+                                  <th className="text-right font-semibold px-4 py-2">
+                                    Change%
+                                  </th>
+                                  <th className="text-right font-semibold px-4 py-2">
+                                    circ_mv
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sortTagMembersByChangePct(
+                                  marketTagMembers,
+                                  marketQuotesBySymbol
+                                )
+                                  .slice(0, 20)
+                                  .map((symbol) => {
+                                    const quote = marketQuotesBySymbol[symbol] ?? null;
+                                    const tone = getCnChangeTone(quote?.changePct ?? null);
+                                    return (
+                                      <tr
+                                        key={symbol}
+                                        className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0 hover:bg-slate-50 dark:hover:bg-background-dark/70 cursor-pointer"
+                                        onClick={() => handleSelectInstrument(symbol)}
+                                      >
+                                        <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">
+                                          {symbol}
+                                        </td>
+                                        <td className="px-4 py-2 text-right font-mono text-xs text-slate-900 dark:text-white">
+                                          {formatNumber(quote?.close ?? null, 2)}
+                                        </td>
+                                        <td
+                                          className={`px-4 py-2 text-right font-mono text-xs ${getCnToneTextClass(
+                                            tone
+                                          )}`}
+                                        >
+                                          {formatSignedPctNullable(quote?.changePct ?? null)}
+                                        </td>
+                                        <td className="px-4 py-2 text-right font-mono text-xs text-slate-500 dark:text-slate-400">
+                                          {formatNumber(quote?.circMv ?? null, 2)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {!marketTagMembersLoading && marketTagMembers.length > 20 && (
+                          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                            仅展示前 20 个标的（共 {marketTagMembers.length}）。点击“查看成分”查看完整列表。
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {marketSelectedSymbol && (
+                    <div className="h-full min-h-0 grid grid-rows-[1.3fr_5.7fr_3fr]">
+                      <div className="min-h-0 border-b border-border-light dark:border-border-dark bg-white/70 dark:bg-background-dark/70 backdrop-blur-lg px-6 py-4">
+                        <div className="flex items-start justify-between gap-6">
+                          <div className="min-w-0">
+                            <div className="flex items-baseline gap-3 flex-wrap">
+                              <div className="text-4xl font-extrabold text-slate-900 dark:text-white">
+                                {marketSelectedProfile?.symbol ?? marketSelectedSymbol}
+                              </div>
+                              <div className="text-lg font-semibold text-slate-700 dark:text-slate-200 truncate">
+                                {marketSelectedProfile?.name ?? "--"}
+                              </div>
+                            </div>
+                            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                              {marketSelectedProfile?.market ?? "--"} ·{" "}
+                              {marketSelectedProfile?.currency ?? "--"} ·{" "}
+                              {marketSelectedProfile?.assetClass ?? "--"}
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-4">
+                            <div className="flex flex-col items-end gap-1">
+                              <MarketQuoteHeader quote={marketSelectedQuote} />
+                            </div>
+                            <div className="flex flex-col items-end gap-2 pt-1">
+                              <div className="flex items-center gap-2">
+                                {marketEffectiveScope === "tags" && marketSelectedTag && (
+                                  <IconButton
+                                    icon="arrow_back"
+                                    label="返回集合"
+                                    onClick={() => setMarketSelectedSymbol(null)}
+                                  />
+                                )}
+                                <IconButton
+                                  icon="star"
+                                  label="加入自选"
+                                  onClick={handleAddSelectedToWatchlist}
+                                  disabled={!marketSelectedProfile}
+                                />
+                                <IconButton
+                                  icon="info"
+                                  label="标的详情"
+                                  onClick={() => setMarketInstrumentDetailsOpen(true)}
+                                  disabled={!marketSelectedProfile}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="min-h-0 px-6 pt-3 pb-3 flex flex-col">
+                        <div className="flex-shrink-0 pb-1">
+                          <div className="relative group h-9">
+                            <div className="absolute inset-0 z-0 flex items-center justify-center">
+                              <div className="flex flex-col items-center gap-0.5 group-hover:opacity-0 transition-opacity">
+                                <div className="text-[13px] font-semibold text-slate-900 dark:text-white">
+                                  {formatCnDate(
+                                    marketChartHoverDate ??
+                                      marketSelectedQuote?.tradeDate ??
+                                      marketLatestBar?.date ??
+                                      null
+                                  )}
+                                </div>
+                                {marketChartHoverPrice !== null && (
+                                  <div className="text-[14px] font-mono font-semibold text-primary">
+                                    {formatNumber(marketChartHoverPrice, 2)}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-1 rounded-full bg-slate-100/80 dark:bg-black/40 backdrop-blur px-2 py-1">
+                                  {marketChartRanges.map((item) => {
+                                    const isActive = marketChartRange === item.key;
+                                    return (
+                                      <button
+                                        key={item.key}
+                                        type="button"
+                                        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                                          isActive
+                                            ? "bg-primary/20 text-primary dark:bg-white/20 dark:text-white"
+                                            : "text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
+                                        }`}
+                                        onClick={() =>
+                                          setMarketChartRange(item.key as MarketChartRangeKey)
+                                        }
+                                      >
+                                        {item.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="relative z-10 h-full flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-4 text-[11px] text-slate-500 dark:text-slate-400">
+                                <div className="flex items-baseline gap-1">
+                                  <span>持仓价</span>
+                                  <span className="font-mono text-xs text-slate-900 dark:text-white">
+                                    {marketHoldingUnitCost === null
+                                      ? "-"
+                                      : formatNumber(marketHoldingUnitCost, 2)}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-baseline gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span>目标价</span>
+                                <span
+                                  className="font-mono text-xs text-slate-900 dark:text-white"
+                                  title="可用用户标签 target:xx.xx 设置"
+                                >
+                                  {marketTargetPrice === null
+                                    ? "-"
+                                    : formatNumber(marketTargetPrice, 2)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-h-0 overflow-hidden relative">
+                          {!marketChartHasEnoughData && (
+                            <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+                              {marketChartLoading ? "加载中..." : "暂无足够数据绘制图表。"}
+                            </div>
+                          )}
+
+                          {marketChartHasEnoughData && (
+                            <ChartErrorBoundary
+                              resetKey={`symbol:${marketSelectedSymbol}:${marketChartRange}:${marketVolumeMode}`}
+                            >
+                              <MarketAreaChart
+                                bars={marketChartBars}
+                                tone={getCnChangeTone(
+                                  marketSelectedQuote?.changePct ?? null
+                                )}
+                                onHoverDatumChange={(datum) => {
+                                  setMarketChartHoverDate(datum?.date ?? null);
+                                  setMarketChartHoverPrice(datum?.close ?? null);
+                                }}
+                              />
+                            </ChartErrorBoundary>
+                          )}
+
+                          {marketChartLoading && marketChartHasEnoughData && (
+                            <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500 dark:text-slate-300 bg-white/40 dark:bg-black/20 backdrop-blur-sm">
+                              加载中...
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex-shrink-0 pt-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              {marketVolumeMode === "volume" ? "每日成交量" : "势能（moneyflow）"}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-xs font-mono text-slate-700 dark:text-slate-200">
+                                {marketVolumeMode === "volume" ? (
+                                  formatCnWanYiNullable(marketActiveVolume, 2, 0)
+                                ) : (
+                                  <>
+                                    {formatSignedCnWanYiNullable(marketActiveMoneyflowVol, 2, 0)}
+                                    {marketActiveMoneyflowRatio !== null && (
+                                      <span className="text-slate-400 dark:text-slate-500">
+                                        {" "}
+                                        · {(marketActiveMoneyflowRatio * 100).toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 rounded-full bg-slate-100/80 dark:bg-black/40 backdrop-blur px-1 py-1">
+                                <button
+                                  type="button"
+                                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                                    marketVolumeMode === "volume"
+                                      ? "bg-primary/20 text-primary dark:bg-white/20 dark:text-white"
+                                      : "text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
+                                  }`}
+                                  onClick={() => setMarketVolumeMode("volume")}
+                                >
+                                  总成交量
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                                    marketVolumeMode === "moneyflow"
+                                      ? "bg-primary/20 text-primary dark:bg-white/20 dark:text-white"
+                                      : "text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
+                                  }`}
+                                  onClick={() => setMarketVolumeMode("moneyflow")}
+                                  title="势能来自行情数据源（Tushare moneyflow）。占比=|势能|/总成交量。"
+                                >
+                                  势能
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-1 h-12 overflow-hidden">
+                            <MarketVolumeMiniChart
+                              bars={marketChartBars}
+                              mode={marketVolumeMode}
+                              activeDate={marketChartHoverDate}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="min-h-0 px-6 pb-6">
+                        <div className="h-full border-t border-slate-200 dark:border-border-dark">
+                          <table className="w-full text-sm">
+                            <tbody className="divide-y divide-slate-200 dark:divide-border-dark">
+                              <tr>
+                                <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
+                                  今日开盘价
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatNumber(marketLatestBar?.open ?? null, 2)}
+                                </td>
+                                <td className="py-2 pl-6 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                  区间最高价
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatNumber(marketRangeSummary.rangeHigh, 2)}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
+                                  今日最高价
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatNumber(marketLatestBar?.high ?? null, 2)}
+                                </td>
+                                <td className="py-2 pl-6 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                  区间最低价
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatNumber(marketRangeSummary.rangeLow, 2)}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
+                                  今日最低价
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatNumber(marketLatestBar?.low ?? null, 2)}
+                                </td>
+                                <td className="py-2 pl-6 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                  平均成交量
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatCnWanYiNullable(marketRangeSummary.avgVolume, 2, 0)}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
+                                  成交量
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatCnWanYiNullable(marketLatestBar?.volume ?? null, 2, 0)}
+                                </td>
+                                <td className="py-2 pl-6 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                  区间收益率
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatSignedPctNullable(marketRangeSummary.rangeReturn)}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
+                                  前收
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatNumber(marketSelectedQuote?.prevClose ?? null, 2)}
+                                </td>
+                                <td className="py-2 pl-6 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                  流通市值
+                                </td>
+                                <td className="py-2 text-right font-mono text-sm text-slate-900 dark:text-white">
+                                  {formatCnWanYiNullable(marketSelectedQuote?.circMv ?? null, 2, 0)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </main>
+              </div>
+
+              <Modal
+                open={marketFiltersOpen}
+                title="筛选"
+                onClose={() => setMarketFiltersOpen(false)}
+              >
+                <div className="space-y-4">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    当前筛选对「搜索 / 持仓」生效；集合成分（Tags）暂不做元数据筛选。
+                  </div>
+
+                  <FormGroup label="市场（market）">
+                    <div className="flex items-center gap-2">
+                      {([
+                        { key: "all", label: "全部" },
+                        { key: "CN", label: "CN" }
+                      ] as const).map((item) => {
+                        const isActive = marketFilterMarket === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                              isActive
+                                ? "bg-primary/20 text-primary dark:bg-white/20 dark:text-white"
+                                : "bg-slate-100 dark:bg-background-dark/80 text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
+                            }`}
+                            onClick={() => setMarketFilterMarket(item.key)}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </FormGroup>
+
+                  <FormGroup label="资产类别（assetClass）">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
+                      {([
+                        { key: "stock", label: "stock" },
+                        { key: "etf", label: "etf" }
+                      ] as const).map((item) => (
+                        <label key={item.key} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={marketFilterAssetClasses.includes(item.key)}
+                            onChange={() =>
+                              setMarketFilterAssetClasses((prev) =>
+                                prev.includes(item.key)
+                                  ? prev.filter((v) => v !== item.key)
+                                  : [...prev, item.key]
+                              )
+                            }
+                          />
+                          <span className="font-mono text-xs">{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </FormGroup>
+
+                  <FormGroup label="标的类型（kind，仅搜索结果）">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
+                      {([
+                        { key: "stock", label: "stock" },
+                        { key: "fund", label: "fund" }
+                      ] as const).map((item) => (
+                        <label key={item.key} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={marketFilterKinds.includes(item.key)}
+                            onChange={() =>
+                              setMarketFilterKinds((prev) =>
+                                prev.includes(item.key)
+                                  ? prev.filter((v) => v !== item.key)
+                                  : [...prev, item.key]
+                              )
+                            }
+                          />
+                          <span className="font-mono text-xs">{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </FormGroup>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="restart_alt"
+                      onClick={resetMarketFilters}
+                      disabled={marketFiltersActiveCount === 0}
+                    >
+                      重置
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon="done"
+                      onClick={() => setMarketFiltersOpen(false)}
+                    >
+                      完成
+                    </Button>
+                  </div>
+                </div>
+              </Modal>
+
+              <Modal
+                open={marketInstrumentDetailsOpen}
+                title="标的详情"
+                onClose={() => setMarketInstrumentDetailsOpen(false)}
+              >
+                {!marketSelectedSymbol && (
+                  <div className="text-sm text-slate-500 dark:text-slate-400">
+                    暂无选中标的。
+                  </div>
+                )}
+
+                {marketSelectedSymbol && marketSelectedProfile === null && (
+                  <div className="text-sm text-slate-500 dark:text-slate-400">
+                    载入中或该标的暂无详情：{" "}
+                    <span className="font-mono">{marketSelectedSymbol}</span>
+                  </div>
+                )}
+
+                {marketSelectedProfile && (
+                  <div className="space-y-5">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="text-lg font-semibold text-slate-900 dark:text-white">
+                          {marketSelectedProfile.name ?? "--"}
+                        </span>
+                        <span className="font-mono text-sm text-slate-600 dark:text-slate-300">
+                          {marketSelectedProfile.symbol}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        提供方：{marketSelectedProfile.provider} · 类型：{" "}
+                        {marketSelectedProfile.kind} · 资产类别：{" "}
+                        {marketSelectedProfile.assetClass ?? "--"} · 市场：{" "}
+                        {marketSelectedProfile.market ?? "--"} · 币种：{" "}
+                        {marketSelectedProfile.currency ?? "--"}
+                      </div>
+                    </div>
+
+                    <FormGroup label="自选">
+                      <div className="flex gap-2">
+                        <Input
+                          value={marketWatchlistGroupDraft}
+                          onChange={(e) => setMarketWatchlistGroupDraft(e.target.value)}
+                          placeholder="自选分组（可选）"
+                          className="text-xs"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="star"
+                          onClick={handleAddSelectedToWatchlist}
+                        >
+                          加入自选
+                        </Button>
+                      </div>
+                    </FormGroup>
+
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        提供方标签（可加入自动拉取筛选）
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {marketSelectedProfile.tags.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketSelectedProfile.tags.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => handleAddTargetTag(tag)}
+                            className="px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                            title="加入标签筛选"
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        用户标签
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {marketSelectedUserTags.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketSelectedUserTags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleAddTargetTag(tag)}
+                              className="hover:underline"
+                              title="加入标签筛选"
+                            >
+                              {tag}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveUserTag(tag)}
+                              className="text-slate-400 hover:text-red-500"
+                              aria-label={`移除标签 ${tag}`}
+                              title="移除标签"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          value={marketUserTagDraft}
+                          onChange={(e) => setMarketUserTagDraft(e.target.value)}
+                          placeholder="例如：user:核心 / theme:AI"
+                          className="text-xs"
+                        />
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon="add"
+                          onClick={handleAddUserTag}
+                          disabled={!marketUserTagDraft.trim()}
+                        >
+                          添加
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                          原始字段
+                        </div>
+                        <button
+                          type="button"
+                          className="text-xs text-slate-600 dark:text-slate-300 hover:underline"
+                          onClick={() => setMarketShowProviderData((prev) => !prev)}
+                        >
+                          {marketShowProviderData ? "隐藏" : "显示"}
+                        </button>
+                      </div>
+                      {marketShowProviderData && (
+                        <pre className="max-h-96 overflow-auto rounded-md bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-border-dark p-3 text-xs font-mono text-slate-700 dark:text-slate-200">
+                          {JSON.stringify(marketSelectedProfile.providerData, null, 2)}
+                        </pre>
+                      )}
+                      {!marketShowProviderData && (
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          用于调试与字段映射。
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </Modal>
+
+              <Modal
+                open={marketTagPickerOpen}
+                title="选择集合（Tags）"
+                onClose={() => setMarketTagPickerOpen(false)}
+              >
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={marketTagPickerQuery}
+                      onChange={(e) => setMarketTagPickerQuery(e.target.value)}
+                      placeholder="搜索 tag（例如 watchlist / industry / 白酒）"
+                      className="text-sm"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="refresh"
+                      onClick={() => refreshMarketTags(marketTagPickerQuery)}
+                      disabled={marketTagsLoading}
+                    >
+                      刷新
+                    </Button>
+                  </div>
+
+                  {marketTagsLoading && (
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      加载中...
+                    </div>
+                  )}
+
+                  {!marketTagsLoading && marketTags.length === 0 && (
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      暂无可用集合。请先同步标的库或添加自选/用户标签。
+                    </div>
+                  )}
+
+                  {!marketTagsLoading && marketTags.length > 0 && (
+                    <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                      {marketTags.map((tag) => {
+                        const isActive = marketSelectedTag === tag.tag;
+                        return (
+                          <button
+                            key={`${tag.source}:${tag.tag}`}
+                            type="button"
+                            onClick={() => {
+                              setMarketTagPickerOpen(false);
+                              setMarketScope("tags");
+                              void handleSelectTag(tag.tag);
+                            }}
+                            className={`w-full text-left px-3 py-2 border-b border-slate-200 dark:border-border-dark last:border-b-0 transition-colors ${
+                              isActive
+                                ? "bg-primary/10"
+                                : "hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-mono text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                                  {tag.tag}
+                                </div>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  {tag.source}
+                                </div>
+                              </div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                {tag.memberCount}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </Modal>
+
+              <Modal
+                open={marketTagMembersModalOpen}
+                title={`成分股 · ${marketSelectedTag ?? "--"}`}
+                onClose={() => setMarketTagMembersModalOpen(false)}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-mono">
+                      {marketTagMembers.length} symbols
+                    </span>
+                    <span>
+                      {marketSelectedTagAggregate
+                        ? `覆盖 ${marketSelectedTagAggregate.includedCount}/${marketSelectedTagAggregate.totalCount}（剔除 ${marketSelectedTagAggregate.excludedCount}）`
+                        : "--"}
+                    </span>
+                  </div>
+
+                  {marketTagMembersLoading && (
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      加载中...
+                    </div>
+                  )}
+
+                  {!marketTagMembersLoading && marketTagMembers.length === 0 && (
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      暂无成分。
+                    </div>
+                  )}
+
+                  {!marketTagMembersLoading && marketTagMembers.length > 0 && (
+                    <div className="rounded-md border border-slate-200 dark:border-border-dark overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-white dark:bg-background-dark">
+                          <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-border-dark">
+                            <th className="text-left font-semibold px-4 py-2">
+                              Symbol
+                            </th>
+                            <th className="text-right font-semibold px-4 py-2">
+                              Price
+                            </th>
+                            <th className="text-right font-semibold px-4 py-2">
+                              Change%
+                            </th>
+                            <th className="text-right font-semibold px-4 py-2">
+                              circ_mv
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortTagMembersByChangePct(
+                            marketTagMembers,
+                            marketQuotesBySymbol
+                          )
+                            .slice(0, 2000)
+                            .map((symbol) => {
+                              const quote = marketQuotesBySymbol[symbol] ?? null;
+                              const tone = getCnChangeTone(quote?.changePct ?? null);
+                              return (
+                                <tr
+                                  key={symbol}
+                                  className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0 hover:bg-slate-50 dark:hover:bg-background-dark/70 cursor-pointer"
+                                  onClick={() => {
+                                    setMarketTagMembersModalOpen(false);
+                                    void handleSelectInstrument(symbol);
+                                  }}
+                                >
+                                  <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">
+                                    {symbol}
+                                  </td>
+                                  <td className="px-4 py-2 text-right font-mono text-xs text-slate-900 dark:text-white">
+                                    {formatNumber(quote?.close ?? null, 2)}
+                                  </td>
+                                  <td
+                                    className={`px-4 py-2 text-right font-mono text-xs ${getCnToneTextClass(
+                                      tone
+                                    )}`}
+                                  >
+                                    {formatSignedPctNullable(quote?.changePct ?? null)}
+                                  </td>
+                                  <td className="px-4 py-2 text-right font-mono text-xs text-slate-500 dark:text-slate-400">
+                                    {formatCnWanYiNullable(quote?.circMv ?? null, 2, 0)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {!marketTagMembersLoading && marketTagMembers.length > 2000 && (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      仅展示前 2000 个标的（共 {marketTagMembers.length}）。
+                    </div>
+                  )}
+                </div>
+              </Modal>
+
+              {/*
+              <div className="space-y-8 max-w-6xl">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm text-slate-700 dark:text-slate-200">
+                    最新行情日期：
+                    <span className="ml-2 font-mono font-medium">
+                      {snapshot?.priceAsOf ?? "--"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="refresh"
+                      onClick={refreshMarketTargets}
+                      disabled={marketTargetsLoading}
+                    >
+                      刷新 Targets
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="sync"
+                      onClick={refreshMarketWatchlist}
+                      disabled={marketWatchlistLoading}
+                    >
+                      刷新自选
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        标的库（Tushare）
+                      </h3>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon="download"
+                        onClick={handleSyncInstrumentCatalog}
+                        disabled={marketCatalogSyncing}
+                      >
+                        {marketCatalogSyncing ? "同步中..." : "同步"}
+                      </Button>
+                    </div>
+                    {marketCatalogSyncSummary && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        {marketCatalogSyncSummary}
+                      </div>
+                    )}
+                    <FormGroup label="搜索（代码 / 名称）">
+                      <Input
+                        value={marketSearchQuery}
+                        onChange={(e) => setMarketSearchQuery(e.target.value)}
+                        placeholder="例如：600519 / 贵州茅台 / 510300"
+                      />
+                    </FormGroup>
+                    <div className="border border-slate-200 dark:border-border-dark rounded-md overflow-hidden">
+                      <div className="max-h-72 overflow-auto">
+                        {marketSearchLoading && (
+                          <div className="p-3 text-xs text-slate-500 dark:text-slate-400">
+                            搜索中...
+                          </div>
+                        )}
+                        {!marketSearchLoading &&
+                          marketSearchQuery.trim() === "" && (
+                            <div className="p-3 text-xs text-slate-500 dark:text-slate-400">
+                              输入关键词开始搜索（需先同步标的库）。
+                            </div>
+                          )}
+                        {!marketSearchLoading &&
+                          marketSearchQuery.trim() !== "" &&
+                          marketSearchResults.length === 0 && (
+                            <div className="p-3 text-xs text-slate-500 dark:text-slate-400">
+                              未找到匹配标的。
+                            </div>
+                          )}
+                        {!marketSearchLoading &&
+                          marketSearchResults.map((item) => {
+                            const isActive = item.symbol === marketSelectedSymbol;
+                            const tagsPreview = item.tags.slice(0, 3);
+                            return (
+                              <button
+                                key={item.symbol}
+                                type="button"
+                                onClick={() => handleSelectInstrument(item.symbol)}
+                                className={`w-full text-left px-3 py-2 border-b border-slate-200 dark:border-border-dark last:border-b-0 transition-colors ${
+                                  isActive
+                                    ? "bg-primary/10"
+                                    : "hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                    {item.symbol}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {item.kind}
+                                  </span>
+                                </div>
+                                <div className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                                  {item.name ?? "--"}
+                                </div>
+                                {tagsPreview.length > 0 && (
+                                  <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                    {tagsPreview.join(" · ")}
+                                    {item.tags.length > tagsPreview.length
+                                      ? " · …"
+                                      : ""}
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        标的详情
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="star"
+                          onClick={handleAddSelectedToWatchlist}
+                          disabled={!marketSelectedProfile}
+                        >
+                          加入自选
+                        </Button>
+                      </div>
+                    </div>
+
+                    {!marketSelectedSymbol && (
+                      <div className="text-sm text-slate-500 dark:text-slate-400">
+                        从左侧搜索结果中选择一个标的查看详情。
+                      </div>
+                    )}
+
+                    {marketSelectedSymbol && marketSelectedProfile === null && (
+                      <div className="text-sm text-slate-500 dark:text-slate-400">
+                        载入中或该标的暂无详情：{" "}
+                        <span className="font-mono">{marketSelectedSymbol}</span>
+                      </div>
+                    )}
+
+                    {marketSelectedProfile && (
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="text-lg font-semibold text-slate-900 dark:text-white">
+                              {marketSelectedProfile.name ?? "--"}
+                            </span>
+                            <span className="font-mono text-sm text-slate-600 dark:text-slate-300">
+                              {marketSelectedProfile.symbol}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            provider: {marketSelectedProfile.provider} · kind:{" "}
+                            {marketSelectedProfile.kind} · assetClass:{" "}
+                            {marketSelectedProfile.assetClass ?? "--"} · market:{" "}
+                            {marketSelectedProfile.market ?? "--"} · currency:{" "}
+                            {marketSelectedProfile.currency ?? "--"}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            Provider 标签（点击可加入 Targets 过滤）
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {marketSelectedProfile.tags.length === 0 && (
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                --
+                              </span>
+                            )}
+                            {marketSelectedProfile.tags.map((tag) => (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => handleAddTargetTag(tag)}
+                                className="px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                                title="加入 Targets.tagFilters"
+                              >
+                                {tag}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            用户标签
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {marketSelectedUserTags.length === 0 && (
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                --
+                              </span>
+                            )}
+                            {marketSelectedUserTags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddTargetTag(tag)}
+                                  className="hover:underline"
+                                  title="加入 Targets.tagFilters"
+                                >
+                                  {tag}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveUserTag(tag)}
+                                  className="text-slate-400 hover:text-red-500"
+                                  aria-label={`移除标签 ${tag}`}
+                                  title="移除标签"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <Input
+                              value={marketUserTagDraft}
+                              onChange={(e) => setMarketUserTagDraft(e.target.value)}
+                              placeholder="例如：my:watch / sector:新能源"
+                              className="text-xs"
+                            />
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              icon="add"
+                              onClick={handleAddUserTag}
+                              disabled={
+                                !marketSelectedSymbol || !marketUserTagDraft.trim()
+                              }
+                            >
+                              添加
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            className="text-xs text-slate-600 dark:text-slate-300 hover:underline"
+                            onClick={() =>
+                              setMarketShowProviderData((prev) => !prev)
+                            }
+                          >
+                            {marketShowProviderData ? "隐藏" : "显示"} 原始字段
+                          </button>
+                          {marketShowProviderData && (
+                            <pre className="max-h-72 overflow-auto rounded-md bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-border-dark p-3 text-xs font-mono text-slate-700 dark:text-slate-200">
+                              {JSON.stringify(
+                                marketSelectedProfile.providerData,
+                                null,
+                                2
+                              )}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        自选列表
+                      </h3>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="refresh"
+                        onClick={refreshMarketWatchlist}
+                        disabled={marketWatchlistLoading}
+                      >
+                        刷新
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <Input
+                        value={marketWatchlistSymbolDraft}
+                        onChange={(e) =>
+                          setMarketWatchlistSymbolDraft(e.target.value)
+                        }
+                        placeholder="代码（如 600519.SH）"
+                        className="font-mono text-xs"
+                      />
+                      <Input
+                        value={marketWatchlistGroupDraft}
+                        onChange={(e) =>
+                          setMarketWatchlistGroupDraft(e.target.value)
+                        }
+                        placeholder="分组（可选）"
+                        className="text-xs"
+                      />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon="add"
+                        onClick={handleAddWatchlistItem}
+                        disabled={!marketWatchlistSymbolDraft.trim()}
+                      >
+                        加入
+                      </Button>
+                    </div>
+
+                    <div className="border border-slate-200 dark:border-border-dark rounded-md overflow-hidden">
+                      <div className="max-h-72 overflow-auto">
+                        {marketWatchlistLoading && (
+                          <div className="p-3 text-xs text-slate-500 dark:text-slate-400">
+                            加载中...
+                          </div>
+                        )}
+                        {!marketWatchlistLoading && marketWatchlistItems.length === 0 && (
+                          <div className="p-3 text-xs text-slate-500 dark:text-slate-400">
+                            暂无自选标的。
+                          </div>
+                        )}
+                        {!marketWatchlistLoading &&
+                          marketWatchlistItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 dark:border-border-dark last:border-b-0"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                  {item.symbol}
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                                  {item.name ?? item.groupName ?? "--"}
+                                </div>
+                              </div>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                icon="delete"
+                                onClick={() => handleRemoveWatchlistItem(item.symbol)}
+                              >
+                                移除
+                              </Button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        目标池编辑
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="refresh"
+                          onClick={refreshMarketTargets}
+                          disabled={marketTargetsLoading}
+                        >
+                          刷新
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon="save"
+                          onClick={handleSaveTargets}
+                          disabled={marketTargetsSaving}
+                        >
+                          保存
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={marketTargetsConfig.includeHoldings}
+                          onChange={(e) =>
+                            setMarketTargetsConfig((prev) => ({
+                              ...prev,
+                              includeHoldings: e.target.checked
+                            }))
+                          }
+                        />
+                        <span>包含持仓</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={marketTargetsConfig.includeWatchlist}
+                          onChange={(e) =>
+                            setMarketTargetsConfig((prev) => ({
+                              ...prev,
+                              includeWatchlist: e.target.checked
+                            }))
+                          }
+                        />
+                        <span>包含自选</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={marketTargetsConfig.includeRegistryAutoIngest}
+                          onChange={(e) =>
+                            setMarketTargetsConfig((prev) => ({
+                              ...prev,
+                              includeRegistryAutoIngest: e.target.checked
+                            }))
+                          }
+                        />
+                        <span>包含注册标的</span>
+                      </label>
+                    </div>
+
+                    <FormGroup label="手动添加标的">
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          value={marketTargetsSymbolDraft}
+                          onChange={(e) =>
+                            setMarketTargetsSymbolDraft(e.target.value)
+                          }
+                          placeholder="600519.SH"
+                          className="font-mono text-xs flex-1 min-w-[220px]"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="add"
+                          onClick={handleAddTargetSymbol}
+                          disabled={!marketTargetsSymbolDraft.trim()}
+                        >
+                          添加
+                        </Button>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {marketTargetsConfig.explicitSymbols.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketTargetsConfig.explicitSymbols.map((symbol) => (
+                          <span
+                            key={symbol}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                          >
+                            <span className="font-mono">{symbol}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTargetSymbol(symbol)}
+                              className="text-slate-400 hover:text-red-500"
+                              aria-label={`移除 symbol ${symbol}`}
+                              title="移除"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </FormGroup>
+
+                    <FormGroup label="标签筛选">
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          value={marketTargetsTagDraft}
+                          onChange={(e) => setMarketTargetsTagDraft(e.target.value)}
+                          placeholder="例如：industry:白酒 / fund_type:股票型"
+                          className="text-xs flex-1 min-w-[220px]"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="add"
+                          onClick={() => handleAddTargetTag()}
+                          disabled={!marketTargetsTagDraft.trim()}
+                        >
+                          添加
+                        </Button>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {marketTargetsConfig.tagFilters.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketTargetsConfig.tagFilters.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                          >
+                            <span>{tag}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTargetTag(tag)}
+                              className="text-slate-400 hover:text-red-500"
+                              aria-label={`移除过滤器 ${tag}`}
+                              title="移除"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </FormGroup>
+
+                    <div className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-background-dark p-3 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
+                        <span>预览（基于已保存配置）</span>
+                        <span className="font-mono">
+                          {marketTargetsPreview
+                            ? `${marketTargetsPreview.symbols.length} symbols`
+                            : "--"}
+                        </span>
+                      </div>
+                      <div className="max-h-56 overflow-auto">
+                        {!marketTargetsPreview && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            点击“刷新”加载预览。
+                          </div>
+                        )}
+                        {marketTargetsPreview &&
+                          marketTargetsPreview.symbols.slice(0, 200).map((row) => (
+                            <div
+                              key={row.symbol}
+                              className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                            >
+                              <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                {row.symbol}
+                              </span>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                                {formatTargetsReasons(row.reasons)}
+                              </span>
+                            </div>
+                          ))}
+                        {marketTargetsPreview &&
+                          marketTargetsPreview.symbols.length > 200 && (
+                            <div className="pt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                              仅展示前 200 个标的（共{" "}
+                              {marketTargetsPreview.symbols.length}）。
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </Panel>
+              */}
+            </>
           )}
 
-          {/* View: Other Tabs */}
+          {/* View: Other */}
           {activeView === "other" && (
             <Panel>
-              <div className="flex items-center gap-3 border-b border-slate-200 dark:border-border-dark pb-2">
-                <div role="tablist" aria-label="\u5176\u4ed6\u529f\u80fd" className="flex items-center gap-2">
+              <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
+                <div className="flex items-center gap-1 overflow-x-auto px-3">
                   {otherTabs.map((tab) => {
                     const isActive = otherTab === tab.key;
                     return (
@@ -2078,10 +5397,10 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         type="button"
                         role="tab"
                         aria-selected={isActive}
-                        className={`px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors ${
+                          className={`flex-none min-w-[140px] flex items-center justify-center px-4 py-2 text-sm font-semibold text-center whitespace-nowrap transition-colors border-b-2 ${
                           isActive
-                            ? "text-primary border-primary"
-                            : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-700 dark:hover:text-slate-200"
+                            ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
+                            : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
                         }`}
                         onClick={() => setOtherTab(tab.key)}
                       >
@@ -2091,52 +5410,780 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                   })}
                 </div>
               </div>
-            </Panel>
-          )}
 
-          {/* View: Other / Data Import */}
-          {activeView === "other" && otherTab === "data-import" && (
-            <Panel>
-               <div className="mb-6 bg-blue-50 dark:bg-blue-900/10 border-l-4 border-blue-500 p-3 text-sm text-blue-800 dark:text-blue-300">
-                  最新行情日期：<span className="font-mono font-medium">{snapshot?.priceAsOf ?? "--"}</span>
-               </div>
-               
-               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl">
-                  <section className="space-y-4">
-                     <h3 className="font-bold text-slate-900 dark:text-white">CSV 导入</h3>
-                     <FormGroup label="持仓 CSV">
-                        <div className="flex gap-2">
-                          <Input value={holdingsCsvPath ?? ""} readOnly className="flex-1 text-xs font-mono" />
-                          <Button variant="secondary" onClick={() => handleChooseCsv("holdings")}>选择</Button>
-                          <Button variant="primary" onClick={handleImportHoldings} disabled={!holdingsCsvPath || !activePortfolio}>导入</Button>
+              <div className="pt-6 space-y-6 max-w-5xl">
+                {otherTab === "data-management" && (
+                  <>
+                    <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark overflow-hidden">
+                      <div className="divide-y divide-slate-200/70 dark:divide-border-dark/70">
+                        <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              行情日期
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {snapshot?.priceAsOf ?? "--"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              最近一次拉取
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {latestMarketIngestRun
+                                ? formatDateTime(latestMarketIngestRun.startedAt)
+                                : "--"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              拉取状态
+                            </div>
+                            {latestMarketIngestRun ? (
+                              <div className="mt-0.5 flex items-center gap-2">
+                                <span
+                                  className={`font-mono text-sm ${formatIngestRunTone(
+                                    latestMarketIngestRun.status
+                                  )}`}
+                                >
+                                  {formatIngestRunStatusLabel(latestMarketIngestRun.status)}
+                                </span>
+                                {!latestMarketIngestRun.finishedAt && (
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    进行中
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                                --
+                              </div>
+                            )}
+                          </div>
                         </div>
-                     </FormGroup>
-                     <FormGroup label="价格 CSV">
-                        <div className="flex gap-2">
-                          <Input value={pricesCsvPath ?? ""} readOnly className="flex-1 text-xs font-mono" />
-                          <Button variant="secondary" onClick={() => handleChooseCsv("prices")}>选择</Button>
-                          <Button variant="primary" onClick={handleImportPrices} disabled={!pricesCsvPath}>导入</Button>
-                        </div>
-                     </FormGroup>
-                  </section>
 
-                  <section className="space-y-4">
-                     <h3 className="font-bold text-slate-900 dark:text-white">Tushare 拉取</h3>
-                     <FormGroup label="日期范围">
-                        <div className="flex gap-2 items-center">
-                           <Input type="date" value={ingestStartDate} onChange={(e) => setIngestStartDate(e.target.value)} />
-                           <span className="text-slate-400">-</span>
-                           <Input type="date" value={ingestEndDate} onChange={(e) => setIngestEndDate(e.target.value)} />
+                        <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              令牌来源
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketTokenStatus
+                                ? formatMarketTokenSource(marketTokenStatus.source)
+                                : "--"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              令牌已配置
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketTokenStatus?.configured === undefined ||
+                              marketTokenStatus?.configured === null
+                                ? "--"
+                                : marketTokenStatus.configured
+                                  ? "是"
+                                  : "否"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              截至日
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {latestMarketIngestRun?.asOfTradeDate ?? "--"}
+                            </div>
+                          </div>
                         </div>
-                     </FormGroup>
-                     <div className="pt-2">
-                        <Button variant="primary" onClick={handleIngestTushare} disabled={!snapshot || snapshot.positions.length === 0} className="w-full">
-                           开始拉取
+
+                        <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              自动拉取标的
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketTargetsPreview
+                                ? marketTargetsPreview.symbols.length
+                                : "--"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              手动添加
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketTargetsConfig.explicitSymbols.length}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              标签筛选
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketTargetsConfig.tagFilters.length}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <section className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-bold text-slate-900 dark:text-white">
+                          数据来源
+                        </h3>
+                      </div>
+
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-2 space-y-2">
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-center">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <PopoverSelect
+                              value={marketTokenProvider}
+                              onChangeValue={setMarketTokenProvider}
+                              options={[{ value: "tushare", label: "Tushare" }]}
+                              className="w-[180px]"
+                            />
+                            <span className="ml-3 text-[11px] text-slate-500 dark:text-slate-400">
+                              当前提供商：{marketTokenProvider === "tushare" ? "Tushare" : "--"}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="open_in_new"
+                              onClick={handleOpenMarketProvider}
+                              className="min-w-[110px]"
+                            >
+                              访问
+                            </Button>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              icon="save"
+                              onClick={handleSaveMarketToken}
+                              disabled={marketTokenSaving}
+                              className="min-w-[110px]"
+                            >
+                              保存
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-center">
+                          <Input
+                            type="password"
+                            value={marketTokenDraft}
+                            onChange={(e) => setMarketTokenDraft(e.target.value)}
+                            placeholder="输入数据源令牌"
+                            className="font-mono text-xs"
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="delete"
+                              onClick={handleClearMarketToken}
+                              disabled={marketTokenSaving}
+                              className="min-w-[110px]"
+                            >
+                              清除
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="check_circle"
+                              onClick={handleTestMarketToken}
+                              disabled={marketTokenTesting}
+                              className="min-w-[110px]"
+                            >
+                              测试连接
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-bold text-slate-900 dark:text-white">
+                          目标池编辑
+                        </h3>
+                      </div>
+
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-4">
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          说明：目标池用于组合估值/缺口回补的快速路径；全市场（Universe，近 3 年）由定时跑批维护，也可在下方「手动拉取」触发。
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          <PopoverSelect
+                            value={autoIngestScopeValue}
+                            onChangeValue={handleChangeAutoIngestScope}
+                            options={[
+                              { value: "holdings+watchlist+registry", label: "持仓 + 自选 + 注册标的" },
+                              { value: "holdings+watchlist", label: "持仓 + 自选" },
+                              { value: "holdings+registry", label: "持仓 + 注册标的" },
+                              { value: "watchlist+registry", label: "自选 + 注册标的" },
+                              { value: "holdings", label: "仅持仓" },
+                              { value: "watchlist", label: "仅自选" },
+                              { value: "registry", label: "仅注册标的" }
+                            ]}
+                            className="w-[220px]"
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="refresh"
+                            onClick={refreshMarketTargets}
+                            disabled={marketTargetsLoading}
+                          >
+                            刷新
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            icon="save"
+                            onClick={handleSaveTargets}
+                            disabled={marketTargetsSaving}
+                          >
+                            保存
+                          </Button>
+                        </div>
+
+                        <FormGroup label="手动添加标的">
+                          <div className="flex gap-2">
+                            <Input
+                              value={marketTargetsSymbolDraft}
+                              onChange={(e) =>
+                                setMarketTargetsSymbolDraft(e.target.value)
+                              }
+                              placeholder="600519.SH"
+                              className="font-mono text-xs"
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="add"
+                              onClick={handleAddTargetSymbol}
+                              disabled={!marketTargetsSymbolDraft.trim()}
+                            >
+                              添加
+                            </Button>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {marketTargetsConfig.explicitSymbols.length === 0 && (
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                --
+                              </span>
+                            )}
+                            {marketTargetsConfig.explicitSymbols.map((symbol) => (
+                              <span
+                                key={symbol}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                              >
+                                <span className="font-mono">{symbol}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveTargetSymbol(symbol)}
+                                  className="text-slate-400 hover:text-red-500"
+                                  aria-label={`移除 symbol ${symbol}`}
+                                  title="移除"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </FormGroup>
+
+                        <FormGroup label="标签筛选">
+                          <div className="flex gap-2">
+                            <Input
+                              value={marketTargetsTagDraft}
+                              onChange={(e) =>
+                                setMarketTargetsTagDraft(e.target.value)
+                              }
+                              placeholder="输入标签"
+                              className="text-xs"
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="add"
+                              onClick={() => handleAddTargetTag()}
+                              disabled={!marketTargetsTagDraft.trim()}
+                            >
+                              添加
+                            </Button>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {marketTargetsConfig.tagFilters.length === 0 && (
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                --
+                              </span>
+                            )}
+                            {marketTargetsConfig.tagFilters.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                              >
+                                <span>{tag}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveTargetTag(tag)}
+                                  className="text-slate-400 hover:text-red-500"
+                                  aria-label={`移除过滤器 ${tag}`}
+                                  title="移除"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </FormGroup>
+
+                        <FormGroup label="临时标的（自动）">
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            从「市场行情」搜索选中但不在目标池的标的，会临时加入并参与后续回补；默认 7 天未续期会自动清理。
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            {marketTempTargetsLoading && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                加载中...
+                              </div>
+                            )}
+                            {!marketTempTargetsLoading && marketTempTargets.length === 0 && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                --
+                              </div>
+                            )}
+                            {!marketTempTargetsLoading &&
+                              marketTempTargets.map((item) => (
+                                <div
+                                  key={item.symbol}
+                                  className="flex items-center justify-between gap-3 rounded-md border border-slate-200 dark:border-border-dark px-2 py-1"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                      {item.symbol}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      到期 {formatDateTime(item.expiresAt)}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      icon="push_pin"
+                                      onClick={() => handlePromoteTempTarget(item.symbol)}
+                                      disabled={marketTargetsSaving}
+                                    >
+                                      转长期
+                                    </Button>
+                                    <Button
+                                      variant="danger"
+                                      size="sm"
+                                      icon="delete"
+                                      onClick={() => handleRemoveTempTarget(item.symbol)}
+                                    >
+                                      移除
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </FormGroup>
+
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-background-dark p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
+                            <span>预览</span>
+                            <span className="font-mono">
+                              {marketTargetsPreview
+                                ? marketTargetsPreview.symbols.length
+                                : "--"}
+                            </span>
+                          </div>
+                          <div className="max-h-56 overflow-auto">
+                            {marketTargetsPreview &&
+                              marketTargetsPreview.symbols.slice(0, 200).map((row) => (
+                                <div
+                                  key={row.symbol}
+                                  className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                >
+                                  <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                    {row.symbol}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                                    {formatTargetsReasons(row.reasons)}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-bold text-slate-900 dark:text-white">
+                          手动拉取
+                        </h3>
+                      </div>
+
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3">
+                        <div className="flex items-center gap-2 overflow-x-auto">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            icon="play_arrow"
+                            onClick={() => handleTriggerMarketIngest("targets")}
+                            disabled={marketIngestTriggering}
+                          >
+                            拉取目标池
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="play_arrow"
+                            onClick={() => handleTriggerMarketIngest("universe")}
+                            disabled={marketIngestTriggering}
+                          >
+                            拉取全市场
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="playlist_play"
+                            onClick={() => handleTriggerMarketIngest("both")}
+                            disabled={marketIngestTriggering}
+                          >
+                            全部拉取
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="monitoring"
+                            onClick={() => setOtherTab("data-status")}
+                          >
+                            查看记录
+                          </Button>
+                        </div>
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {otherTab === "data-status" && (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        数据状态
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+                        <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+                          行情更新
+                        </div>
+                        <div className="text-sm text-slate-700 dark:text-slate-300">
+                          {snapshot?.priceAsOf ? (
+                            <span className="font-mono">{snapshot.priceAsOf}</span>
+                          ) : (
+                            "--"
+                          )}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+                        <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+                          覆盖率
+                        </div>
+                        <div className="text-sm text-slate-700 dark:text-slate-300 font-mono">
+                          {formatPctNullable(dataQuality?.coverageRatio ?? null)}
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          缺失标的 {dataQuality?.missingSymbols.length ?? 0}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+                        <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+                          新鲜度
+                        </div>
+                        <div className="text-sm text-slate-700 dark:text-slate-300 font-mono">
+                          {dataQuality?.freshnessDays === null || dataQuality?.freshnessDays === undefined
+                            ? "--"
+                            : `${dataQuality.freshnessDays} 天`}
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          截至 {dataQuality?.asOfDate ?? "--"}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+                        <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+                          Token
+                        </div>
+                        <div className="text-sm text-slate-700 dark:text-slate-300 font-mono">
+                          {marketTokenStatus?.configured ? "已配置" : "未配置"}
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          来源{" "}
+                          {marketTokenStatus
+                            ? formatMarketTokenSource(marketTokenStatus.source)
+                            : "--"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {dataQuality?.missingSymbols && dataQuality.missingSymbols.length > 0 && (
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            缺失标的
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="play_arrow"
+                            onClick={() => handleTriggerMarketIngest("targets")}
+                            disabled={
+                              marketIngestTriggering || !marketTokenStatus?.configured
+                            }
+                          >
+                            拉取目标池
+                          </Button>
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {marketTokenStatus?.configured
+                            ? "将按 Targets 配置回补缺失行情。"
+                            : "请先在「数据管理」配置 token。"}
+                        </div>
+                        <div className="max-h-32 overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70 bg-slate-50/50 dark:bg-background-dark/40">
+                          <div className="p-2 flex flex-wrap gap-1">
+                            {dataQuality.missingSymbols.slice(0, 200).map((symbol) => (
+                              <span
+                                key={symbol}
+                                className="px-2 py-1 rounded-full bg-white dark:bg-surface-dark border border-slate-200/60 dark:border-border-dark/60 text-[11px] font-mono text-slate-700 dark:text-slate-200"
+                              >
+                                {symbol}
+                              </span>
+                            ))}
+                            {dataQuality.missingSymbols.length > 200 && (
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 px-1 py-1">
+                                …共 {dataQuality.missingSymbols.length}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          拉取记录
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            {marketIngestRunsLoading
+                              ? "加载中..."
+                              : `${marketIngestRuns.length} 条记录`}
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="refresh"
+                            onClick={refreshMarketIngestRuns}
+                            disabled={marketIngestRunsLoading}
+                          >
+                            刷新
+                          </Button>
+                        </div>
+                      </div>
+
+                      {marketIngestRunsLoading && (
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          加载中...
+                        </div>
+                      )}
+
+                      {!marketIngestRunsLoading && marketIngestRuns.length === 0 && (
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          暂无拉取记录。
+                        </div>
+                      )}
+
+                      {!marketIngestRunsLoading && marketIngestRuns.length > 0 && (
+                        <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                          <table className="w-full text-sm">
+                            <thead className="bg-white dark:bg-background-dark sticky top-0">
+                              <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-border-dark">
+                                <th className="text-left font-semibold px-3 py-2">
+                                  时间
+                                </th>
+                                <th className="text-left font-semibold px-3 py-2">
+                                  范围
+                                </th>
+                                <th className="text-left font-semibold px-3 py-2">
+                                  状态
+                                </th>
+                                <th className="text-right font-semibold px-3 py-2">
+                                  写入
+                                </th>
+                                <th className="text-right font-semibold px-3 py-2">
+                                  错误
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {marketIngestRuns.slice(0, 200).map((run) => {
+                                const statusTone = formatIngestRunTone(run.status);
+                                return (
+                                  <tr
+                                    key={run.id}
+                                    className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
+                                  >
+                                    <td className="px-3 py-2">
+                                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        {formatDateTime(run.startedAt)}
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        {run.finishedAt
+                                          ? `耗时 ${formatDurationMs(
+                                              run.finishedAt - run.startedAt
+                                            )}`
+                                          : "进行中..."}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                                        截至 {run.asOfTradeDate ?? "--"}
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200">
+                                      <span className="font-mono">{formatIngestRunScopeLabel(run.scope)}</span>
+                                      <span className="text-slate-400 dark:text-slate-500">
+                                        {" "}
+                                        · {formatIngestRunModeLabel(run.mode)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-xs">
+                                      <span className={statusTone}>
+                                        {formatIngestRunStatusLabel(run.status)}
+                                      </span>
+                                      {run.errorMessage && (
+                                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                                          {run.errorMessage}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-xs font-mono text-slate-700 dark:text-slate-200">
+                                      {(run.inserted ?? 0) + (run.updated ?? 0)}
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-xs font-mono text-slate-700 dark:text-slate-200">
+                                      {run.errors ?? 0}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {otherTab === "test" && (
+                  <>
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-bold text-slate-900 dark:text-white">
+                          示例数据
+                        </h3>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="show_chart"
+                          onClick={() => setActiveView("market")}
+                        >
+                          打开市场行情
                         </Button>
-                        <p className="mt-2 text-xs text-slate-500">使用当前持仓代码拉取。请先设置 MYTRADER_TUSHARE_TOKEN。</p>
-                     </div>
-                  </section>
-               </div>
+                      </div>
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            icon="science"
+                            onClick={() => {
+                              void (async () => {
+                                await handleSeedMarketDemoData();
+                                setActiveView("market");
+                              })();
+                            }}
+                            disabled={marketDemoSeeding}
+                          >
+                            {marketDemoSeeding ? "注入中..." : "注入示例数据"}
+                          </Button>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-4">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        数据导入
+                      </h3>
+                      <div className="grid grid-cols-1 gap-8">
+                        <div className="space-y-4">
+                          <FormGroup label="持仓文件">
+                            <div className="flex gap-2">
+                              <Input
+                                value={holdingsCsvPath ?? ""}
+                                readOnly
+                                className="flex-1 text-xs font-mono"
+                              />
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleChooseCsv("holdings")}
+                              >
+                                选择
+                              </Button>
+                              <Button
+                                variant="primary"
+                                onClick={handleImportHoldings}
+                                disabled={!holdingsCsvPath || !activePortfolio}
+                              >
+                                导入
+                              </Button>
+                            </div>
+                          </FormGroup>
+                          <FormGroup label="价格文件">
+                            <div className="flex gap-2">
+                              <Input
+                                value={pricesCsvPath ?? ""}
+                                readOnly
+                                className="flex-1 text-xs font-mono"
+                              />
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleChooseCsv("prices")}
+                              >
+                                选择
+                              </Button>
+                              <Button
+                                variant="primary"
+                                onClick={handleImportPrices}
+                                disabled={!pricesCsvPath}
+                              >
+                                导入
+                              </Button>
+                            </div>
+                          </FormGroup>
+                        </div>
+                      </div>
+                    </section>
+                  </>
+                )}
+              </div>
             </Panel>
           )}
 
@@ -2214,6 +6261,52 @@ function PlaceholderPanel({ title, description }: { title: string, description: 
    )
 }
 
+function Modal({
+  open,
+  title,
+  onClose,
+  children
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    if (typeof window === "undefined") return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40"
+        aria-label="关闭弹层"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-xl border border-slate-200 dark:border-border-dark bg-white dark:bg-surface-dark shadow-2xl">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-border-dark bg-white/70 dark:bg-surface-dark/80 backdrop-blur">
+          <div className="text-sm font-semibold text-slate-900 dark:text-white">
+            {title}
+          </div>
+          <IconButton icon="close" label="关闭" onClick={onClose} />
+        </div>
+        <div className="p-4 overflow-auto max-h-[calc(85vh-52px)]">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormGroup({ label, children }: { label: React.ReactNode, children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -2234,7 +6327,7 @@ function Input({ className, ...props }: InputProps) {
 
   return (
     <input 
-      className={`block w-full rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-1.5 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 placeholder:text-slate-400 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${dateHintClass} ${className}`}
+      className={`block w-full rounded-md border-slate-300 dark:border-border-dark bg-white dark:bg-field-dark py-1.5 text-slate-900 dark:text-slate-100 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 placeholder:text-slate-400 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-background-dark ${dateHintClass} ${className}`}
       {...props}
     />
   );
@@ -2246,7 +6339,7 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 function Select({ className, options, ...props }: SelectProps) {
   return (
     <select
-      className={`block w-full rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-1.5 pl-3 pr-10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 ${className}`}
+      className={`block w-full rounded-md border-slate-300 dark:border-border-dark bg-white dark:bg-field-dark py-1.5 pl-3 pr-10 text-slate-900 dark:text-slate-100 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 ${className}`}
       {...props}
     >
       {options.map(opt => (
@@ -2256,17 +6349,125 @@ function Select({ className, options, ...props }: SelectProps) {
   );
 }
 
+interface PopoverSelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+function PopoverSelect({
+  value,
+  options,
+  onChangeValue,
+  disabled,
+  className,
+  buttonClassName
+}: {
+  value: string;
+  options: PopoverSelectOption[];
+  onChangeValue: (value: string) => void;
+  disabled?: boolean;
+  className?: string;
+  buttonClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  const selected = useMemo(
+    () => options.find((opt) => opt.value === value) ?? null,
+    [options, value]
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (rootRef.current && rootRef.current.contains(target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className={`relative ${className ?? ""}`}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`relative h-6 w-full rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark pl-2 pr-8 text-left text-xs text-slate-900 dark:text-slate-100 shadow-sm dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_10px_rgba(0,0,0,0.35)] hover:bg-slate-50 dark:hover:bg-surface-dark/80 transition-colors disabled:opacity-60 ${buttonClassName ?? ""}`}
+      >
+        <span className="block truncate pr-6">{selected?.label ?? "--"}</span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400">
+          expand_more
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50">
+          <div
+            role="listbox"
+            className="max-h-72 overflow-auto rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-surface-dark shadow-xl dark:shadow-black/60 p-1"
+          >
+            {options.map((opt) => {
+              const isActive = opt.value === value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  disabled={opt.disabled}
+                  onClick={() => {
+                    if (opt.disabled) return;
+                    setOpen(false);
+                    onChangeValue(opt.value);
+                  }}
+                  className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded text-left text-xs transition-colors ${
+                    opt.disabled
+                      ? "opacity-50 cursor-not-allowed"
+                      : isActive
+                        ? "bg-primary/15 text-slate-900 dark:text-white"
+                        : "hover:bg-slate-100 dark:hover:bg-background-dark/80 text-slate-700 dark:text-slate-200"
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {isActive && (
+                    <span className="material-icons-outlined text-base text-primary">
+                      check
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger';
   size?: 'sm' | 'md';
   icon?: string;
 }
 function Button({ children, variant = 'secondary', size = 'md', icon, className, ...props }: ButtonProps) {
-  const baseClass = "inline-flex items-center justify-center rounded font-medium !text-white transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
+  const baseClass = "inline-flex items-center justify-center rounded font-medium !text-white whitespace-nowrap break-keep shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
   
   const variants = {
     primary: "bg-primary border border-primary/90 shadow-md hover:bg-[#14b8ca] focus:ring-primary/70",
-    secondary: "bg-slate-500 border border-slate-400/80 shadow-md hover:bg-slate-400 dark:bg-slate-400 dark:hover:bg-slate-300 focus:ring-slate-300/70",
+    secondary: "bg-slate-500 border border-slate-400/80 shadow-md hover:bg-slate-400 dark:bg-surface-dark dark:border-border-dark dark:hover:bg-background-dark focus:ring-primary/50",
     danger: "bg-red-500 border border-red-400/90 shadow-md hover:bg-red-400 focus:ring-red-400/80"
   };
   
@@ -2315,7 +6516,7 @@ function IconButton({
       type="button"
       aria-label={label}
       title={label}
-      className={`inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 ${sizeClass} text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-border-dark ${sizeClass} text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       {...props}
     >
       <span className={`material-icons-outlined ${iconClass}`}>{icon}</span>
@@ -2325,15 +6526,409 @@ function IconButton({
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/10">
+    <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-background-dark px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-border-light/60 dark:ring-border-dark/40">
       {children}
     </span>
   );
 }
 
+function MarketQuoteHeader({ quote }: { quote: MarketQuote | null }) {
+  const tone = getCnChangeTone(quote?.changePct ?? null);
+  return (
+    <div className="text-right">
+      <div className="text-3xl font-mono font-semibold text-slate-900 dark:text-white">
+        {formatNumber(quote?.close ?? null, 2)}
+      </div>
+      <div className={`mt-1 font-mono text-sm ${getCnToneTextClass(tone)}`}>
+        {formatSignedNumberNullable(quote?.change ?? null, 2)}（
+        {formatSignedPctNullable(quote?.changePct ?? null)}）
+      </div>
+    </div>
+  );
+}
+
+class ChartErrorBoundary extends Component<
+  { children: React.ReactNode; resetKey?: string | number },
+  { error: string | null; lastResetKey?: string | number }
+> {
+  constructor(props: { children: React.ReactNode; resetKey?: string | number }) {
+    super(props);
+    this.state = { error: null, lastResetKey: props.resetKey };
+  }
+
+  static getDerivedStateFromProps(
+    props: { resetKey?: string | number },
+    state: { error: string | null; lastResetKey?: string | number }
+  ): { error: string | null; lastResetKey?: string | number } | null {
+    if (props.resetKey !== state.lastResetKey) {
+      return { error: null, lastResetKey: props.resetKey };
+    }
+    return null;
+  }
+
+  static getDerivedStateFromError(error: unknown): { error: string } {
+    return { error: toUserErrorMessage(error) };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[mytrader] MarketAreaChart crashed", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+          图表渲染失败：{this.state.error}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function MarketAreaChart({
+  bars,
+  tone,
+  onHoverDatumChange
+}: {
+  bars: MarketDailyBar[];
+  tone: ChangeTone;
+  onHoverDatumChange?: (datum: { date: string; close: number } | null) => void;
+}) {
+  const colors = getCnToneColors(tone);
+  const gradientId = useId();
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const hoverDatumRef = useRef<{ date: string; close: number } | null>(null);
+  const hoverIndexRef = useRef<number | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const latestClientXRef = useRef<number | null>(null);
+  const series = useMemo(
+    () =>
+      bars
+        .map((bar) => ({ date: bar.date, close: bar.close ?? null }))
+        .filter(
+          (bar): bar is { date: string; close: number } =>
+            bar.close !== null && Number.isFinite(bar.close)
+        ),
+    [bars]
+  );
+
+  if (series.length < 2) {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-slate-300">
+        暂无足够数据绘制图表。
+      </div>
+    );
+  }
+
+  const width = 800;
+  const height = 360;
+  const paddingLeft = 18;
+  const paddingRight = 72;
+  const paddingTop = 12;
+  const paddingBottom = 18;
+
+  const values = series.map((point) => point.close);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const geometry = useMemo(() => {
+    const points = series.map((point, idx) => {
+      const x = paddingLeft + (idx / (series.length - 1)) * chartWidth;
+      const y = paddingTop + (1 - (point.close - min) / span) * chartHeight;
+      return { x, y };
+    });
+    const path = points
+      .map((point, idx) => `${idx === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+      .join(" ");
+    const area = `${path} L ${points[points.length - 1].x} ${
+      height - paddingBottom
+    } L ${points[0].x} ${height - paddingBottom} Z`;
+    return { points, path, area };
+  }, [
+    chartHeight,
+    chartWidth,
+    height,
+    min,
+    paddingBottom,
+    paddingLeft,
+    paddingTop,
+    series,
+    span
+  ]);
+
+  const hoverPoint =
+    hoverIndex === null ? null : geometry.points[hoverIndex] ?? null;
+  const hoverDatum = hoverIndex === null ? null : series[hoverIndex] ?? null;
+
+  useEffect(() => {
+    const datum = hoverDatum ? { date: hoverDatum.date, close: hoverDatum.close } : null;
+    if (
+      hoverDatumRef.current?.date === datum?.date &&
+      hoverDatumRef.current?.close === datum?.close
+    ) {
+      return;
+    }
+    hoverDatumRef.current = datum;
+    onHoverDatumChange?.(datum);
+  }, [hoverDatum, onHoverDatumChange]);
+
+  const path = geometry.path;
+  const area = geometry.area;
+  const yTicks = [max, (max + min) / 2, min];
+  const gridLines = 5;
+  const hoverStroke = "rgba(96,165,250,0.55)";
+
+  const flushHoverIndex = useCallback(() => {
+    rafIdRef.current = null;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const clientX = latestClientXRef.current;
+    if (clientX === null) return;
+
+    const ratioX = (clientX - rect.left) / rect.width;
+    const x = ratioX * width;
+    const idxFloat = ((x - paddingLeft) / chartWidth) * (series.length - 1);
+    const idx = Math.min(series.length - 1, Math.max(0, Math.round(idxFloat)));
+
+    if (idx === hoverIndexRef.current) return;
+    hoverIndexRef.current = idx;
+    setHoverIndex(idx);
+  }, [chartWidth, paddingLeft, series.length]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className="w-full h-full"
+      onPointerMove={(event) => {
+        latestClientXRef.current = event.clientX;
+        if (rafIdRef.current === null) {
+          rafIdRef.current = requestAnimationFrame(flushHoverIndex);
+        }
+      }}
+      onPointerLeave={() => {
+        setHoverIndex(null);
+        hoverIndexRef.current = null;
+        hoverDatumRef.current = null;
+        latestClientXRef.current = null;
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
+        onHoverDatumChange?.(null);
+      }}
+    >
+      <defs>
+        <linearGradient
+          id={`market-area-fill-${gradientId}`}
+          x1="0"
+          y1="0"
+          x2="0"
+          y2="1"
+        >
+          <stop offset="0%" stopColor={colors.fill} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={colors.fill} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      <rect
+        x={paddingLeft}
+        y={paddingTop}
+        width={chartWidth}
+        height={chartHeight}
+        fill="transparent"
+        pointerEvents="none"
+      />
+
+      {Array.from({ length: gridLines }, (_, idx) => {
+        const y = paddingTop + (idx / (gridLines - 1)) * chartHeight;
+        return (
+          <line
+            key={`grid-${idx}`}
+            x1={paddingLeft}
+            x2={width - paddingRight}
+            y1={y}
+            y2={y}
+            stroke="rgba(255,255,255,0.08)"
+            strokeWidth="1"
+          />
+        );
+      })}
+
+      <path d={area} fill={`url(#market-area-fill-${gradientId})`} />
+      <path d={path} fill="none" stroke={colors.line} strokeWidth="2.2" />
+
+      {hoverPoint && hoverDatum && (
+        <>
+          <line
+            x1={hoverPoint.x}
+            x2={hoverPoint.x}
+            y1={paddingTop}
+            y2={height - paddingBottom}
+            stroke={hoverStroke}
+            strokeWidth="1"
+          />
+          <circle
+            cx={hoverPoint.x}
+            cy={hoverPoint.y}
+            r={3.5}
+            fill={colors.line}
+            stroke="rgba(15,23,42,0.9)"
+            strokeWidth="1"
+          />
+
+        </>
+      )}
+
+      {yTicks.map((tick, idx) => {
+        const y = paddingTop + (idx / (yTicks.length - 1)) * chartHeight;
+        return (
+          <text
+            key={`y-${idx}`}
+            x={width - 12}
+            y={y + 4}
+            textAnchor="end"
+            fontSize="12"
+            fill="rgba(226,232,240,0.85)"
+            fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+          >
+            {formatNumber(tick, 2)}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}
+
+function MarketVolumeMiniChart({
+  bars,
+  mode,
+  activeDate,
+}: {
+  bars: MarketDailyBar[];
+  mode: "volume" | "moneyflow";
+  activeDate: string | null;
+}) {
+  const series = useMemo(() => {
+    return bars
+      .map((bar) => ({
+        date: bar.date,
+        volume: bar.volume,
+        netMfVol: bar.netMfVol ?? null
+      }))
+      .filter(
+        (row): row is { date: string; volume: number; netMfVol: number | null } =>
+          row.volume !== null && Number.isFinite(row.volume)
+      );
+  }, [bars]);
+
+  if (series.length < 2) {
+    return (
+      <div className="h-full flex items-center justify-center text-xs text-slate-500 dark:text-slate-400">
+        --
+      </div>
+    );
+  }
+
+  const width = 800;
+  const height = 80;
+  const paddingTop = 6;
+  const paddingBottom = 6;
+
+  const values = series.map((row) => {
+    if (mode === "volume") return row.volume;
+    return row.netMfVol ?? 0;
+  });
+
+  const maxAbs =
+    mode === "moneyflow"
+      ? Math.max(1, ...values.map((value) => Math.abs(value)))
+      : Math.max(1, ...values);
+
+  const chartHeight = height - paddingTop - paddingBottom;
+  const barWidth = width / series.length;
+  const baselineY = mode === "moneyflow" ? paddingTop + chartHeight / 2 : height - paddingBottom;
+  const scale = mode === "moneyflow" ? chartHeight / 2 / maxAbs : chartHeight / maxAbs;
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full h-full">
+      {mode === "moneyflow" && (
+        <line
+          x1={0}
+          x2={width}
+          y1={baselineY}
+          y2={baselineY}
+          stroke="rgba(148,163,184,0.22)"
+          strokeWidth="1"
+        />
+      )}
+      {series.map((row, idx) => {
+        const value = values[idx] ?? 0;
+        const isActive = activeDate !== null && row.date === activeDate;
+        const x = idx * barWidth;
+        const w = Math.max(1, barWidth - 1);
+
+        let y = baselineY;
+        let h = 0;
+        if (mode === "moneyflow") {
+          const scaled = value * scale;
+          if (scaled >= 0) {
+            y = baselineY - scaled;
+            h = scaled;
+          } else {
+            y = baselineY;
+            h = Math.abs(scaled);
+          }
+        } else {
+          h = value * scale;
+          y = baselineY - h;
+        }
+
+        const fill =
+          mode === "moneyflow"
+            ? value >= 0
+              ? "rgba(96,165,250,0.55)"
+              : "rgba(248,113,113,0.45)"
+            : "rgba(148,163,184,0.35)";
+
+        return (
+          <rect
+            key={row.date}
+            x={x}
+            y={y}
+            width={w}
+            height={h <= 0 ? 0 : Math.max(1, h)}
+            fill={fill}
+            stroke={isActive ? "rgba(96,165,250,0.6)" : "transparent"}
+            strokeWidth={isActive ? 1 : 0}
+            opacity={isActive ? 1 : 0.85}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 function SummaryCard({ label, value, trend }: { label: string, value: string, trend?: 'up' | 'down' }) {
   return (
-    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-200 dark:border-slate-800">
+    <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark rounded-lg p-4 border border-slate-200 dark:border-border-dark">
        <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
        <div className={`text-xl font-bold font-mono ${
           trend === 'up' ? 'text-green-600 dark:text-green-500' : 
@@ -2348,7 +6943,7 @@ function SummaryCard({ label, value, trend }: { label: string, value: string, tr
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-8 text-slate-400 bg-slate-50/50 dark:bg-slate-900/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-800">
+    <div className="flex flex-col items-center justify-center py-8 text-slate-400 bg-slate-50/50 dark:bg-background-dark rounded-lg border border-dashed border-slate-200 dark:border-border-dark">
       <span className="material-icons-outlined text-3xl mb-2 opacity-50">inbox</span>
       <p className="text-sm">{message}</p>
     </div>
@@ -2407,7 +7002,7 @@ function HelpHint({ text }: { text: string }) {
       onBlur={closeHint}
     >
       <span
-        className="inline-flex items-center justify-center w-4 h-4 rounded-none border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-300 cursor-help"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-none border border-slate-300 dark:border-border-dark text-[10px] text-slate-500 dark:text-slate-300 cursor-help"
         aria-label={text}
       >
         ?
@@ -2415,7 +7010,7 @@ function HelpHint({ text }: { text: string }) {
       {open && (
         <span
           role="tooltip"
-          className="absolute left-1/2 top-full z-20 mt-1 w-max max-w-xs -translate-x-1/2 whitespace-normal rounded-none border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg"
+          className="absolute left-1/2 top-full z-20 mt-1 w-max max-w-xs -translate-x-1/2 whitespace-normal rounded-none border border-border-dark bg-surface-dark px-2 py-1 text-[11px] text-white shadow-lg"
         >
           {text}
         </span>
@@ -2447,13 +7042,13 @@ function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/45 backdrop-blur-sm"
         onClick={onCancel}
       />
       <div
         role="dialog"
         aria-modal="true"
-        className="relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-5"
+        className="relative bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-lg shadow-xl w-full max-w-md mx-4 p-5"
       >
         <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-2">
           {title}
@@ -2482,9 +7077,9 @@ interface LedgerTableProps {
 
 function LedgerTable({ entries, onEdit, onDelete }: LedgerTableProps) {
   return (
-    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 mb-4">
-      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-        <thead className="bg-slate-50 dark:bg-slate-900">
+    <div className="overflow-x-auto border border-slate-200 dark:border-border-dark mb-4">
+      <table className="min-w-full divide-y divide-slate-200 dark:divide-border-dark">
+        <thead className="bg-slate-50 dark:bg-background-dark">
           <tr>
             {[
               "日期",
@@ -2519,7 +7114,7 @@ function LedgerTable({ entries, onEdit, onDelete }: LedgerTableProps) {
             return (
               <tr
                 key={entry.id}
-                className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group"
+                className="hover:bg-slate-50 dark:hover:bg-background-dark/70 transition-colors group"
               >
                 <td className="px-4 py-2">
                   <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
@@ -2905,7 +7500,7 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
           </Button>
         </div>
       </div>
-      <div className="border-t border-slate-200 dark:border-slate-800" />
+      <div className="border-t border-slate-200 dark:border-border-dark" />
 
       <div className="space-y-2">
         {showPrimaryInstrumentRow && (
@@ -2928,7 +7523,7 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
                     className={`grid grid-cols-2 overflow-hidden rounded-none border ${
                       sideMissing
                         ? "border-rose-500"
-                        : "border-slate-300 dark:border-slate-700"
+                        : "border-slate-300 dark:border-border-dark"
                     }`}
                   >
                     <button
@@ -2939,7 +7534,7 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
                         form.side === "buy"
                           ? "bg-primary text-white"
                           : "bg-transparent text-slate-500 dark:text-slate-400"
-                      } border-r border-slate-300 dark:border-slate-700`}
+                      } border-r border-slate-300 dark:border-border-dark`}
                     >
                       买入
                     </button>
@@ -3123,7 +7718,7 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
         </div>
       </div>
 
-      <div className="border-t border-slate-200 dark:border-slate-800" />
+      <div className="border-t border-slate-200 dark:border-border-dark" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
         <FormGroup label="交易日期">
@@ -3180,7 +7775,13 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
   );
 }
 
-function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
+function DataQualityCard({
+  quality,
+  onOpenMarketDataStatus
+}: {
+  quality: MarketDataQuality;
+  onOpenMarketDataStatus?: () => void;
+}) {
   const overall = describeDataQuality(quality.overallLevel);
   const coverage = describeDataQuality(quality.coverageLevel);
   const freshness = describeDataQuality(quality.freshnessLevel);
@@ -3188,7 +7789,7 @@ function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
     quality.freshnessDays === null ? "--" : `${quality.freshnessDays} 天`;
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+    <div className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
           <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${overall.badgeClass}`}>
@@ -3196,12 +7797,23 @@ function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
           </span>
           <span className="text-xs text-slate-500 dark:text-slate-400">数据质量</span>
         </div>
-        <span className="text-xs text-slate-400 dark:text-slate-500">
-          as-of {quality.asOfDate ?? "--"}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            截至 {quality.asOfDate ?? "--"}
+          </span>
+          {onOpenMarketDataStatus && (
+            <button
+              type="button"
+              onClick={onOpenMarketDataStatus}
+              className="text-xs text-primary hover:text-primary/80 transition-colors"
+            >
+              数据状态
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-md p-3">
+        <div className="bg-slate-50 dark:bg-background-dark rounded-md p-3">
           <div className="text-xs text-slate-500 mb-1">覆盖率</div>
           <div className="font-mono text-slate-800 dark:text-slate-200">
             {formatPctNullable(quality.coverageRatio ?? null)}
@@ -3210,7 +7822,7 @@ function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
             {coverage.label}
           </div>
         </div>
-        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-md p-3">
+        <div className="bg-slate-50 dark:bg-background-dark rounded-md p-3">
           <div className="text-xs text-slate-500 mb-1">新鲜度</div>
           <div className="font-mono text-slate-800 dark:text-slate-200">
             {freshnessLabel}
@@ -3219,7 +7831,7 @@ function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
             {freshness.label}
           </div>
         </div>
-        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-md p-3">
+        <div className="bg-slate-50 dark:bg-background-dark rounded-md p-3">
           <div className="text-xs text-slate-500 mb-1">缺失标的</div>
           <div className="font-mono text-slate-800 dark:text-slate-200">
             {quality.missingSymbols.length}
@@ -3238,9 +7850,40 @@ function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
   );
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  if (min > max) return value;
+  return Math.min(Math.max(value, min), max);
+}
+
 function formatNumber(value: number | null, digits = 2): string {
-  if (value === null || Number.isNaN(value)) return "--";
+  if (value === null || !Number.isFinite(value)) return "--";
   return value.toFixed(digits);
+}
+
+function formatCnWanYiNullable(
+  value: number | null | undefined,
+  digits = 2,
+  smallDigits = 0
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  const abs = Math.abs(value);
+  if (abs >= 1e8) return `${(value / 1e8).toFixed(digits)}亿`;
+  if (abs >= 1e4) return `${(value / 1e4).toFixed(digits)}万`;
+  return value.toFixed(smallDigits);
+}
+
+function formatSignedCnWanYiNullable(
+  value: number | null | undefined,
+  digits = 2,
+  smallDigits = 0
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs >= 1e8) return `${sign}${(abs / 1e8).toFixed(digits)}亿`;
+  if (abs >= 1e4) return `${sign}${(abs / 1e4).toFixed(digits)}万`;
+  return `${sign}${abs.toFixed(smallDigits)}`;
 }
 
 function formatCurrency(value: number | null): string {
@@ -3258,6 +7901,55 @@ function formatPct(value: number): string {
 function formatPctNullable(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "--";
   return formatPct(value);
+}
+
+type ChangeTone = "up" | "down" | "flat" | "unknown";
+
+function formatSignedNumberNullable(
+  value: number | null | undefined,
+  digits = 2
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(digits)}`;
+}
+
+function formatSignedPctNullable(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  const pct = value * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(2)}%`;
+}
+
+function getCnChangeTone(changePct: number | null | undefined): ChangeTone {
+  if (changePct === null || changePct === undefined || Number.isNaN(changePct)) {
+    return "unknown";
+  }
+  if (changePct > 0) return "up";
+  if (changePct < 0) return "down";
+  return "flat";
+}
+
+function getCnToneTextClass(tone: ChangeTone): string {
+  switch (tone) {
+    case "up":
+      return "text-red-500";
+    case "down":
+      return "text-green-500";
+    default:
+      return "text-slate-500 dark:text-slate-400";
+  }
+}
+
+function getCnToneColors(tone: ChangeTone): { line: string; fill: string } {
+  switch (tone) {
+    case "up":
+      return { line: "#ef4444", fill: "#ef4444" };
+    case "down":
+      return { line: "#22c55e", fill: "#22c55e" };
+    default:
+      return { line: "#e2e8f0", fill: "#94a3b8" };
+  }
 }
 
 function formatPerformanceMethod(value: PerformanceMethod): string {
@@ -3282,6 +7974,69 @@ function sortContributionEntries(entries: ContributionEntry[]): ContributionEntr
     const bScore = b.contribution === null ? -Infinity : Math.abs(b.contribution);
     if (aScore !== bScore) return bScore - aScore;
     return b.marketValue - a.marketValue;
+  });
+}
+
+type TagAggregateResult = {
+  totalCount: number;
+  includedCount: number;
+  excludedCount: number;
+  weightedChangePct: number | null;
+  totalWeight: number;
+};
+
+function computeTagAggregate(
+  symbols: string[],
+  quotesBySymbol: Record<string, MarketQuote>
+): TagAggregateResult {
+  let totalWeight = 0;
+  let weightedChangeSum = 0;
+  let includedCount = 0;
+
+  symbols.forEach((symbol) => {
+    const quote = quotesBySymbol[symbol];
+    const changePct = quote?.changePct ?? null;
+    const circMv = quote?.circMv ?? null;
+    if (
+      changePct === null ||
+      circMv === null ||
+      !Number.isFinite(changePct) ||
+      !Number.isFinite(circMv) ||
+      circMv <= 0
+    ) {
+      return;
+    }
+    includedCount += 1;
+    totalWeight += circMv;
+    weightedChangeSum += changePct * circMv;
+  });
+
+  return {
+    totalCount: symbols.length,
+    includedCount,
+    excludedCount: Math.max(0, symbols.length - includedCount),
+    weightedChangePct: totalWeight > 0 ? weightedChangeSum / totalWeight : null,
+    totalWeight
+  };
+}
+
+function sortTagMembersByChangePct(
+  symbols: string[],
+  quotesBySymbol: Record<string, MarketQuote>
+): string[] {
+  return [...symbols].sort((a, b) => {
+    const aValue = quotesBySymbol[a]?.changePct;
+    const bValue = quotesBySymbol[b]?.changePct;
+    const aScore =
+      aValue === null || aValue === undefined || Number.isNaN(aValue)
+        ? -Infinity
+        : aValue;
+    const bScore =
+      bValue === null || bValue === undefined || Number.isNaN(bValue)
+        ? -Infinity
+        : bValue;
+    if (aScore !== bScore) return bScore - aScore;
+    return a.localeCompare(b);
   });
 }
 
@@ -3334,6 +8089,105 @@ function formatDateTime(value: number | null): string {
   return date.toLocaleString("zh-CN");
 }
 
+function formatDurationMs(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "0s";
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours > 0) return `${hours}h${minutes}m`;
+  if (minutes > 0) return `${minutes}m${seconds}s`;
+  return `${seconds}s`;
+}
+
+function formatMarketTokenSource(source: MarketTokenStatus["source"]): string {
+  switch (source) {
+    case "env":
+      return "环境变量";
+    case "local":
+      return "本地";
+    case "none":
+      return "无";
+    default:
+      return source;
+  }
+}
+
+function formatIngestRunStatusLabel(status: MarketIngestRun["status"]): string {
+  switch (status) {
+    case "running":
+      return "进行中";
+    case "success":
+      return "成功";
+    case "partial":
+      return "部分成功";
+    case "failed":
+      return "失败";
+    case "canceled":
+      return "已取消";
+    default:
+      return String(status);
+  }
+}
+
+function formatIngestRunScopeLabel(scope: MarketIngestRun["scope"]): string {
+  switch (scope) {
+    case "targets":
+      return "目标池";
+    case "universe":
+      return "全市场";
+    default:
+      return String(scope);
+  }
+}
+
+function formatIngestRunModeLabel(mode: MarketIngestRun["mode"]): string {
+  switch (mode) {
+    case "daily":
+      return "定时";
+    case "bootstrap":
+      return "初始化";
+    case "manual":
+      return "手动";
+    case "on_demand":
+      return "按需";
+    default:
+      return String(mode);
+  }
+}
+
+function formatTargetsReasonLabel(reason: string): string {
+  const normalized = reason.trim().toLowerCase();
+  if (normalized === "holdings") return "持仓";
+  if (normalized === "watchlist") return "自选";
+  if (normalized === "registry" || normalized === "registry_auto_ingest") return "注册标的";
+  if (normalized === "explicit") return "手动添加";
+  if (normalized.startsWith("tag:")) return `标签：${reason.slice(4)}`;
+  return reason;
+}
+
+function formatTargetsReasons(reasons: string[]): string {
+  return reasons.map(formatTargetsReasonLabel).join("，");
+}
+
+function formatIngestRunTone(status: MarketIngestRun["status"]): string {
+  switch (status) {
+    case "success":
+      return "text-emerald-600 dark:text-emerald-400";
+    case "partial":
+      return "text-amber-600 dark:text-amber-400";
+    case "failed":
+      return "text-red-600 dark:text-red-400";
+    case "canceled":
+      return "text-slate-500 dark:text-slate-400";
+    case "running":
+      return "text-primary";
+    default:
+      return "text-slate-700 dark:text-slate-200";
+  }
+}
+
 function formatDateTimeInput(value: number | null): string {
   if (!value) return "";
   const date = new Date(value);
@@ -3348,10 +8202,37 @@ function formatDateTimeInput(value: number | null): string {
 
 function sanitizeToastMessage(message: string): string {
   if (!message) return message;
-  if (/[A-Za-z]/.test(message)) {
+  const trimmed = message.trim();
+
+  const redacted = trimmed.replace(/[A-Za-z0-9_-]{32,}/g, "[REDACTED]");
+
+  if (/(^|\n)\s*at\s+/i.test(redacted)) {
     return "操作失败，请检查输入后重试。";
   }
-  return message;
+  if (
+    redacted.includes("node:") ||
+    redacted.includes("file:") ||
+    redacted.includes("/Volumes/") ||
+    redacted.includes("/Users/")
+  ) {
+    return "操作失败，请检查输入后重试。";
+  }
+
+  const lower = redacted.toLowerCase();
+  if (lower.includes("failed to fetch") || lower.includes("fetch failed")) {
+    return "网络请求失败：无法访问数据源接口（请检查网络/代理/防火墙/DNS）。";
+  }
+  if (lower.includes("enotfound") || lower.includes("eai_again")) {
+    return "DNS 解析失败：请检查网络或代理设置。";
+  }
+  if (lower.includes("etimedout") || lower.includes("timeout")) {
+    return "请求超时：请检查网络或稍后重试。";
+  }
+  if (lower.includes("econnreset")) {
+    return "连接被重置：请检查网络或稍后重试。";
+  }
+
+  return redacted || "操作失败，请检查输入后重试。";
 }
 
 function describeDataQuality(level: DataQualityLevel): {
@@ -3382,15 +8263,44 @@ function describeDataQuality(level: DataQualityLevel): {
 }
 
 function toUserErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message || "未知错误。";
-  if (typeof error === "string") return error;
-  return "未知错误。";
-}
+  if (error instanceof Error) {
+    const raw = String(error.message ?? "").trim();
+    if (!raw) return "未知错误。";
 
-function daysAgo(days: number): Date {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date;
+    const firstLine = raw.split("\n")[0]?.trim() ?? "";
+
+    const handlerMatch =
+      /^Error occurred in handler for '([^']+)': Error: (.+)$/.exec(firstLine);
+    if (handlerMatch?.[2]) return handlerMatch[2].trim();
+
+    const invokeMatch =
+      /^Error invoking remote method '([^']+)': Error: (.+)$/.exec(firstLine);
+    if (invokeMatch?.[2]) return invokeMatch[2].trim();
+
+    const remoteMatch = /^Error: (.+)$/.exec(firstLine);
+    if (remoteMatch?.[1]) return remoteMatch[1].trim();
+
+    return firstLine || raw;
+  }
+  if (typeof error === "string") {
+    const raw = error.trim();
+    if (!raw) return "未知错误。";
+    const firstLine = raw.split("\n")[0]?.trim() ?? "";
+
+    const handlerMatch =
+      /^Error occurred in handler for '([^']+)': Error: (.+)$/.exec(firstLine);
+    if (handlerMatch?.[2]) return handlerMatch[2].trim();
+
+    const invokeMatch =
+      /^Error invoking remote method '([^']+)': Error: (.+)$/.exec(firstLine);
+    if (invokeMatch?.[2]) return invokeMatch[2].trim();
+
+    const remoteMatch = /^Error: (.+)$/.exec(firstLine);
+    if (remoteMatch?.[1]) return remoteMatch[1].trim();
+
+    return firstLine || raw;
+  }
+  return "未知错误。";
 }
 
 function formatInputDate(date: Date): string {
@@ -3398,6 +8308,153 @@ function formatInputDate(date: Date): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseInputDate(value: string): Date | null {
+  const trimmed = value.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+  const date = new Date();
+  date.setFullYear(year, month - 1, day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function formatCnDate(value: string | null | undefined): string {
+  if (!value) return "--";
+  const date = parseInputDate(value);
+  if (!date) return value;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function parseTargetPriceFromTags(tags: string[]): number | null {
+  for (const raw of tags) {
+    const tag = raw.trim();
+    if (!tag) continue;
+    const idx = tag.indexOf(":");
+    if (idx <= 0) continue;
+    const ns = tag.slice(0, idx).trim().toLowerCase();
+    if (ns !== "target" && ns !== "tp" && ns !== "目标价") continue;
+    const payload = tag.slice(idx + 1).trim();
+    const value = Number(payload);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function computeFifoUnitCost(entries: LedgerEntry[], symbol: string): number | null {
+  const key = symbol.trim();
+  if (!key) return null;
+
+  const candidates = entries
+    .filter((entry) => {
+      if (entry.symbol !== key) return false;
+      if (entry.side !== "buy" && entry.side !== "sell") return false;
+      if (entry.eventType !== "trade" && entry.eventType !== "adjustment") {
+        return false;
+      }
+      const qty = entry.quantity;
+      if (qty === null || !Number.isFinite(qty) || qty <= 0) return false;
+      if (entry.side === "buy") {
+        const price = entry.price;
+        return price !== null && Number.isFinite(price) && price > 0;
+      }
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      if (a.tradeDate !== b.tradeDate) return a.tradeDate < b.tradeDate ? -1 : 1;
+      const tsA = a.eventTs ?? 0;
+      const tsB = b.eventTs ?? 0;
+      if (tsA !== tsB) return tsA - tsB;
+      const seqA = a.sequence ?? 0;
+      const seqB = b.sequence ?? 0;
+      if (seqA !== seqB) return seqA - seqB;
+      return a.createdAt - b.createdAt;
+    });
+
+  if (candidates.length === 0) return null;
+
+  const lots: Array<{ qty: number; price: number }> = [];
+  for (const entry of candidates) {
+    const qty = entry.quantity ?? 0;
+    if (entry.side === "buy") {
+      const price = entry.price ?? 0;
+      lots.push({ qty, price });
+      continue;
+    }
+
+    let remaining = qty;
+    while (remaining > 0 && lots.length > 0) {
+      const head = lots[0];
+      const take = Math.min(head.qty, remaining);
+      head.qty -= take;
+      remaining -= take;
+      if (head.qty <= 1e-12) lots.shift();
+    }
+  }
+
+  let totalQty = 0;
+  let totalCost = 0;
+  for (const lot of lots) {
+    totalQty += lot.qty;
+    totalCost += lot.qty * lot.price;
+  }
+  if (totalQty <= 0) return null;
+  return totalCost / totalQty;
+}
+
+function resolveMarketChartDateRange(
+  range: MarketChartRangeKey,
+  endDate: string
+): { startDate: string; endDate: string } {
+  const end = parseInputDate(endDate) ?? new Date();
+  const start = new Date(end);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+
+  switch (range) {
+    case "1D":
+      start.setDate(start.getDate() - 7);
+      break;
+    case "1W":
+      start.setDate(start.getDate() - 7);
+      break;
+    case "1M":
+      start.setMonth(start.getMonth() - 1);
+      break;
+    case "3M":
+      start.setMonth(start.getMonth() - 3);
+      break;
+    case "6M":
+      start.setMonth(start.getMonth() - 6);
+      break;
+    case "YTD":
+      start.setMonth(0, 1);
+      break;
+    case "1Y":
+      start.setFullYear(start.getFullYear() - 1);
+      break;
+    case "2Y":
+      start.setFullYear(start.getFullYear() - 2);
+      break;
+    case "5Y":
+      start.setFullYear(start.getFullYear() - 5);
+      break;
+    case "10Y":
+      start.setFullYear(start.getFullYear() - 10);
+      break;
+    default:
+      break;
+  }
+
+  return { startDate: formatInputDate(start), endDate: formatInputDate(end) };
 }
 
 const LEDGER_RATE_STORAGE_PREFIX = "mytrader:ledger:rates:";
@@ -3550,7 +8607,7 @@ function createEmptyLedgerForm(baseCurrency: string): LedgerFormState {
 
 function DescriptionItem({ label, value }: { label: string, value: React.ReactNode }) {
   return (
-    <div className="flex justify-between py-2 border-b border-slate-50 dark:border-slate-800 last:border-0">
+    <div className="flex justify-between py-2 border-b border-slate-50 dark:border-border-dark last:border-0">
       <span className="text-sm text-slate-500">{label}</span>
       <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{value}</span>
     </div>
@@ -3581,7 +8638,7 @@ function PerformanceChart({ series }: { series: PortfolioPerformanceSeries }) {
   const endPoint = series.points[series.points.length - 1];
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+    <div className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs uppercase tracking-wider text-slate-500">收益曲线</div>
         <Badge>{formatPerformanceMethod(series.method)}</Badge>
@@ -3637,7 +8694,7 @@ function ContributionTable({
   const canToggle = entries.length > topCount;
 
   return (
-    <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-4">
+    <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200/80 dark:border-border-dark rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs uppercase tracking-wider text-slate-500">{title}</div>
         {canToggle && (
@@ -3653,9 +8710,9 @@ function ContributionTable({
       {visible.length === 0 ? (
         <div className="text-xs text-slate-400">暂无数据</div>
       ) : (
-        <div className="overflow-hidden border border-slate-200 dark:border-slate-800">
-          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-            <thead className="bg-slate-50 dark:bg-slate-900">
+        <div className="overflow-hidden border border-slate-200 dark:border-border-dark">
+          <table className="min-w-full divide-y divide-slate-200 dark:divide-border-dark">
+            <thead className="bg-slate-50 dark:bg-background-dark">
               <tr>
                 <th className="px-3 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase">
                   {labelHeader ?? "标的"}
@@ -3715,7 +8772,7 @@ interface RiskMetricCardProps {
 function RiskMetricCard({ title, metrics, annualized }: RiskMetricCardProps) {
   const volatility = annualized ? metrics.volatilityAnnualized : metrics.volatility;
   return (
-    <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-4">
+    <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200/80 dark:border-border-dark rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs uppercase tracking-wider text-slate-500">{title}</div>
         <div className="text-[11px] text-slate-400">{metrics.points} 点</div>

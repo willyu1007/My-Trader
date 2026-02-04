@@ -1,10 +1,7 @@
-import type { TushareIngestItem } from "@mytrader/shared";
-
 import { config } from "../config";
-import { ingestTushare } from "../services/marketService";
-import { listPositionIngestItems } from "../storage/positionRepository";
+import { getResolvedTushareToken } from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
-import { getLatestPrices, listAutoIngestItems } from "./marketRepository";
+import { runTargetsIngest } from "./marketIngestRunner";
 
 type AutoIngestState = {
   timer: NodeJS.Timeout | null;
@@ -41,9 +38,15 @@ export function startAutoIngest(
   console.log(
     `[mytrader] auto-ingest scheduled every ${Math.round(intervalMs / 60000)} min.`
   );
-  void runOnce("startup");
+  void runOnce("startup").catch((err) => {
+    console.error("[mytrader] auto-ingest startup failed");
+    console.error(err);
+  });
   state.timer = setInterval(() => {
-    void runOnce("interval");
+    void runOnce("interval").catch((err) => {
+      console.error("[mytrader] auto-ingest interval failed");
+      console.error(err);
+    });
   }, intervalMs);
 }
 
@@ -61,7 +64,10 @@ export function stopAutoIngest(): void {
 export function triggerAutoIngest(reason: "import" | "positions"): void {
   if (!config.autoIngest.enabled) return;
   if (!state.businessDb || !state.marketDb) return;
-  void runOnce("trigger", reason);
+  void runOnce("trigger", reason).catch((err) => {
+    console.error("[mytrader] auto-ingest trigger failed");
+    console.error(err);
+  });
 }
 
 async function runOnce(
@@ -75,12 +81,11 @@ async function runOnce(
   const sessionId = state.sessionId;
   const businessDb = state.businessDb;
   const marketDb = state.marketDb;
-  const token = config.tushareToken;
+  const resolved = await getResolvedTushareToken(businessDb);
+  const token = resolved.token;
   if (!token) {
     if (!state.warnedMissingToken) {
-      console.warn(
-        "[mytrader] auto-ingest skipped: missing MYTRADER_TUSHARE_TOKEN."
-      );
+      console.warn("[mytrader] auto-ingest skipped: missing Tushare token.");
       state.warnedMissingToken = true;
     }
     return;
@@ -89,106 +94,15 @@ async function runOnce(
 
   state.running = true;
   try {
-    const registryItems = await listAutoIngestItems(marketDb);
     if (sessionId !== state.sessionId) return;
-    const positionItems = await listPositionIngestItems(businessDb);
-    if (sessionId !== state.sessionId) return;
-    const items = mergeItems(registryItems, positionItems);
-    if (items.length === 0) {
-      console.log("[mytrader] auto-ingest skipped: no symbols.");
-      return;
-    }
-
-    const latest = await getLatestPrices(
+    await runTargetsIngest({
+      businessDb,
       marketDb,
-      items.map((item) => item.symbol)
-    );
-    if (sessionId !== state.sessionId) return;
-    const endDate = formatDate(new Date());
-    const lookbackDate = formatDate(
-      addDays(new Date(), -config.autoIngest.lookbackDays)
-    );
-
-    let pulled = 0;
-    let skipped = 0;
-    let errors = 0;
-
-    for (const item of items) {
-      if (sessionId !== state.sessionId) return;
-      const startDate = getStartDate(item, latest, lookbackDate);
-      if (startDate > endDate) {
-        skipped += 1;
-        continue;
-      }
-      try {
-        const result = await ingestTushare(marketDb, {
-          items: [item],
-          startDate,
-          endDate
-        });
-        pulled += result.inserted + result.updated;
-      } catch (err) {
-        errors += 1;
-        console.error(`[mytrader] auto-ingest failed for ${item.symbol}.`);
-        console.error(err);
-      }
-    }
-
-    const reasonLabel = reason ? `/${reason}` : "";
-    console.log(
-      `[mytrader] auto-ingest done (${schedule}${reasonLabel}): symbols=${items.length} skipped=${skipped} errors=${errors} rows=${pulled}.`
-    );
+      token,
+      mode: "on_demand",
+      meta: { schedule, reason: reason ?? null }
+    });
   } finally {
     state.running = false;
   }
-}
-
-function mergeItems(
-  registryItems: TushareIngestItem[],
-  positionItems: TushareIngestItem[]
-): TushareIngestItem[] {
-  const map = new Map<string, TushareIngestItem>();
-  for (const item of registryItems) {
-    map.set(item.symbol, item);
-  }
-  for (const item of positionItems) {
-    map.set(item.symbol, item);
-  }
-  return Array.from(map.values());
-}
-
-function getStartDate(
-  item: TushareIngestItem,
-  latest: Map<string, { tradeDate: string }>,
-  fallbackDate: string
-): string {
-  const latestDate = latest.get(item.symbol)?.tradeDate;
-  if (!latestDate) return fallbackDate;
-  const parsed = parseDate(latestDate);
-  if (!parsed) return fallbackDate;
-  return formatDate(addDays(parsed, 1));
-}
-
-function parseDate(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]) - 1;
-  const day = Number(match[3]);
-  const date = new Date(year, month, day);
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
-}
-
-function addDays(date: Date, days: number): Date {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function formatDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }

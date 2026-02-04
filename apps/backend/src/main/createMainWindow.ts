@@ -11,16 +11,23 @@ export function createMainWindow() {
     console.error(`[mytrader] preload 脚本不存在：${preloadPath}`);
   }
 
+  const isDev = Boolean(config.devServerUrl);
   const mainWindow = new BrowserWindow({
     width: 1100,
     height: 760,
-    show: true,
+    show: !isDev,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: preloadPath
     }
   });
+
+  if (!isDev) {
+    mainWindow.once("ready-to-show", () => {
+      if (!mainWindow.isVisible()) mainWindow.show();
+    });
+  }
 
   mainWindow.webContents.on("preload-error", (_event, failingPreloadPath, err) => {
     console.error(`[mytrader] preload 执行异常：${failingPreloadPath}`);
@@ -74,7 +81,9 @@ export function createMainWindow() {
   const devUrl = config.devServerUrl;
   if (devUrl) {
     mainWindow.loadURL(devUrl);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    if (process.env.MYTRADER_DEVTOOLS === "1") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
     return mainWindow;
   }
 

@@ -10,7 +10,14 @@ app.whenReady().then(() => {
 
     app.on("activate", () => {
       if (process.platform !== "darwin") return;
-      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+      const existing = BrowserWindow.getAllWindows()[0] ?? null;
+      if (existing) {
+        if (existing.isMinimized()) existing.restore();
+        if (!existing.isVisible()) existing.show();
+        existing.focus();
+        return;
+      }
+      createMainWindow();
     });
   })();
 });

@@ -52,7 +52,56 @@ const api: MyTraderApi = {
     importPricesCsv: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_IMPORT_PRICES_CSV, input),
     ingestTushare: (input) =>
-      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_TUSHARE, input)
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_TUSHARE, input),
+    syncInstrumentCatalog: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_SYNC_INSTRUMENT_CATALOG),
+    searchInstruments: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_SEARCH_INSTRUMENTS, input),
+    getInstrumentProfile: (symbol) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_INSTRUMENT_PROFILE, symbol),
+    getTargets: () => ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_TARGETS),
+    setTargets: (config) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_SET_TARGETS, config),
+    previewTargets: () => ipcRenderer.invoke(IPC_CHANNELS.MARKET_PREVIEW_TARGETS),
+    listWatchlist: () => ipcRenderer.invoke(IPC_CHANNELS.MARKET_WATCHLIST_LIST),
+    upsertWatchlistItem: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_WATCHLIST_UPSERT, input),
+    removeWatchlistItem: (symbol) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_WATCHLIST_REMOVE, symbol),
+    listInstrumentTags: (symbol) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TAGS_LIST, symbol),
+    addInstrumentTag: (symbol, tag) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TAGS_ADD, symbol, tag),
+    removeInstrumentTag: (symbol, tag) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TAGS_REMOVE, symbol, tag),
+    listTags: (input) => ipcRenderer.invoke(IPC_CHANNELS.MARKET_LIST_TAGS, input),
+    getTagMembers: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_TAG_MEMBERS, input),
+    getTagSeries: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_TAG_SERIES, input),
+    getQuotes: (input) => ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_QUOTES, input),
+    getDailyBars: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_DAILY_BARS, input),
+    seedDemoData: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_SEED_DEMO_DATA, input ?? null),
+    getTokenStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_GET_STATUS),
+    setToken: (input) => ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_SET, input),
+    testToken: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_TEST, input ?? null),
+    openProviderHomepage: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_PROVIDER_OPEN, input),
+    listIngestRuns: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUNS_LIST, input ?? null),
+    triggerIngest: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_TRIGGER, input),
+    listTempTargets: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST),
+    touchTempTarget: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_TOUCH, input),
+    removeTempTarget: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_REMOVE, input),
+    promoteTempTarget: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_PROMOTE, input)
   }
 };
 

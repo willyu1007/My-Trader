@@ -120,7 +120,7 @@ async function run() {
 
   const vite = spawnChild(
     pnpmCmd,
-    ["dev", "--", "--port", String(devPort)],
+    ["exec", "vite", "--", "--port", String(devPort)],
     { cwd: frontendDir }
   );
   const build = spawnChild(pnpmCmd, ["run", "build"], { cwd: backendDir });
@@ -175,7 +175,7 @@ async function run() {
   };
 
   sharedWatch = spawnChild(pnpmCmd, ["run", "dev"], { cwd: sharedDir });
-  backendWatch = spawnChild(pnpmCmd, ["run", "build", "--", "--watch"], {
+  backendWatch = spawnChild(pnpmCmd, ["exec", "tsup", "--", "--watch"], {
     cwd: backendDir
   });
 

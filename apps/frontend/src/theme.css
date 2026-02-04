@@ -7,11 +7,12 @@
   --mt-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 
-  --mt-bg: #14171b;
-  --mt-bg-1: #1b2025;
-  --mt-surface: rgba(20, 24, 29, 0.74);
-  --mt-surface-2: rgba(24, 30, 36, 0.82);
-  --mt-field: rgba(18, 23, 28, 0.92);
+  /* Scheme B (warm dark): reduce blue cast for long-session comfort */
+  --mt-bg: #151312;
+  --mt-bg-1: #1d1a18;
+  --mt-surface: rgba(21, 19, 18, 0.74);
+  --mt-surface-2: rgba(29, 26, 24, 0.84);
+  --mt-field: rgba(20, 18, 17, 0.92);
 
   --mt-border: rgba(220, 225, 230, 0.16);
   --mt-border-strong: rgba(220, 225, 230, 0.24);
@@ -35,11 +36,11 @@
 
   --mt-ring: 0 0 0 3px rgba(8, 145, 178, 0.25);
 
-  --mt-topbar-bg: rgba(20, 24, 29, 0.72);
+  --mt-topbar-bg: rgba(21, 19, 18, 0.74);
 
   --mt-body-bg:
-    radial-gradient(1200px 800px at 18% -10%, rgba(110, 120, 130, 0.12), transparent 55%),
-    radial-gradient(900px 700px at 100% 0%, rgba(80, 95, 110, 0.1), transparent 60%),
+    radial-gradient(1200px 800px at 18% -10%, rgba(140, 118, 92, 0.1), transparent 56%),
+    radial-gradient(900px 700px at 100% 0%, rgba(110, 98, 86, 0.08), transparent 62%),
     linear-gradient(0deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.14)),
     var(--mt-bg);
 
@@ -152,4 +153,11 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+/* Global form control tone: avoid overly bright blue checkboxes/radios */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: rgba(8, 145, 178, 0.85);
+  color: rgba(8, 145, 178, 0.85);
 }
