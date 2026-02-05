@@ -30,6 +30,65 @@ export async function ensureMarketCacheSchema(
     `
   );
 
+  await exec(
+    db,
+    `
+      create table if not exists instrument_data_sources (
+        symbol text not null,
+        domain text not null,
+        source text not null,
+        updated_at integer not null,
+        primary key (symbol, domain)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists sw_industries (
+        level text not null,
+        code text not null,
+        name text not null,
+        parent_code text,
+        updated_at integer not null,
+        primary key (level, code)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists sw_industries_level_name
+      on sw_industries (level, name);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists sw_industries_parent_code
+      on sw_industries (parent_code, level);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists instrument_data_sources_domain_symbol
+      on instrument_data_sources (domain, symbol);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists instrument_data_sources_symbol_domain
+      on instrument_data_sources (symbol, domain);
+    `
+  );
+
   await ensureColumn(
     db,
     "instruments",

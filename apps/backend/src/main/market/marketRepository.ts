@@ -5,6 +5,7 @@ import type {
 } from "@mytrader/shared";
 
 import { all, run, transaction } from "../storage/sqlite";
+import { ensureInstrumentDomainSources } from "./instrumentDataSourceRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 
 export interface InstrumentInput {
@@ -230,7 +231,12 @@ export async function upsertPrices(
 ): Promise<void> {
   if (inputs.length === 0) return;
   const now = Date.now();
+  const sources = inputs.map((input) => ({
+    symbol: input.symbol,
+    source: input.source
+  }));
   await transaction(db, async () => {
+    await ensureInstrumentDomainSources(db, "daily_prices", sources, now);
     for (const input of inputs) {
       await run(
         db,

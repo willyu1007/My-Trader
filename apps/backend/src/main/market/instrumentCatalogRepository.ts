@@ -1,4 +1,4 @@
-import type { AssetClass } from "@mytrader/shared";
+import { buildTagFacets, type AssetClass, type TagFacets } from "@mytrader/shared";
 
 import { all, get, run, transaction } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
@@ -13,6 +13,7 @@ export type InstrumentProfileSummary = {
   market: string | null;
   currency: string | null;
   tags: string[];
+  tagFacets?: TagFacets;
 };
 
 export type InstrumentProfile = InstrumentProfileSummary & {
@@ -147,16 +148,20 @@ export async function searchInstrumentProfiles(
     [like, like, trimmed, `${escapeLike(trimmed)}%`, limit]
   );
 
-  return rows.map((row) => ({
-    provider: row.provider,
-    kind: row.kind,
-    symbol: row.symbol,
-    name: row.name ?? null,
-    assetClass: row.asset_class ? (row.asset_class as AssetClass) : null,
-    market: row.market ?? null,
-    currency: row.currency ?? null,
-    tags: parseJsonArray(row.tags_json)
-  }));
+  return rows.map((row) => {
+    const tags = parseJsonArray(row.tags_json);
+    return {
+      provider: row.provider,
+      kind: row.kind,
+      symbol: row.symbol,
+      name: row.name ?? null,
+      assetClass: row.asset_class ? (row.asset_class as AssetClass) : null,
+      market: row.market ?? null,
+      currency: row.currency ?? null,
+      tags,
+      tagFacets: buildTagFacets(tags)
+    };
+  });
 }
 
 export async function getInstrumentProfile(
@@ -192,6 +197,7 @@ export async function getInstrumentProfile(
 
   if (!row) return null;
 
+  const tags = parseJsonArray(row.tags_json);
   return {
     provider: row.provider,
     kind: row.kind,
@@ -200,7 +206,8 @@ export async function getInstrumentProfile(
     assetClass: row.asset_class ? (row.asset_class as AssetClass) : null,
     market: row.market ?? null,
     currency: row.currency ?? null,
-    tags: parseJsonArray(row.tags_json),
+    tags,
+    tagFacets: buildTagFacets(tags),
     providerData: parseJsonObject(row.provider_data_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at

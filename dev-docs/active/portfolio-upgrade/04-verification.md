@@ -53,3 +53,7 @@
 - 2026-01-15: `pnpm typecheck`（通过，分析层 v1 贡献/风险指标）
 - 2026-01-15: `pnpm -C packages/shared build && pnpm -C apps/backend dev`（失败：Vite 端口 5173 被占用）
 - 2026-01-15: `pnpm -C packages/shared build && pnpm -C apps/backend dev`（启动 Vite 成功但命令超时退出；期间出现 preload.js 短暂缺失与 window.mytrader 未注入提示）
+- 2026-02-05: `pnpm typecheck`（失败：缺少 `@duckdb/duckdb-wasm` 类型声明，触发 apps/backend 相关 TS2307）
+- 2026-02-05: `pnpm -C apps/frontend typecheck`（通过）
+- 2026-02-05: `pnpm typecheck`（通过）
+- 2026-02-05: `pnpm typecheck`（通过，手动主题 + SW 层级维护）

@@ -2,6 +2,7 @@ import type { MarketDataSource } from "@mytrader/shared";
 
 import { all, run, transaction } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
+import { ensureInstrumentDomainSources } from "./instrumentDataSourceRepository";
 
 export interface DailyMoneyflowInput {
   symbol: string;
@@ -26,8 +27,13 @@ export async function upsertDailyMoneyflows(
 ): Promise<void> {
   if (inputs.length === 0) return;
   const now = Date.now();
+  const sources = inputs.map((input) => ({
+    symbol: input.symbol,
+    source: input.source
+  }));
 
   await transaction(db, async () => {
+    await ensureInstrumentDomainSources(db, "daily_moneyflows", sources, now);
     for (const input of inputs) {
       await run(
         db,
@@ -110,4 +116,3 @@ export async function getDailyMoneyflowCoverage(
     maxDate: row?.max_date ?? null
   };
 }
-

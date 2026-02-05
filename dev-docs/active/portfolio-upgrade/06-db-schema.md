@@ -113,6 +113,8 @@
 ## market-cache.sqlite（全局共享缓存）
 ### 已有表
 - `instruments(symbol primary key, name, asset_class, market, currency, auto_ingest, created_at, updated_at)`
+- `instrument_data_sources(symbol, domain, source, updated_at)`（同一标的同一数据域的当前数据源）
+- `sw_industries(level, code, name, parent_code, updated_at)`（申万行业层级与 L1-L2 关系）
 - `daily_prices(symbol, trade_date, open, high, low, close, volume, source, ingested_at)`
 
 ### 规划表（按需要逐步接入）

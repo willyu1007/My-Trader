@@ -1,3 +1,5 @@
+import type { TagFacets } from "./tagFacets";
+
 export type AccountId = string;
 export type PortfolioId = string;
 export type PositionId = string;
@@ -229,6 +231,7 @@ export interface UpdatePositionInput extends CreatePositionInput {
   id: PositionId;
 }
 
+
 export interface CreateRiskLimitInput {
   portfolioId: PortfolioId;
   limitType: RiskLimitType;
@@ -255,6 +258,7 @@ export interface InstrumentProfileSummary {
   market: string | null;
   currency: string | null;
   tags: string[];
+  tagFacets?: TagFacets;
 }
 
 export interface InstrumentProfile extends InstrumentProfileSummary {

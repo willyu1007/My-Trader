@@ -46,6 +46,7 @@ import type {
   RiskSeriesMetrics,
   RiskLimitType,
   TagSummary,
+  TagFacetTheme,
   WatchlistItem
 } from "@mytrader/shared";
 
@@ -485,11 +486,26 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   );
   const [marketSelectedProfile, setMarketSelectedProfile] =
     useState<InstrumentProfile | null>(null);
+  const marketSelectedIndustry = marketSelectedProfile?.tagFacets?.industry ?? [];
+  const marketSelectedThemes = marketSelectedProfile?.tagFacets?.themes ?? [];
   const [marketSelectedUserTags, setMarketSelectedUserTags] = useState<string[]>(
     []
   );
+  const marketSelectedManualThemes = useMemo(
+    () => marketSelectedUserTags.filter((tag) => tag.startsWith("theme:manual:")),
+    [marketSelectedUserTags]
+  );
+  const marketSelectedPlainUserTags = useMemo(
+    () => marketSelectedUserTags.filter((tag) => !tag.startsWith("theme:manual:")),
+    [marketSelectedUserTags]
+  );
   const [marketUserTagDraft, setMarketUserTagDraft] = useState("");
   const [marketShowProviderData, setMarketShowProviderData] = useState(false);
+  const [marketManualThemeOptions, setMarketManualThemeOptions] = useState<
+    PopoverSelectOption[]
+  >([]);
+  const [marketManualThemeLoading, setMarketManualThemeLoading] = useState(false);
+  const [marketManualThemeDraft, setMarketManualThemeDraft] = useState("");
 
   const [marketWatchlistItems, setMarketWatchlistItems] = useState<
     WatchlistItem[]
@@ -1757,6 +1773,28 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     }
   }, []);
 
+  const refreshManualThemeOptions = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketManualThemeLoading(true);
+    try {
+      const tags = await window.mytrader.market.listTags({
+        query: "theme:ths:",
+        limit: 500
+      });
+      const options = buildManualThemeOptions(tags);
+      setMarketManualThemeOptions(options);
+      setMarketManualThemeDraft((prev) =>
+        options.some((opt) => opt.value === prev) ? prev : ""
+      );
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      setMarketManualThemeOptions([]);
+      setMarketManualThemeDraft("");
+    } finally {
+      setMarketManualThemeLoading(false);
+    }
+  }, []);
+
   const resetMarketFilters = useCallback(() => {
     setMarketFilterMarket("all");
     setMarketFilterAssetClasses([]);
@@ -2051,6 +2089,10 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setError("标签必须符合 namespace:value，例如 user:核心 或 theme:AI。");
       return;
     }
+    if (tag.startsWith("theme:")) {
+      setError("主题请通过“手动主题（THS）”选择，不支持手动输入。");
+      return;
+    }
     setError(null);
     setNotice(null);
     try {
@@ -2089,6 +2131,41 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     },
     [marketSelectedSymbol]
   );
+
+  const handleAddManualTheme = useCallback(async () => {
+    if (!window.mytrader || !marketSelectedSymbol) return;
+    const tag = marketManualThemeDraft.trim();
+    if (!tag) return;
+    if (!tag.startsWith("theme:manual:")) {
+      setError("请选择 THS 主题后再添加。");
+      return;
+    }
+    if (!marketManualThemeOptions.some((opt) => opt.value === tag)) {
+      setError("主题不在 THS 列表中，请重新选择。");
+      return;
+    }
+    if (marketSelectedUserTags.includes(tag)) {
+      setNotice("主题已存在。");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      await window.mytrader.market.addInstrumentTag(marketSelectedSymbol, tag);
+      const tags = await window.mytrader.market.listInstrumentTags(
+        marketSelectedSymbol
+      );
+      setMarketSelectedUserTags(tags);
+      setNotice("主题已添加。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, [
+    marketManualThemeDraft,
+    marketManualThemeOptions,
+    marketSelectedSymbol,
+    marketSelectedUserTags
+  ]);
 
   const handleAddSelectedToWatchlist = useCallback(async () => {
     if (!window.mytrader || !marketSelectedProfile) return;
@@ -2283,6 +2360,11 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     refreshMarketWatchlist().catch(() => undefined);
     refreshMarketTags("").catch(() => undefined);
   }, [activeView, refreshMarketTags, refreshMarketWatchlist]);
+
+  useEffect(() => {
+    if (!marketInstrumentDetailsOpen) return;
+    refreshManualThemeOptions().catch(() => undefined);
+  }, [marketInstrumentDetailsOpen, refreshManualThemeOptions]);
 
   useEffect(() => {
     if (activeView !== "other") return;
@@ -4563,17 +4645,122 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                       </div>
                     </div>
 
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        行业（SW 口径）
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {marketSelectedIndustry.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketSelectedIndustry.map((item) => (
+                          <button
+                            key={item.tag}
+                            type="button"
+                            onClick={() => handleAddTargetTag(item.tag)}
+                            className="px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                            title="加入标签筛选"
+                          >
+                            {`L${item.level.slice(1)}:${item.name}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        主题
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {marketSelectedThemes.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketSelectedThemes.map((theme) => (
+                          <button
+                            key={theme.tag}
+                            type="button"
+                            onClick={() => handleAddTargetTag(theme.tag)}
+                            className="px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-dark/70"
+                            title="加入标签筛选"
+                          >
+                            {formatThemeLabel(theme)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <FormGroup label="手动主题（THS 选择）">
+                      <div className="flex gap-2">
+                        <PopoverSelect
+                          value={marketManualThemeDraft}
+                          onChangeValue={setMarketManualThemeDraft}
+                          options={marketManualThemeOptions}
+                          className="flex-1"
+                          disabled={marketManualThemeLoading}
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="add"
+                          onClick={handleAddManualTheme}
+                          disabled={!marketManualThemeDraft || marketManualThemeLoading}
+                        >
+                          添加
+                        </Button>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {marketSelectedManualThemes.length === 0 && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </span>
+                        )}
+                        {marketSelectedManualThemes.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleAddTargetTag(tag)}
+                              className="hover:underline"
+                              title="加入标签筛选"
+                            >
+                              {tag.replace(/^theme:manual:/, "")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveUserTag(tag)}
+                              className="text-slate-400 hover:text-red-500"
+                              aria-label={`移除主题 ${tag}`}
+                              title="移除主题"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      {marketManualThemeOptions.length === 0 && (
+                        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                          暂无 THS 主题可选（需先同步或导入相关主题标签）。
+                        </div>
+                      )}
+                    </FormGroup>
+
                     <div className="space-y-1.5">
                       <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         用户标签
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {marketSelectedUserTags.length === 0 && (
+                        {marketSelectedPlainUserTags.length === 0 && (
                           <span className="text-xs text-slate-500 dark:text-slate-400">
                             --
                           </span>
                         )}
-                        {marketSelectedUserTags.map((tag) => (
+                        {marketSelectedPlainUserTags.map((tag) => (
                           <span
                             key={tag}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
@@ -8355,6 +8542,30 @@ function parseTargetPriceFromTags(tags: string[]): number | null {
     if (Number.isFinite(value)) return value;
   }
   return null;
+}
+
+function buildManualThemeOptions(tags: TagSummary[]): PopoverSelectOption[] {
+  const options: PopoverSelectOption[] = [];
+  const seen = new Set<string>();
+  tags.forEach((item) => {
+    const raw = item.tag.trim();
+    if (!raw.startsWith("theme:ths:")) return;
+    const name = raw.slice("theme:ths:".length).trim();
+    if (!name) return;
+    const value = `theme:manual:${name}`;
+    if (seen.has(value)) return;
+    seen.add(value);
+    options.push({ value, label: name });
+  });
+  options.sort((a, b) => a.label.localeCompare(b.label));
+  return options;
+}
+
+function formatThemeLabel(theme: TagFacetTheme): string {
+  if (theme.provider) {
+    return `${theme.provider}:${theme.name}`;
+  }
+  return theme.name || theme.tag;
 }
 
 function computeFifoUnitCost(entries: LedgerEntry[], symbol: string): number | null {
