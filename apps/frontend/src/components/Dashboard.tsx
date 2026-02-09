@@ -122,6 +122,39 @@ type MarketChartRangeKey =
   | "10Y";
 
 type MarketFilterMarket = "all" | "CN";
+type TargetPoolStatsScope = "universe" | "focus";
+
+interface TargetPoolCategoryDetail {
+  key: string;
+  label: string;
+  symbols: string[];
+}
+
+interface TargetPoolStructureStats {
+  totalSymbols: number;
+  industryL1Count: number;
+  industryL2Count: number;
+  conceptCount: number;
+  unclassifiedCount: number;
+  classificationCoverage: number | null;
+  allSymbols: string[];
+  classifiedSymbols: string[];
+  industryL1Details: TargetPoolCategoryDetail[];
+  industryL2Details: TargetPoolCategoryDetail[];
+  conceptDetails: TargetPoolCategoryDetail[];
+  unclassifiedSymbols: string[];
+  symbolNames: Record<string, string | null>;
+  loading: boolean;
+  error: string | null;
+}
+
+type TargetPoolMetricKey =
+  | "totalSymbols"
+  | "industryL1Count"
+  | "industryL2Count"
+  | "conceptCount"
+  | "unclassifiedCount"
+  | "classificationCoverage";
 
 const emptyPositionForm: PositionFormState = {
   symbol: "",
@@ -186,6 +219,27 @@ const MARKET_EXPLORER_WIDTH_STORAGE_KEY = "mytrader:market:explorerWidth";
 const MARKET_EXPLORER_DEFAULT_WIDTH = 240;
 const MARKET_EXPLORER_MIN_WIDTH = 220;
 const MARKET_EXPLORER_MAX_WIDTH = 520;
+const TARGETS_EDITOR_SPLIT_STORAGE_KEY = "mytrader:other:targetsEditorLeftPct";
+const TARGETS_EDITOR_SPLIT_DEFAULT = 50;
+const TARGETS_EDITOR_SPLIT_MIN = 34;
+const TARGETS_EDITOR_SPLIT_MAX = 66;
+const TARGET_POOL_STRUCTURE_EMPTY: TargetPoolStructureStats = {
+  totalSymbols: 0,
+  industryL1Count: 0,
+  industryL2Count: 0,
+  conceptCount: 0,
+  unclassifiedCount: 0,
+  classificationCoverage: null,
+  allSymbols: [],
+  classifiedSymbols: [],
+  industryL1Details: [],
+  industryL2Details: [],
+  conceptDetails: [],
+  unclassifiedSymbols: [],
+  symbolNames: {},
+  loading: false,
+  error: null
+};
 
 const corporateActionKindLabels: Record<CorporateActionKindUi, string> = {
   split: "拆股",
@@ -463,6 +517,27 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     startX: number;
     startWidth: number;
   } | null>(null);
+  const [targetsEditorLeftPct, setTargetsEditorLeftPct] = useState<number>(() => {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return TARGETS_EDITOR_SPLIT_DEFAULT;
+    }
+    try {
+      const raw = window.localStorage.getItem(TARGETS_EDITOR_SPLIT_STORAGE_KEY);
+      const value = raw ? Number(raw) : NaN;
+      if (!Number.isFinite(value)) return TARGETS_EDITOR_SPLIT_DEFAULT;
+      return clampNumber(value, TARGETS_EDITOR_SPLIT_MIN, TARGETS_EDITOR_SPLIT_MAX);
+    } catch {
+      return TARGETS_EDITOR_SPLIT_DEFAULT;
+    }
+  });
+  const targetsEditorGridRef = useRef<HTMLDivElement | null>(null);
+  const targetsEditorResizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+    startPct: number;
+  } | null>(null);
+  const marketTargetPoolStatsRequestIdRef = useRef(0);
 
   const [marketTags, setMarketTags] = useState<TagSummary[]>([]);
   const [marketTagsLoading, setMarketTagsLoading] = useState(false);
@@ -571,7 +646,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const [marketTargetsConfig, setMarketTargetsConfig] =
     useState<MarketTargetsConfig>(() => ({
       includeHoldings: true,
-      includeRegistryAutoIngest: true,
+      includeRegistryAutoIngest: false,
       includeWatchlist: true,
       portfolioIds: null,
       explicitSymbols: [],
@@ -599,14 +674,31 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   });
   const [marketTargetsTagDraft, setMarketTargetsTagDraft] = useState("");
   const [marketTagManagementQuery, setMarketTagManagementQuery] = useState("");
-  const [marketTargetsPreviewFilter, setMarketTargetsPreviewFilter] = useState("");
   const [marketCurrentTargetsModalOpen, setMarketCurrentTargetsModalOpen] =
     useState(false);
   const [marketCurrentTargetsFilter, setMarketCurrentTargetsFilter] = useState("");
+  const [marketTargetPoolDetailMetric, setMarketTargetPoolDetailMetric] =
+    useState<TargetPoolMetricKey | null>(null);
+  const [marketTargetPoolDetailCategoryKey, setMarketTargetPoolDetailCategoryKey] =
+    useState<string | null>(null);
+  const [marketTargetPoolDetailMemberFilter, setMarketTargetPoolDetailMemberFilter] =
+    useState("");
   const [marketTargetsSectionOpen, setMarketTargetsSectionOpen] = useState({
     scope: true,
     symbols: true
   });
+  const [marketDiffSectionOpen, setMarketDiffSectionOpen] = useState({
+    added: true,
+    removed: true,
+    reasonChanged: true
+  });
+  const [marketTargetPoolStatsScope, setMarketTargetPoolStatsScope] =
+    useState<TargetPoolStatsScope>("focus");
+  const [marketTargetPoolStatsByScope, setMarketTargetPoolStatsByScope] =
+    useState<Record<TargetPoolStatsScope, TargetPoolStructureStats>>({
+      universe: { ...TARGET_POOL_STRUCTURE_EMPTY },
+      focus: { ...TARGET_POOL_STRUCTURE_EMPTY }
+    });
   const [marketTempTargets, setMarketTempTargets] = useState<TempTargetSymbol[]>([]);
   const [marketTempTargetsLoading, setMarketTempTargetsLoading] = useState(false);
   const [marketSelectedTempTargetSymbols, setMarketSelectedTempTargetSymbols] =
@@ -676,6 +768,8 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return values.map((value) => ({ value, label: value }));
   }, [marketSchedulerConfig?.timezone]);
 
+  const marketRegistryEntryEnabled = false;
+
   const marketPortfolioScopeSelectOptions = useMemo(
     () => [
       { value: "__all__", label: "全部组合" },
@@ -691,10 +785,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     const selected = marketTargetsConfig.portfolioIds ?? [];
     return selected.length > 0 ? selected[0] : "__all__";
   }, [marketTargetsConfig.portfolioIds]);
-
-  const marketTargetsPreviewKeyword = marketTargetsPreviewFilter
-    .trim()
-    .toLowerCase();
 
   const marketCurrentTargetsSource = useMemo(
     () => marketTargetsDiffPreview?.draft.symbols ?? marketTargetsPreview?.symbols ?? [],
@@ -713,32 +803,249 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   }, [marketCurrentTargetsKeyword, marketCurrentTargetsSource]);
 
   const marketFilteredAddedSymbols = useMemo(() => {
-    const source = marketTargetsDiffPreview?.addedSymbols ?? [];
-    if (!marketTargetsPreviewKeyword) return source;
-    return source.filter((row) =>
-      row.symbol.toLowerCase().includes(marketTargetsPreviewKeyword)
-    );
-  }, [marketTargetsDiffPreview?.addedSymbols, marketTargetsPreviewKeyword]);
+    return marketTargetsDiffPreview?.addedSymbols ?? [];
+  }, [marketTargetsDiffPreview?.addedSymbols]);
 
   const marketFilteredRemovedSymbols = useMemo(() => {
-    const source = marketTargetsDiffPreview?.removedSymbols ?? [];
-    if (!marketTargetsPreviewKeyword) return source;
-    return source.filter((row) =>
-      row.symbol.toLowerCase().includes(marketTargetsPreviewKeyword)
-    );
-  }, [marketTargetsDiffPreview?.removedSymbols, marketTargetsPreviewKeyword]);
+    return marketTargetsDiffPreview?.removedSymbols ?? [];
+  }, [marketTargetsDiffPreview?.removedSymbols]);
 
   const marketFilteredReasonChangedSymbols = useMemo(() => {
-    const source = marketTargetsDiffPreview?.reasonChangedSymbols ?? [];
-    if (!marketTargetsPreviewKeyword) return source;
-    return source.filter((row) =>
-      row.symbol.toLowerCase().includes(marketTargetsPreviewKeyword)
+    return marketTargetsDiffPreview?.reasonChangedSymbols ?? [];
+  }, [marketTargetsDiffPreview?.reasonChangedSymbols]);
+
+  const marketFocusTargetSymbols = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (marketTargetsDiffPreview?.draft.symbols ?? marketTargetsPreview?.symbols ?? [])
+            .map((item) => item.symbol.trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [marketTargetsDiffPreview?.draft.symbols, marketTargetsPreview?.symbols]
+  );
+
+  const marketActiveTargetPoolStats = useMemo(
+    () => marketTargetPoolStatsByScope[marketTargetPoolStatsScope],
+    [marketTargetPoolStatsByScope, marketTargetPoolStatsScope]
+  );
+
+  const marketTargetPoolScopeLabel = useMemo(
+    () => (marketTargetPoolStatsScope === "universe" ? "全量标的" : "强相关标的"),
+    [marketTargetPoolStatsScope]
+  );
+
+  const marketTargetPoolMetricCards = useMemo(
+    () => [
+      {
+        key: "totalSymbols" as const,
+        label: "标的总数",
+        value: String(marketActiveTargetPoolStats.totalSymbols)
+      },
+      {
+        key: "industryL1Count" as const,
+        label: "一级行业分类",
+        value: String(marketActiveTargetPoolStats.industryL1Count)
+      },
+      {
+        key: "industryL2Count" as const,
+        label: "二级行业分类",
+        value: String(marketActiveTargetPoolStats.industryL2Count)
+      },
+      {
+        key: "conceptCount" as const,
+        label: "概念分类数",
+        value: String(marketActiveTargetPoolStats.conceptCount)
+      },
+      {
+        key: "unclassifiedCount" as const,
+        label: "未分类标的",
+        value: String(marketActiveTargetPoolStats.unclassifiedCount)
+      },
+      {
+        key: "classificationCoverage" as const,
+        label: "分类覆盖率",
+        value:
+          marketActiveTargetPoolStats.classificationCoverage === null
+            ? "--"
+            : formatPct(marketActiveTargetPoolStats.classificationCoverage)
+      }
+    ],
+    [marketActiveTargetPoolStats]
+  );
+
+  const marketTargetPoolDetailTitle = useMemo(() => {
+    if (!marketTargetPoolDetailMetric) return "";
+    const card = marketTargetPoolMetricCards.find(
+      (item) => item.key === marketTargetPoolDetailMetric
     );
-  }, [marketTargetsDiffPreview?.reasonChangedSymbols, marketTargetsPreviewKeyword]);
+    return `${marketTargetPoolScopeLabel} · ${card?.label ?? "指标详情"}`;
+  }, [marketTargetPoolDetailMetric, marketTargetPoolMetricCards, marketTargetPoolScopeLabel]);
+
+  const marketTargetPoolDetailValue = useMemo(() => {
+    if (!marketTargetPoolDetailMetric) return "--";
+    const card = marketTargetPoolMetricCards.find(
+      (item) => item.key === marketTargetPoolDetailMetric
+    );
+    return card?.value ?? "--";
+  }, [marketTargetPoolDetailMetric, marketTargetPoolMetricCards]);
+
+  const marketTargetPoolDetailDescription = useMemo(() => {
+    if (!marketTargetPoolDetailMetric) return "";
+    switch (marketTargetPoolDetailMetric) {
+      case "totalSymbols":
+        return "当前口径下参与统计的标的总数。";
+      case "industryL1Count":
+        return "已命中的一级行业分类标签。";
+      case "industryL2Count":
+        return "已命中的二级行业分类标签。";
+      case "conceptCount":
+        return "已命中的概念（主题）分类标签。";
+      case "unclassifiedCount":
+        return "未命中行业与概念分类的标的数量。";
+      case "classificationCoverage":
+        return "有任一行业或概念分类的标的占比。";
+      default:
+        return "";
+    }
+  }, [marketTargetPoolDetailMetric]);
+
+  const marketTargetPoolDetailCategoryRows = useMemo(() => {
+    if (!marketTargetPoolDetailMetric) {
+      return [] as Array<{
+        key: string;
+        label: string;
+        symbols: string[];
+        count: number;
+        ratio: number | null;
+      }>;
+    }
+
+    const total = Math.max(0, marketActiveTargetPoolStats.totalSymbols);
+    const toRow = (detail: TargetPoolCategoryDetail) => {
+      const count = detail.symbols.length;
+      return {
+        key: detail.key,
+        label: detail.label,
+        symbols: detail.symbols,
+        count,
+        ratio: total > 0 ? count / total : null
+      };
+    };
+
+    switch (marketTargetPoolDetailMetric) {
+      case "industryL1Count":
+        return marketActiveTargetPoolStats.industryL1Details.map(toRow);
+      case "industryL2Count":
+        return marketActiveTargetPoolStats.industryL2Details.map(toRow);
+      case "conceptCount":
+        return marketActiveTargetPoolStats.conceptDetails.map(toRow);
+      case "unclassifiedCount":
+        return [
+          toRow({
+            key: "unclassified",
+            label: "未分类",
+            symbols: marketActiveTargetPoolStats.unclassifiedSymbols
+          })
+        ];
+      case "classificationCoverage":
+        return [
+          toRow({
+            key: "classified",
+            label: "已分类",
+            symbols: marketActiveTargetPoolStats.classifiedSymbols
+          }),
+          toRow({
+            key: "unclassified",
+            label: "未分类",
+            symbols: marketActiveTargetPoolStats.unclassifiedSymbols
+          })
+        ];
+      case "totalSymbols":
+      default:
+        return [
+          toRow({
+            key: "all",
+            label: "全部标的",
+            symbols: marketActiveTargetPoolStats.allSymbols
+          }),
+          toRow({
+            key: "classified",
+            label: "已分类",
+            symbols: marketActiveTargetPoolStats.classifiedSymbols
+          }),
+          toRow({
+            key: "unclassified",
+            label: "未分类",
+            symbols: marketActiveTargetPoolStats.unclassifiedSymbols
+          })
+        ];
+    }
+  }, [marketActiveTargetPoolStats, marketTargetPoolDetailMetric]);
+
+  const marketTargetPoolActiveCategoryRow = useMemo(() => {
+    if (marketTargetPoolDetailCategoryRows.length === 0) return null;
+    const selected = marketTargetPoolDetailCategoryRows.find(
+      (row) => row.key === marketTargetPoolDetailCategoryKey
+    );
+    return selected ?? marketTargetPoolDetailCategoryRows[0];
+  }, [marketTargetPoolDetailCategoryRows, marketTargetPoolDetailCategoryKey]);
+
+  const marketTargetPoolDetailMembers = useMemo(() => {
+    const source = marketTargetPoolActiveCategoryRow?.symbols ?? [];
+    const keyword = marketTargetPoolDetailMemberFilter.trim().toLowerCase();
+    if (!keyword) return source;
+    return source.filter((symbol) => {
+      const normalized = symbol.toLowerCase();
+      if (normalized.includes(keyword)) return true;
+      const name = marketActiveTargetPoolStats.symbolNames[symbol]?.toLowerCase() ?? "";
+      return Boolean(name && name.includes(keyword));
+    });
+  }, [
+    marketTargetPoolActiveCategoryRow,
+    marketTargetPoolDetailMemberFilter,
+    marketActiveTargetPoolStats.symbolNames
+  ]);
+
+  useEffect(() => {
+    if (!marketTargetPoolDetailMetric) {
+      setMarketTargetPoolDetailCategoryKey(null);
+      setMarketTargetPoolDetailMemberFilter("");
+      return;
+    }
+    setMarketTargetPoolDetailCategoryKey(null);
+    setMarketTargetPoolDetailMemberFilter("");
+  }, [marketTargetPoolDetailMetric, marketTargetPoolStatsScope]);
+
+  useEffect(() => {
+    if (!marketTargetPoolDetailCategoryRows.length) {
+      setMarketTargetPoolDetailCategoryKey(null);
+      return;
+    }
+    if (
+      !marketTargetPoolDetailCategoryKey ||
+      !marketTargetPoolDetailCategoryRows.some(
+        (row) => row.key === marketTargetPoolDetailCategoryKey
+      )
+    ) {
+      setMarketTargetPoolDetailCategoryKey(marketTargetPoolDetailCategoryRows[0]?.key ?? null);
+    }
+  }, [marketTargetPoolDetailCategoryRows, marketTargetPoolDetailCategoryKey]);
 
   const handleToggleTargetsSection = useCallback(
     (section: "scope" | "symbols") => {
       setMarketTargetsSectionOpen((prev) => ({
+        ...prev,
+        [section]: !prev[section]
+      }));
+    },
+    []
+  );
+
+  const handleToggleDiffSection = useCallback(
+    (section: "added" | "removed" | "reasonChanged") => {
+      setMarketDiffSectionOpen((prev) => ({
         ...prev,
         [section]: !prev[section]
       }));
@@ -1554,6 +1861,18 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   }, [marketExplorerWidth]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(
+        TARGETS_EDITOR_SPLIT_STORAGE_KEY,
+        String(targetsEditorLeftPct)
+      );
+    } catch {
+      // ignore
+    }
+  }, [targetsEditorLeftPct]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const handleMove = (event: PointerEvent) => {
       const state = marketExplorerResizeRef.current;
@@ -1570,6 +1889,39 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     const stop = () => {
       if (!marketExplorerResizeRef.current) return;
       marketExplorerResizeRef.current = null;
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      document.body.style.userSelect = "";
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleMove = (event: PointerEvent) => {
+      const state = targetsEditorResizeRef.current;
+      if (!state) return;
+      if (state.startWidth <= 0) return;
+      const delta = event.clientX - state.startX;
+      const deltaPct = (delta / state.startWidth) * 100;
+      const next = clampNumber(
+        state.startPct + deltaPct,
+        TARGETS_EDITOR_SPLIT_MIN,
+        TARGETS_EDITOR_SPLIT_MAX
+      );
+      setTargetsEditorLeftPct(next);
+    };
+
+    const stop = () => {
+      if (!targetsEditorResizeRef.current) return;
+      targetsEditorResizeRef.current = null;
       document.body.style.userSelect = "";
     };
 
@@ -2230,6 +2582,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       const config = await window.mytrader.market.getTargets();
       const normalizedConfig: MarketTargetsConfig = {
         ...config,
+        includeRegistryAutoIngest: false,
         tagFilters: []
       };
       setMarketTargetsSavedConfig(normalizedConfig);
@@ -2255,6 +2608,233 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setMarketTargetsLoading(false);
     }
   }, []);
+
+  const refreshMarketTargetPoolStats = useCallback(async () => {
+    if (!window.mytrader) return;
+    const marketApi = window.mytrader.market;
+    const requestId = marketTargetPoolStatsRequestIdRef.current + 1;
+    marketTargetPoolStatsRequestIdRef.current = requestId;
+
+    setMarketTargetPoolStatsByScope((prev) => ({
+      universe: { ...prev.universe, loading: true, error: null },
+      focus: { ...prev.focus, loading: true, error: null }
+    }));
+
+    try {
+      const [
+        kindTagsRaw,
+        industryL1Raw,
+        industryL2Raw,
+        industryLegacyRaw,
+        themeConceptRaw,
+        conceptRaw
+      ] =
+        await Promise.all([
+          marketApi.listTags({ query: "kind:", limit: 500 }),
+          marketApi.listTags({ query: "ind:sw:l1:", limit: 500 }),
+          marketApi.listTags({ query: "ind:sw:l2:", limit: 500 }),
+          marketApi.listTags({ query: "industry:", limit: 500 }),
+          marketApi.listTags({ query: "theme:", limit: 500 }),
+          marketApi.listTags({ query: "concept:", limit: 500 })
+        ]);
+
+      if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+
+      const providerKindTags = filterUniqueTagSummariesByPrefix(
+        kindTagsRaw,
+        "kind:",
+        "provider"
+      );
+      const providerIndustryL1Tags = filterUniqueTagSummariesByPrefix(
+        industryL1Raw,
+        "ind:sw:l1:",
+        "provider"
+      );
+      const providerIndustryLegacyTags = filterUniqueTagSummariesByPrefix(
+        industryLegacyRaw,
+        "industry:",
+        "provider"
+      );
+      const providerIndustryL2Tags = filterUniqueTagSummariesByPrefix(
+        industryL2Raw,
+        "ind:sw:l2:",
+        "provider"
+      );
+      const providerThemeTags = filterUniqueTagSummariesByPrefix(
+        themeConceptRaw,
+        "theme:",
+        "provider"
+      );
+      const providerConceptRawTags = filterUniqueTagSummariesByPrefix(
+        conceptRaw,
+        "concept:",
+        "provider"
+      );
+      const providerConceptTags = dedupeTagSummaries([
+        ...providerThemeTags,
+        ...providerConceptRawTags
+      ]);
+
+      const industryL1TagsForUniverse =
+        providerIndustryL1Tags.length > 0
+          ? providerIndustryL1Tags
+          : providerIndustryLegacyTags;
+      const universeMembersByTag = new Map<string, string[]>();
+      const universeAllSymbols = new Set<string>();
+
+      await mapWithConcurrency(
+        providerKindTags.map((row) => row.tag),
+        4,
+        async (tag) => {
+          const members = await marketApi.getTagMembers({
+            tag,
+            limit: 50000
+          });
+          if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+          const normalized = normalizeSymbolList(members);
+          universeMembersByTag.set(tag, normalized);
+          normalized.forEach((symbol) => universeAllSymbols.add(symbol));
+        }
+      );
+
+      if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+
+      const universeClassificationTags = Array.from(
+        new Set(
+          [
+            ...industryL1TagsForUniverse,
+            ...providerIndustryL2Tags,
+            ...providerConceptTags
+          ].map((row) => row.tag)
+        )
+      );
+
+      const universeClassifiedSymbols = new Set<string>();
+      await mapWithConcurrency(universeClassificationTags, 6, async (tag) => {
+        const members = await marketApi.getTagMembers({
+          tag,
+          limit: 50000
+        });
+        if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+        const normalized = normalizeSymbolList(members);
+        universeMembersByTag.set(tag, normalized);
+        normalized.forEach((symbol) => universeClassifiedSymbols.add(symbol));
+      });
+
+      if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+
+      const universeIndustryL1Details = buildCategoryDetailsFromTagSummaries(
+        industryL1TagsForUniverse,
+        universeMembersByTag
+      );
+      const universeIndustryL2Details = buildCategoryDetailsFromTagSummaries(
+        providerIndustryL2Tags,
+        universeMembersByTag
+      );
+      const universeConceptDetails = buildCategoryDetailsFromTagSummaries(
+        providerConceptTags,
+        universeMembersByTag
+      );
+      const universeAllSymbolsList =
+        universeAllSymbols.size > 0
+          ? Array.from(universeAllSymbols).sort((a, b) => a.localeCompare(b))
+          : normalizeSymbolList(
+              Array.from(
+                new Set(
+                  providerKindTags.flatMap((row) => universeMembersByTag.get(row.tag) ?? [])
+                )
+              )
+            );
+      const universeClassifiedSymbolsList = Array.from(universeClassifiedSymbols).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      const universeClassifiedSet = new Set(universeClassifiedSymbolsList);
+      const universeUnclassifiedSymbolsList = universeAllSymbolsList.filter(
+        (symbol) => !universeClassifiedSet.has(symbol)
+      );
+
+      const universeStats = buildTargetPoolStructureStats({
+        totalSymbols: universeAllSymbolsList.length,
+        industryL1Count: universeIndustryL1Details.length,
+        industryL2Count: universeIndustryL2Details.length,
+        conceptCount: universeConceptDetails.length,
+        classifiedCount: universeClassifiedSymbolsList.length,
+        allSymbols: universeAllSymbolsList,
+        classifiedSymbols: universeClassifiedSymbolsList,
+        industryL1Details: universeIndustryL1Details,
+        industryL2Details: universeIndustryL2Details,
+        conceptDetails: universeConceptDetails,
+        unclassifiedSymbols: universeUnclassifiedSymbolsList,
+        symbolNames: {}
+      });
+
+      const focusIndustryL1Map = new Map<string, Set<string>>();
+      const focusIndustryL2Map = new Map<string, Set<string>>();
+      const focusConceptMap = new Map<string, Set<string>>();
+      const focusClassifiedSymbols = new Set<string>();
+      const focusSymbolNames: Record<string, string | null> = {};
+      let focusClassifiedCount = 0;
+
+      await mapWithConcurrency(marketFocusTargetSymbols, 8, async (symbol) => {
+        const profile = await marketApi.getInstrumentProfile(symbol);
+        if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+        focusSymbolNames[symbol] = profile?.name ?? null;
+        const tagStats = collectClassificationFromTags(profile?.tags ?? []);
+        if (tagStats.hasClassification) {
+          focusClassifiedCount += 1;
+          focusClassifiedSymbols.add(symbol);
+        }
+        tagStats.industryL1.forEach((tag) =>
+          addSymbolToCategoryMap(focusIndustryL1Map, tag, symbol)
+        );
+        tagStats.industryL2.forEach((tag) =>
+          addSymbolToCategoryMap(focusIndustryL2Map, tag, symbol)
+        );
+        tagStats.concepts.forEach((tag) =>
+          addSymbolToCategoryMap(focusConceptMap, tag, symbol)
+        );
+      });
+
+      if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+
+      const focusAllSymbolsList = [...marketFocusTargetSymbols].sort((a, b) =>
+        a.localeCompare(b)
+      );
+      const focusClassifiedSymbolsList = Array.from(focusClassifiedSymbols).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      const focusUnclassifiedSymbolsList = focusAllSymbolsList.filter(
+        (symbol) => !focusClassifiedSymbols.has(symbol)
+      );
+
+      const focusStats = buildTargetPoolStructureStats({
+        totalSymbols: focusAllSymbolsList.length,
+        industryL1Count: focusIndustryL1Map.size,
+        industryL2Count: focusIndustryL2Map.size,
+        conceptCount: focusConceptMap.size,
+        classifiedCount: focusClassifiedCount,
+        allSymbols: focusAllSymbolsList,
+        classifiedSymbols: focusClassifiedSymbolsList,
+        industryL1Details: buildCategoryDetailsFromCategoryMap(focusIndustryL1Map),
+        industryL2Details: buildCategoryDetailsFromCategoryMap(focusIndustryL2Map),
+        conceptDetails: buildCategoryDetailsFromCategoryMap(focusConceptMap),
+        unclassifiedSymbols: focusUnclassifiedSymbolsList,
+        symbolNames: focusSymbolNames
+      });
+
+      setMarketTargetPoolStatsByScope({
+        universe: { ...universeStats, loading: false, error: null },
+        focus: { ...focusStats, loading: false, error: null }
+      });
+    } catch (err) {
+      if (marketTargetPoolStatsRequestIdRef.current !== requestId) return;
+      const message = toUserErrorMessage(err);
+      setMarketTargetPoolStatsByScope((prev) => ({
+        universe: { ...prev.universe, loading: false, error: message },
+        focus: { ...prev.focus, loading: false, error: message }
+      }));
+    }
+  }, [marketFocusTargetSymbols]);
 
   const refreshMarketTokenStatus = useCallback(async () => {
     if (!window.mytrader) return;
@@ -2831,6 +3411,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
         });
         const saved: MarketTargetsConfig = {
           ...savedRaw,
+          includeRegistryAutoIngest: false,
           tagFilters: []
         };
         setMarketTargetsSavedConfig(saved);
@@ -2861,11 +3442,13 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     try {
       const payload: MarketTargetsConfig = {
         ...marketTargetsConfig,
+        includeRegistryAutoIngest: false,
         tagFilters: []
       };
       const savedRaw = await window.mytrader.market.setTargets(payload);
       const saved: MarketTargetsConfig = {
         ...savedRaw,
+        includeRegistryAutoIngest: false,
         tagFilters: []
       };
       setMarketTargetsSavedConfig(saved);
@@ -3214,6 +3797,43 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     []
   );
 
+  const handleTargetsEditorResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      const width = targetsEditorGridRef.current?.getBoundingClientRect().width ?? 0;
+      if (width <= 0) return;
+      event.preventDefault();
+      targetsEditorResizeRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: width,
+        startPct: targetsEditorLeftPct
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      document.body.style.userSelect = "none";
+    },
+    [targetsEditorLeftPct]
+  );
+
+  const handleTargetsEditorResizeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = event.shiftKey ? 6 : 3;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setTargetsEditorLeftPct((prev) =>
+          clampNumber(prev - step, TARGETS_EDITOR_SPLIT_MIN, TARGETS_EDITOR_SPLIT_MAX)
+        );
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setTargetsEditorLeftPct((prev) =>
+          clampNumber(prev + step, TARGETS_EDITOR_SPLIT_MIN, TARGETS_EDITOR_SPLIT_MAX)
+        );
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     if (activeView !== "market") return;
     if (!window.mytrader) return;
@@ -3248,7 +3868,9 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       refreshMarketIngestRuns().catch(() => undefined);
       refreshMarketIngestControl().catch(() => undefined);
       refreshMarketSchedulerConfig().catch(() => undefined);
-      refreshMarketRegistry().catch(() => undefined);
+      if (marketRegistryEntryEnabled) {
+        refreshMarketRegistry().catch(() => undefined);
+      }
       return;
     }
 
@@ -3272,6 +3894,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     refreshMarketSchedulerConfig,
     refreshMarketTags,
     marketTagManagementQuery,
+    marketRegistryEntryEnabled,
     refreshMarketTargets,
     refreshMarketTokenStatus
   ]);
@@ -3286,6 +3909,20 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   }, [activeView, otherTab, marketTargetsConfig, refreshMarketTargetsDiff]);
 
   useEffect(() => {
+    if (activeView !== "other" || otherTab !== "data-management") return;
+    if (!window.mytrader) return;
+    const timer = window.setTimeout(() => {
+      refreshMarketTargetPoolStats().catch(() => undefined);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeView,
+    otherTab,
+    marketFocusTargetSymbols,
+    refreshMarketTargetPoolStats
+  ]);
+
+  useEffect(() => {
     if (activeView !== "other" || otherTab !== "instrument-management") return;
     if (!window.mytrader) return;
     const timer = window.setTimeout(() => {
@@ -3296,6 +3933,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
 
   useEffect(() => {
     if (activeView !== "other" || otherTab !== "data-management") return;
+    if (!marketRegistryEntryEnabled) return;
     if (!window.mytrader) return;
     const timer = window.setTimeout(() => {
       refreshMarketRegistry().catch(() => undefined);
@@ -3304,6 +3942,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   }, [
     activeView,
     otherTab,
+    marketRegistryEntryEnabled,
     marketRegistryAutoFilter,
     marketRegistryQuery,
     refreshMarketRegistry
@@ -5054,7 +5693,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                   style={{ width: marketExplorerWidth }}
                 >
                   <div className="pt-0 pb-0 border-b border-border-light dark:border-border-dark space-y-0">
-                    <div className="w-full rounded-none border border-slate-200 dark:border-border-dark bg-white/75 dark:bg-panel-dark/80 backdrop-blur shadow-sm dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_12px_rgba(0,0,0,0.35)] focus-within:border-primary/60">
+                    <div className="w-full rounded-none border border-slate-200 dark:border-border-dark bg-white/75 dark:bg-panel-dark/80 backdrop-blur shadow-sm focus-within:border-primary/60">
                       <div className="flex items-center px-0 bg-transparent dark:bg-white/5">
                         <div className="flex-1 relative">
                           <span className="material-icons-outlined absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-lg">
@@ -7360,7 +7999,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                         </h3>
                       </div>
 
-                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3">
+                      <div className="scheduler-shell rounded-md border p-3">
                         {!marketSchedulerConfig && !marketSchedulerLoading && (
                           <div className="text-xs text-slate-500 dark:text-slate-400">
                             --
@@ -7537,7 +8176,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                 </Button>
                               </div>
                               {!marketTokenStatus?.configured && (
-                                <div className="text-[11px] text-amber-600 dark:text-amber-300">
+                                <div className="ui-tone-warning text-[11px]">
                                   执行拉取需要先配置可用的数据源令牌。
                                 </div>
                               )}
@@ -7554,13 +8193,13 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                     >
                       {marketSchedulerConfig ? (
                         <div className="space-y-4">
-                          <div className="rounded-lg border border-slate-200 dark:border-border-dark bg-slate-50/80 dark:bg-background-dark/40 p-4">
-                            <div className="text-base font-semibold text-slate-900 dark:text-white">
+                          <div className="scheduler-intro rounded-lg border p-4">
+                            <div className="text-base font-semibold text-[color:var(--mt-text)]">
                               自动调度补充项
                             </div>
                           </div>
 
-                          <div className="rounded-lg border border-slate-200 dark:border-border-dark p-4 space-y-4">
+                          <div className="scheduler-card rounded-lg border p-4 space-y-4">
                             <label className="flex items-start gap-3">
                               <input
                                 type="checkbox"
@@ -7573,7 +8212,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                 }
                               />
                               <span className="space-y-1">
-                                <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900 dark:text-white">
+                                <span className="inline-flex items-center gap-1 text-sm font-semibold text-[color:var(--mt-text)]">
                                   启用定时调度
                                   <HelpHint text="关闭后不会按计划自动触发，但不影响手动拉取。" />
                                 </span>
@@ -7600,8 +8239,8 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                             </FormGroup>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <label className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/35 p-3">
-                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                              <label className="scheduler-toggle-card rounded-md border p-3">
+                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--mt-text)]">
                                   <input
                                     type="checkbox"
                                     className="h-4 w-4 accent-primary"
@@ -7615,13 +8254,13 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                   启动后立即执行
                                   <HelpHint text="应用启动后触发一次拉取，无需等待当天定时时间。" />
                                 </span>
-                                <span className="mt-1 block pl-6 text-xs text-slate-500 dark:text-slate-400">
+                                <span className="ui-tone-neutral mt-1 block pl-6 text-xs">
                                   适合长时间离线后快速补齐最新数据。
                                 </span>
                               </label>
 
-                              <label className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/35 p-3">
-                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                              <label className="scheduler-toggle-card rounded-md border p-3">
+                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--mt-text)]">
                                   <input
                                     type="checkbox"
                                     className="h-4 w-4 accent-primary"
@@ -7635,7 +8274,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                   补跑错过的当日任务
                                   <HelpHint text="若应用在执行时段离线，恢复后会补一次当日任务。" />
                                 </span>
-                                <span className="mt-1 block pl-6 text-xs text-slate-500 dark:text-slate-400">
+                                <span className="ui-tone-neutral mt-1 block pl-6 text-xs">
                                   减少因离线导致的数据缺口。
                                 </span>
                               </label>
@@ -7764,9 +8403,18 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 p-3 items-start">
-                          <div className="space-y-3">
-                            <div className="rounded-md border border-slate-200 dark:border-border-dark">
+                        <div
+                          ref={targetsEditorGridRef}
+                          className="grid grid-cols-1 xl:grid-cols-[minmax(0,var(--targets-left-pct))_8px_minmax(0,var(--targets-right-pct))] gap-3 p-3 items-start"
+                          style={
+                            {
+                              "--targets-left-pct": `${targetsEditorLeftPct}%`,
+                              "--targets-right-pct": `calc(${100 - targetsEditorLeftPct}% - 8px)`
+                            } as React.CSSProperties
+                          }
+                        >
+                          <div className="space-y-3 min-w-0">
+                            <div className="rounded-md bg-slate-50/45 dark:bg-background-dark/25">
                               <button
                                 type="button"
                                 onClick={() => handleToggleTargetsSection("scope")}
@@ -7810,21 +8458,23 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                       />
                                       <span>包含自选</span>
                                     </label>
-                                    <label className="flex items-center gap-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={
-                                          marketTargetsConfig.includeRegistryAutoIngest
-                                        }
-                                        onChange={(e) =>
-                                          setMarketTargetsConfig((prev) => ({
-                                            ...prev,
-                                            includeRegistryAutoIngest: e.target.checked
-                                          }))
-                                        }
-                                      />
-                                      <span>包含注册标的</span>
-                                    </label>
+                                    {marketRegistryEntryEnabled && (
+                                      <label className="flex items-center gap-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={
+                                            marketTargetsConfig.includeRegistryAutoIngest
+                                          }
+                                          onChange={(e) =>
+                                            setMarketTargetsConfig((prev) => ({
+                                              ...prev,
+                                              includeRegistryAutoIngest: e.target.checked
+                                            }))
+                                          }
+                                        />
+                                        <span>包含注册标的</span>
+                                      </label>
+                                    )}
                                   </div>
                                   <div className="space-y-1">
                                     <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -7848,7 +8498,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                               )}
                             </div>
 
-                            <div className="rounded-md border border-slate-200 dark:border-border-dark">
+                            <div className="rounded-md bg-slate-50/45 dark:bg-background-dark/25">
                               <button
                                 type="button"
                                 onClick={() => handleToggleTargetsSection("symbols")}
@@ -7885,13 +8535,13 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                       type="button"
                                       onClick={handlePreviewManualTargetSymbols}
                                       disabled={!marketTargetsSymbolDraft.trim()}
-                                      className="absolute right-2 bottom-2 h-7 px-3 rounded-[4px] border border-primary/70 bg-primary/90 text-[11px] font-semibold text-white shadow-[0_6px_14px_rgba(8,24,28,0.3)] hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                      className="ui-btn ui-btn-primary absolute right-2 bottom-2 h-7 px-3 rounded-[4px] text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                       解析
                                     </button>
                                   </div>
 
-                                  <div className="rounded-md border border-slate-200 dark:border-border-dark p-2 space-y-2">
+                                  <div className="rounded-md bg-slate-100/70 dark:bg-background-dark/35 p-2 space-y-2">
                                     <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                                       <span>预览</span>
                                       <span className="font-mono">
@@ -7905,7 +8555,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                       {marketManualSymbolPreview.addable.map((symbol) => (
                                         <div
                                           key={`preview-addable-${symbol}`}
-                                          className="flex items-center justify-between gap-2 rounded border border-emerald-200 dark:border-emerald-800/50 px-2 py-1"
+                                          className="flex items-center justify-between gap-2 rounded bg-emerald-50/70 dark:bg-emerald-900/15 px-2 py-1"
                                         >
                                           <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
                                             {symbol}
@@ -7934,7 +8584,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                       {marketManualSymbolPreview.existing.map((symbol) => (
                                         <div
                                           key={`preview-existing-${symbol}`}
-                                          className="flex items-center justify-between gap-2 rounded border border-amber-200 dark:border-amber-800/50 px-2 py-1"
+                                          className="flex items-center justify-between gap-2 rounded bg-amber-50/70 dark:bg-amber-900/15 px-2 py-1"
                                         >
                                           <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
                                             {symbol}
@@ -7963,7 +8613,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                       {marketManualSymbolPreview.invalid.map((symbol) => (
                                         <div
                                           key={`preview-invalid-${symbol}`}
-                                          className="flex items-center justify-between gap-2 rounded border border-rose-200 dark:border-rose-800/50 px-2 py-1"
+                                          className="flex items-center justify-between gap-2 rounded bg-rose-50/70 dark:bg-rose-900/15 px-2 py-1"
                                         >
                                           <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
                                             {symbol}
@@ -8003,7 +8653,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                         type="button"
                                         onClick={handleApplyManualTargetSymbols}
                                         disabled={marketManualSymbolPreview.addable.length === 0}
-                                        className="h-7 px-3 rounded-[4px] border border-primary/70 bg-primary/90 text-[11px] font-semibold text-white shadow-[0_6px_14px_rgba(8,24,28,0.3)] hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="ui-btn ui-btn-primary h-7 px-3 rounded-[4px] text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
                                         加入目标池（{marketManualSymbolPreview.addable.length}）
                                       </button>
@@ -8015,41 +8665,80 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
 
                           </div>
 
-                          <div className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-background-dark p-3 space-y-3 xl:sticky xl:top-3">
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
-                                <div className="text-slate-400">总数</div>
-                                <div className="font-mono text-slate-700 dark:text-slate-200">
-                                  {marketTargetsDiffPreview
-                                    ? marketTargetsDiffPreview.draft.symbols.length
-                                    : marketTargetsPreview
-                                      ? marketTargetsPreview.symbols.length
-                                      : "--"}
+                          <div
+                            role="separator"
+                            aria-orientation="vertical"
+                            tabIndex={0}
+                            onPointerDown={handleTargetsEditorResizePointerDown}
+                            onKeyDown={handleTargetsEditorResizeKeyDown}
+                            className="hidden xl:flex w-[8px] h-full cursor-col-resize items-center justify-center rounded-[3px] hover:bg-primary/12 focus:bg-primary/16 focus:outline-none transition-colors"
+                            title="拖拽调节左右宽度（←/→ 可微调）"
+                          >
+                            <span className="h-full w-px bg-slate-300/95 dark:bg-border-dark pointer-events-none" />
+                          </div>
+
+                          <div className="min-w-0 rounded-md bg-slate-50/70 dark:bg-background-dark/45 p-3 space-y-3 xl:sticky xl:top-3">
+                            <div className="rounded-md bg-white/65 dark:bg-background-dark/55 p-2.5 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                  标的结构看板
+                                </div>
+                                <div className="inline-flex items-center rounded-md bg-slate-100/80 dark:bg-background-dark/70 p-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setMarketTargetPoolStatsScope("universe")}
+                                    className={`h-7 px-3 rounded-[5px] text-xs transition-colors ${
+                                      marketTargetPoolStatsScope === "universe"
+                                        ? "bg-primary/20 text-slate-900 dark:text-slate-100"
+                                        : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                    }`}
+                                  >
+                                    全量标的
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setMarketTargetPoolStatsScope("focus")}
+                                    className={`h-7 px-3 rounded-[5px] text-xs transition-colors ${
+                                      marketTargetPoolStatsScope === "focus"
+                                        ? "bg-primary/20 text-slate-900 dark:text-slate-100"
+                                        : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                    }`}
+                                  >
+                                    强相关标的
+                                  </button>
                                 </div>
                               </div>
-                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
-                                <div className="text-slate-400">新增</div>
-                                <div className="font-mono text-slate-700 dark:text-slate-200">
-                                  {marketTargetsDiffPreview?.addedSymbols.length ?? "--"}
-                                </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                                {marketTargetPoolMetricCards.map((card) => (
+                                  <button
+                                    key={card.key}
+                                    type="button"
+                                    onClick={() => setMarketTargetPoolDetailMetric(card.key)}
+                                    className="rounded-md border border-slate-200/60 dark:border-border-dark/70 bg-slate-100/65 dark:bg-background-dark/70 px-2.5 py-2 min-h-[54px] flex flex-col justify-between text-left hover:bg-slate-200/60 dark:hover:bg-background-dark/82 transition-colors"
+                                  >
+                                    <div className="text-slate-500 dark:text-slate-400">
+                                      {card.label}
+                                    </div>
+                                    <div className="font-mono text-sm text-slate-800 dark:text-slate-100">
+                                      {card.value}
+                                    </div>
+                                  </button>
+                                ))}
                               </div>
-                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
-                                <div className="text-slate-400">移除</div>
-                                <div className="font-mono text-slate-700 dark:text-slate-200">
-                                  {marketTargetsDiffPreview?.removedSymbols.length ?? "--"}
+
+                              {(marketActiveTargetPoolStats.loading ||
+                                marketActiveTargetPoolStats.error) && (
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  {marketActiveTargetPoolStats.loading
+                                    ? "统计中..."
+                                    : `统计失败：${marketActiveTargetPoolStats.error}`}
                                 </div>
-                              </div>
-                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
-                                <div className="text-slate-400">来源变化</div>
-                                <div className="font-mono text-slate-700 dark:text-slate-200">
-                                  {marketTargetsDiffPreview?.reasonChangedSymbols.length ??
-                                    "--"}
-                                </div>
-                              </div>
+                              )}
                             </div>
 
                             <div className="grid grid-cols-2 gap-2">
-                              <div className="h-8 rounded-md border border-primary bg-primary/15 text-slate-900 dark:text-white text-xs font-medium flex items-center justify-center">
+                              <div className="h-8 rounded-md border border-primary/40 bg-primary/18 text-slate-900 dark:text-white text-xs font-medium flex items-center justify-center">
                                 差异预览
                               </div>
                               <button
@@ -8060,107 +8749,161 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                                   }
                                   setMarketCurrentTargetsModalOpen(true);
                                 }}
-                                className="h-8 rounded-md border border-slate-200 dark:border-border-dark text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-background-dark/70 transition-colors"
+                                className="h-8 rounded-md bg-slate-100/75 dark:bg-background-dark/55 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-background-dark/75 transition-colors"
                               >
                                 当前目标池
                               </button>
                             </div>
 
-                            <Input
-                              value={marketTargetsPreviewFilter}
-                              onChange={(event) =>
-                                setMarketTargetsPreviewFilter(event.target.value)
-                              }
-                              placeholder="按代码过滤差异"
-                              className="font-mono text-xs"
-                            />
-
-                            <div className="max-h-[520px] overflow-auto space-y-3">
-                                <div className="space-y-1">
-                                  <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            <div className="max-h-[520px] overflow-auto space-y-2">
+                              <div className="rounded-md bg-white/70 dark:bg-background-dark/55">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDiffSection("added")}
+                                  className="w-full flex items-center justify-between px-2 py-1.5 text-left border-b border-slate-200/70 dark:border-border-dark/60"
+                                >
+                                  <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                                     新增
-                                  </div>
-                                  {marketFilteredAddedSymbols.length === 0 ? (
-                                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                                      --
-                                    </div>
-                                  ) : (
-                                    marketFilteredAddedSymbols.slice(0, 100).map((row) => (
-                                      <div
-                                        key={`added-${row.symbol}`}
-                                        className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
-                                      >
-                                        <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
-                                          {row.symbol}
-                                        </span>
-                                        <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
-                                          {formatTargetsReasons(row.reasons)}
-                                        </span>
+                                  </span>
+                                  <span className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                    <span className="font-mono">
+                                      {marketFilteredAddedSymbols.length}
+                                    </span>
+                                    <span className="material-icons-outlined text-sm">
+                                      {marketDiffSectionOpen.added
+                                        ? "expand_less"
+                                        : "expand_more"}
+                                    </span>
+                                  </span>
+                                </button>
+                                {marketDiffSectionOpen.added && (
+                                  <div className="px-2 pb-2 space-y-1">
+                                    {marketFilteredAddedSymbols.length === 0 ? (
+                                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                                        --
                                       </div>
-                                    ))
-                                  )}
-                                </div>
-
-                                <div className="space-y-1">
-                                  <div className="text-xs font-semibold text-rose-700 dark:text-rose-300">
-                                    移除
-                                  </div>
-                                  {marketFilteredRemovedSymbols.length === 0 ? (
-                                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                                      --
-                                    </div>
-                                  ) : (
-                                    marketFilteredRemovedSymbols.slice(0, 100).map((row) => (
-                                      <div
-                                        key={`removed-${row.symbol}`}
-                                        className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
-                                      >
-                                        <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
-                                          {row.symbol}
-                                        </span>
-                                        <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
-                                          {formatTargetsReasons(row.reasons)}
-                                        </span>
-                                      </div>
-                                    ))
-                                  )}
-                                </div>
-
-                                <div className="space-y-1">
-                                  <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-                                    来源变化
-                                  </div>
-                                  {marketFilteredReasonChangedSymbols.length === 0 ? (
-                                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                                      --
-                                    </div>
-                                  ) : (
-                                    marketFilteredReasonChangedSymbols
-                                      .slice(0, 100)
-                                      .map((row) => (
+                                    ) : (
+                                      marketFilteredAddedSymbols.slice(0, 100).map((row) => (
                                         <div
-                                          key={`changed-${row.symbol}`}
-                                          className="py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                          key={`added-${row.symbol}`}
+                                          className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
                                         >
-                                          <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                          <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
                                             {row.symbol}
-                                          </div>
-                                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                            旧：{formatTargetsReasons(row.baselineReasons)}
-                                          </div>
-                                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                            新：{formatTargetsReasons(row.draftReasons)}
-                                          </div>
+                                          </span>
+                                          <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                                            {formatTargetsReasons(row.reasons)}
+                                          </span>
                                         </div>
                                       ))
-                                  )}
-                                </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="rounded-md bg-white/70 dark:bg-background-dark/55">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDiffSection("removed")}
+                                  className="w-full flex items-center justify-between px-2 py-1.5 text-left border-b border-slate-200/70 dark:border-border-dark/60"
+                                >
+                                  <span className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+                                    移除
+                                  </span>
+                                  <span className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                    <span className="font-mono">
+                                      {marketFilteredRemovedSymbols.length}
+                                    </span>
+                                    <span className="material-icons-outlined text-sm">
+                                      {marketDiffSectionOpen.removed
+                                        ? "expand_less"
+                                        : "expand_more"}
+                                    </span>
+                                  </span>
+                                </button>
+                                {marketDiffSectionOpen.removed && (
+                                  <div className="px-2 pb-2 space-y-1">
+                                    {marketFilteredRemovedSymbols.length === 0 ? (
+                                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                                        --
+                                      </div>
+                                    ) : (
+                                      marketFilteredRemovedSymbols
+                                        .slice(0, 100)
+                                        .map((row) => (
+                                          <div
+                                            key={`removed-${row.symbol}`}
+                                            className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                          >
+                                            <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                              {row.symbol}
+                                            </span>
+                                            <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                                              {formatTargetsReasons(row.reasons)}
+                                            </span>
+                                          </div>
+                                        ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="rounded-md bg-white/70 dark:bg-background-dark/55">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDiffSection("reasonChanged")}
+                                  className="w-full flex items-center justify-between px-2 py-1.5 text-left border-b border-slate-200/70 dark:border-border-dark/60"
+                                >
+                                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                    变化来源
+                                  </span>
+                                  <span className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                    <span className="font-mono">
+                                      {marketFilteredReasonChangedSymbols.length}
+                                    </span>
+                                    <span className="material-icons-outlined text-sm">
+                                      {marketDiffSectionOpen.reasonChanged
+                                        ? "expand_less"
+                                        : "expand_more"}
+                                    </span>
+                                  </span>
+                                </button>
+                                {marketDiffSectionOpen.reasonChanged && (
+                                  <div className="px-2 pb-2 space-y-1">
+                                    {marketFilteredReasonChangedSymbols.length === 0 ? (
+                                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                                        --
+                                      </div>
+                                    ) : (
+                                      marketFilteredReasonChangedSymbols
+                                        .slice(0, 100)
+                                        .map((row) => (
+                                          <div
+                                            key={`changed-${row.symbol}`}
+                                            className="py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                          >
+                                            <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                              {row.symbol}
+                                            </div>
+                                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                              旧：{formatTargetsReasons(row.baselineReasons)}
+                                            </div>
+                                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                              新：{formatTargetsReasons(row.draftReasons)}
+                                            </div>
+                                          </div>
+                                        ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
                     </section>
 
+                    {marketRegistryEntryEnabled && (
                     <section className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
                         <h3 className="font-bold text-slate-900 dark:text-white">
@@ -8314,6 +9057,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                         </div>
                       </div>
                     </section>
+                    )}
 
                     <section className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
@@ -9052,6 +9796,129 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
           </div>
         )}
 
+        {marketTargetPoolDetailMetric && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div
+              className="absolute inset-0 bg-black/45 backdrop-blur-sm"
+              onClick={() => setMarketTargetPoolDetailMetric(null)}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="relative bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-lg shadow-xl w-full max-w-2xl mx-4 p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {marketTargetPoolDetailTitle}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    当前值：<span className="font-mono">{marketTargetPoolDetailValue}</span>
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="close"
+                  onClick={() => setMarketTargetPoolDetailMetric(null)}
+                >
+                  关闭
+                </Button>
+              </div>
+
+              <div className="text-xs text-slate-600 dark:text-slate-300">
+                {marketTargetPoolDetailDescription}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-[0.95fr_1.05fr] gap-3">
+                <div className="rounded-md border border-slate-200 dark:border-border-dark p-2 space-y-2">
+                  <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    分类列表
+                  </div>
+                  <div className="max-h-[360px] overflow-auto space-y-1">
+                    {marketTargetPoolDetailCategoryRows.length === 0 && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400 px-1 py-1">
+                        暂无分类数据
+                      </div>
+                    )}
+                    {marketTargetPoolDetailCategoryRows.map((row) => {
+                      const active = row.key === marketTargetPoolActiveCategoryRow?.key;
+                      return (
+                        <button
+                          key={`target-pool-category-${row.key}`}
+                          type="button"
+                          onClick={() => setMarketTargetPoolDetailCategoryKey(row.key)}
+                          className={`w-full rounded-md px-2 py-1.5 text-left transition-colors ${
+                            active
+                              ? "bg-primary/15 border border-primary/40"
+                              : "bg-slate-50/80 dark:bg-background-dark/45 hover:bg-slate-100 dark:hover:bg-background-dark/65"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-slate-700 dark:text-slate-200 truncate">
+                              {row.label}
+                            </span>
+                            <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                              {row.count}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            占比 {row.ratio === null ? "--" : formatPct(row.ratio)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-slate-200 dark:border-border-dark p-2 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      成分列表
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                      {marketTargetPoolDetailMembers.length}
+                    </div>
+                  </div>
+                  <Input
+                    value={marketTargetPoolDetailMemberFilter}
+                    onChange={(event) =>
+                      setMarketTargetPoolDetailMemberFilter(event.target.value)
+                    }
+                    placeholder="按代码或名称过滤成分"
+                    className="font-mono text-xs"
+                  />
+                  <div className="max-h-[320px] overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70 p-2">
+                    {marketTargetPoolDetailMembers.length === 0 && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400 px-1 py-1">
+                        暂无匹配成分
+                      </div>
+                    )}
+                    {marketTargetPoolDetailMembers.slice(0, 500).map((symbol) => (
+                      <div
+                        key={`target-pool-member-${symbol}`}
+                        className="py-1.5 px-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                      >
+                        <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                          {symbol}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                          {marketActiveTargetPoolStats.symbolNames[symbol] ?? "--"}
+                        </div>
+                      </div>
+                    ))}
+                    {marketTargetPoolDetailMembers.length > 500 && (
+                      <div className="pt-2 text-[11px] text-slate-500 dark:text-slate-400 px-1">
+                        仅展示前 500 个成分（共 {marketTargetPoolDetailMembers.length}）。
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {ledgerDeleteTarget && (
           <ConfirmDialog
             open={Boolean(ledgerDeleteTarget)}
@@ -9143,13 +10010,13 @@ function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 ui-modal-backdrop"
         aria-label="关闭弹层"
         onClick={onClose}
       />
-      <div className="relative w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-xl border border-slate-200 dark:border-border-dark bg-white dark:bg-surface-dark shadow-2xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-border-dark bg-white/70 dark:bg-surface-dark/80 backdrop-blur">
-          <div className="text-sm font-semibold text-slate-900 dark:text-white">
+      <div className="ui-modal-panel relative w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-xl shadow-2xl">
+        <div className="ui-modal-header flex items-center justify-between px-4 py-3 backdrop-blur">
+          <div className="text-sm font-semibold text-[color:var(--mt-text)]">
             {title}
           </div>
           <IconButton icon="close" label="关闭" onClick={onClose} />
@@ -9165,7 +10032,7 @@ function Modal({
 function FormGroup({ label, children }: { label: React.ReactNode, children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-sm font-medium text-slate-500 dark:text-slate-400">{label}</label>
+      <label className="ui-form-label block text-sm font-medium">{label}</label>
       {children}
     </div>
   );
@@ -9178,11 +10045,11 @@ function Input({ className, ...props }: InputProps) {
   const isEmpty =
     props.value === "" || props.value === undefined || props.value === null;
   const dateHintClass =
-    isDateInput && isEmpty ? "text-slate-500 dark:text-slate-400" : "";
+    isDateInput && isEmpty ? "ui-tone-neutral" : "";
 
   return (
     <input 
-      className={`block w-full rounded-md border-slate-300 dark:border-border-dark bg-white dark:bg-field-dark py-1.5 text-slate-900 dark:text-slate-100 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 placeholder:text-slate-400 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-background-dark ${dateHintClass} ${className}`}
+      className={`ui-input block w-full rounded-md py-1.5 focus:ring-2 focus:ring-primary sm:text-sm sm:leading-6 disabled:opacity-50 ${dateHintClass} ${className}`}
       {...props}
     />
   );
@@ -9194,7 +10061,7 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 function Select({ className, options, ...props }: SelectProps) {
   return (
     <select
-      className={`block w-full rounded-md border-slate-300 dark:border-border-dark bg-white dark:bg-field-dark py-1.5 pl-3 pr-10 text-slate-900 dark:text-slate-100 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 ${className}`}
+      className={`ui-select block w-full rounded-md py-1.5 pl-3 pr-10 focus:ring-2 focus:ring-primary sm:text-sm sm:leading-6 ${className}`}
       {...props}
     >
       {options.map(opt => (
@@ -9263,7 +10130,7 @@ function PopoverSelect({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((prev) => !prev)}
-        className={`relative h-6 w-full rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark pl-2 text-left text-xs text-slate-900 dark:text-slate-100 shadow-sm dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_10px_rgba(0,0,0,0.35)] hover:bg-slate-50 dark:hover:bg-surface-dark/80 transition-colors disabled:opacity-60 ${
+        className={`ui-popover-button relative h-6 w-full rounded-md border pl-2 text-left text-xs transition-colors disabled:opacity-60 ${
           hasRightAccessory ? "pr-14" : "pr-8"
         } ${buttonClassName ?? ""}`}
       >
@@ -9288,7 +10155,7 @@ function PopoverSelect({
         <div className="absolute left-0 right-0 top-full mt-1 z-50">
           <div
             role="listbox"
-            className="max-h-72 overflow-auto rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-surface-dark shadow-xl dark:shadow-black/60 p-1"
+            className="ui-popover-menu max-h-72 overflow-auto rounded-md border p-1"
           >
             {options.map((opt) => {
               const isActive = opt.value === value;
@@ -9308,8 +10175,8 @@ function PopoverSelect({
                     opt.disabled
                       ? "opacity-50 cursor-not-allowed"
                       : isActive
-                        ? "bg-primary/15 text-slate-900 dark:text-white"
-                        : "hover:bg-slate-100 dark:hover:bg-background-dark/80 text-slate-700 dark:text-slate-200"
+                        ? "ui-popover-option isActive"
+                        : "ui-popover-option"
                   }`}
                 >
                   <span className="truncate">{opt.label}</span>
@@ -9334,12 +10201,12 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: string;
 }
 function Button({ children, variant = 'secondary', size = 'md', icon, className, ...props }: ButtonProps) {
-  const baseClass = "inline-flex items-center justify-center rounded-[4px] font-medium whitespace-nowrap break-keep shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
+  const baseClass = "ui-btn inline-flex items-center justify-center rounded-[4px] border font-medium whitespace-nowrap break-keep shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
   
   const variants = {
-    primary: "bg-primary/80 border border-primary/70 text-slate-50 shadow-[0_8px_16px_rgba(8,24,28,0.35)] hover:bg-primary/95 focus:ring-primary/45",
-    secondary: "bg-slate-200/95 border border-slate-300 text-slate-800 shadow-[0_6px_14px_rgba(15,23,42,0.12)] hover:bg-slate-200 dark:bg-surface-dark dark:border-border-dark dark:text-slate-200 dark:hover:bg-background-dark focus:ring-primary/35",
-    danger: "bg-[#b8726b] border border-[#c48680] text-[#fff4f3] shadow-[0_8px_16px_rgba(58,32,30,0.32)] hover:bg-[#c07a73] dark:bg-[#9b625d] dark:border-[#b27570] dark:hover:bg-[#aa6b66] focus:ring-[#c48680]/45"
+    primary: "ui-btn-primary focus:ring-primary/45",
+    secondary: "ui-btn-secondary focus:ring-primary/35",
+    danger: "ui-btn-danger focus:ring-primary/35"
   };
   
   const sizes = {
@@ -9387,7 +10254,7 @@ function IconButton({
       type="button"
       aria-label={label}
       title={label}
-      className={`inline-flex items-center justify-center rounded-[4px] border border-slate-200 dark:border-border-dark ${sizeClass} text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`ui-icon-btn inline-flex items-center justify-center rounded-[4px] border ${sizeClass} transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       {...props}
     >
       <span className={`material-icons-outlined ${iconClass}`}>{icon}</span>
@@ -9397,7 +10264,7 @@ function IconButton({
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-background-dark px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-border-light/60 dark:ring-border-dark/40">
+    <span className="ui-badge inline-flex items-center rounded-md px-2 py-1 text-xs font-medium">
       {children}
     </span>
   );
@@ -9407,7 +10274,7 @@ function MarketQuoteHeader({ quote }: { quote: MarketQuote | null }) {
   const tone = getCnChangeTone(quote?.changePct ?? null);
   return (
     <div className="text-right">
-      <div className="text-3xl font-mono font-semibold text-slate-900 dark:text-white">
+      <div className="text-3xl font-mono font-semibold text-[color:var(--mt-text)]">
         {formatNumber(quote?.close ?? null, 2)}
       </div>
       <div className={`mt-1 font-mono text-sm ${getCnToneTextClass(tone)}`}>
@@ -9448,7 +10315,7 @@ class ChartErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+        <div className="ui-tone-neutral h-full flex items-center justify-center text-sm">
           图表渲染失败：{this.state.error}
         </div>
       );
@@ -9552,7 +10419,7 @@ function MarketAreaChart({
   const area = geometry.area;
   const yTicks = [max, (max + min) / 2, min];
   const gridLines = 5;
-  const hoverStroke = "rgba(96,165,250,0.55)";
+  const hoverStroke = "var(--mt-chart-hover)";
 
   const flushHoverIndex = useCallback(() => {
     rafIdRef.current = null;
@@ -9637,7 +10504,7 @@ function MarketAreaChart({
             x2={width - paddingRight}
             y1={y}
             y2={y}
-            stroke="rgba(255,255,255,0.08)"
+            stroke="var(--mt-chart-grid)"
             strokeWidth="1"
           />
         );
@@ -9661,7 +10528,7 @@ function MarketAreaChart({
             cy={hoverPoint.y}
             r={3.5}
             fill={colors.line}
-            stroke="rgba(15,23,42,0.9)"
+            stroke="var(--mt-chart-axis)"
             strokeWidth="1"
           />
 
@@ -9677,7 +10544,7 @@ function MarketAreaChart({
             y={y + 4}
             textAnchor="end"
             fontSize="12"
-            fill="rgba(226,232,240,0.85)"
+            fill="var(--mt-chart-label)"
             fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
           >
             {formatNumber(tick, 2)}
@@ -9746,7 +10613,7 @@ function MarketVolumeMiniChart({
           x2={width}
           y1={baselineY}
           y2={baselineY}
-          stroke="rgba(148,163,184,0.22)"
+          stroke="var(--mt-chart-grid)"
           strokeWidth="1"
         />
       )}
@@ -9775,9 +10642,9 @@ function MarketVolumeMiniChart({
         const fill =
           mode === "moneyflow"
             ? value >= 0
-              ? "rgba(96,165,250,0.55)"
-              : "rgba(248,113,113,0.45)"
-            : "rgba(148,163,184,0.35)";
+              ? "var(--mt-chart-moneyflow-pos)"
+              : "var(--mt-chart-moneyflow-neg)"
+            : "var(--mt-chart-volume)";
 
         return (
           <rect
@@ -9787,7 +10654,7 @@ function MarketVolumeMiniChart({
             width={w}
             height={h <= 0 ? 0 : Math.max(1, h)}
             fill={fill}
-            stroke={isActive ? "rgba(96,165,250,0.6)" : "transparent"}
+            stroke={isActive ? "var(--mt-chart-hover)" : "transparent"}
             strokeWidth={isActive ? 1 : 0}
             opacity={isActive ? 1 : 0.85}
           />
@@ -10804,22 +11671,22 @@ function getCnChangeTone(changePct: number | null | undefined): ChangeTone {
 function getCnToneTextClass(tone: ChangeTone): string {
   switch (tone) {
     case "up":
-      return "text-red-500";
+      return "ui-tone-up";
     case "down":
-      return "text-green-500";
+      return "ui-tone-down";
     default:
-      return "text-slate-500 dark:text-slate-400";
+      return "ui-tone-neutral";
   }
 }
 
 function getCnToneColors(tone: ChangeTone): { line: string; fill: string } {
   switch (tone) {
     case "up":
-      return { line: "#ef4444", fill: "#ef4444" };
+      return { line: "var(--mt-chart-up)", fill: "var(--mt-chart-up)" };
     case "down":
-      return { line: "#22c55e", fill: "#22c55e" };
+      return { line: "var(--mt-chart-down)", fill: "var(--mt-chart-down)" };
     default:
-      return { line: "#e2e8f0", fill: "#94a3b8" };
+      return { line: "var(--mt-chart-neutral)", fill: "var(--mt-chart-neutral)" };
   }
 }
 
@@ -11058,17 +11925,17 @@ function formatTargetsReasons(reasons: string[]): string {
 function formatIngestRunTone(status: MarketIngestRun["status"]): string {
   switch (status) {
     case "success":
-      return "text-emerald-600 dark:text-emerald-400";
+      return "ui-tone-down";
     case "partial":
-      return "text-amber-600 dark:text-amber-400";
+      return "ui-tone-warning";
     case "failed":
-      return "text-red-600 dark:text-red-400";
+      return "ui-tone-up";
     case "canceled":
-      return "text-slate-500 dark:text-slate-400";
+      return "ui-tone-neutral";
     case "running":
-      return "text-primary";
+      return "ui-tone-info";
     default:
-      return "text-slate-700 dark:text-slate-200";
+      return "text-[color:var(--mt-text)]";
   }
 }
 
@@ -11094,15 +11961,15 @@ function getIngestControlStateDotClass(
 ): string {
   switch (state) {
     case "idle":
-      return "bg-emerald-500";
+      return "ui-dot-idle";
     case "running":
-      return "bg-primary";
+      return "ui-dot-running";
     case "paused":
-      return "bg-amber-500";
+      return "ui-dot-paused";
     case "canceling":
-      return "bg-rose-500";
+      return "ui-dot-canceling";
     default:
-      return "bg-slate-400";
+      return "ui-dot-unknown";
   }
 }
 
@@ -11156,6 +12023,223 @@ function normalizeStringArray(values: string[]): string[] {
   return Array.from(
     new Set(values.map((value) => value.trim()).filter(Boolean))
   ).sort((a, b) => a.localeCompare(b));
+}
+
+function dedupeTagSummaries(rows: TagSummary[]): TagSummary[] {
+  const map = new Map<string, TagSummary>();
+  rows.forEach((row) => {
+    const key = row.tag.trim();
+    if (!key) return;
+    if (!map.has(key)) {
+      map.set(key, { ...row, tag: key });
+    }
+  });
+  return Array.from(map.values()).sort((a, b) => a.tag.localeCompare(b.tag));
+}
+
+function filterUniqueTagSummariesByPrefix(
+  rows: TagSummary[],
+  prefix: string,
+  source?: TagSummary["source"]
+): TagSummary[] {
+  const lowered = prefix.toLowerCase();
+  return dedupeTagSummaries(
+    rows.filter((row) => {
+      if (source && row.source !== source) return false;
+      return row.tag.trim().toLowerCase().startsWith(lowered);
+    })
+  );
+}
+
+function formatTargetPoolClassificationLabel(rawTag: string): string {
+  const tag = rawTag.trim();
+  if (!tag) return "";
+
+  const starts = (prefix: string) => tag.toLowerCase().startsWith(prefix);
+  if (starts("ind:sw:l1:")) return tag.slice("ind:sw:l1:".length).trim();
+  if (starts("ind:sw:l2:")) return tag.slice("ind:sw:l2:".length).trim();
+  if (starts("industry:")) return tag.slice("industry:".length).trim();
+  if (starts("theme:ths:")) return tag.slice("theme:ths:".length).trim();
+  if (starts("theme:manual:")) return tag.slice("theme:manual:".length).trim();
+  if (starts("theme:")) return tag.slice("theme:".length).trim();
+  if (starts("concept:")) return tag.slice("concept:".length).trim();
+  return tag;
+}
+
+function buildTargetPoolStructureStats(input: {
+  totalSymbols: number;
+  industryL1Count: number;
+  industryL2Count: number;
+  conceptCount: number;
+  classifiedCount: number;
+  allSymbols?: string[];
+  classifiedSymbols?: string[];
+  industryL1Details?: TargetPoolCategoryDetail[];
+  industryL2Details?: TargetPoolCategoryDetail[];
+  conceptDetails?: TargetPoolCategoryDetail[];
+  unclassifiedSymbols?: string[];
+  symbolNames?: Record<string, string | null>;
+}): Omit<TargetPoolStructureStats, "loading" | "error"> {
+  const allSymbols = normalizeSymbolList(input.allSymbols ?? []);
+  const classifiedSymbols = normalizeSymbolList(input.classifiedSymbols ?? []);
+  const totalSymbols = Math.max(0, Math.floor(input.totalSymbols || allSymbols.length));
+  const industryL1Count = Math.max(0, Math.floor(input.industryL1Count));
+  const industryL2Count = Math.max(0, Math.floor(input.industryL2Count));
+  const conceptCount = Math.max(0, Math.floor(input.conceptCount));
+  const classifiedCount = Math.max(0, Math.min(totalSymbols, Math.floor(input.classifiedCount)));
+  const unclassifiedCount = Math.max(0, totalSymbols - classifiedCount);
+  const normalizedUnclassified = normalizeSymbolList(input.unclassifiedSymbols ?? []);
+  const symbolNames = Object.fromEntries(
+    Object.entries(input.symbolNames ?? {}).map(([symbol, name]) => [
+      symbol.trim().toUpperCase(),
+      typeof name === "string" ? name : null
+    ])
+  );
+  return {
+    totalSymbols,
+    industryL1Count,
+    industryL2Count,
+    conceptCount,
+    unclassifiedCount,
+    classificationCoverage:
+      totalSymbols > 0 ? (totalSymbols - unclassifiedCount) / totalSymbols : null,
+    allSymbols,
+    classifiedSymbols,
+    industryL1Details: dedupeCategoryDetails(input.industryL1Details ?? []),
+    industryL2Details: dedupeCategoryDetails(input.industryL2Details ?? []),
+    conceptDetails: dedupeCategoryDetails(input.conceptDetails ?? []),
+    unclassifiedSymbols: normalizedUnclassified,
+    symbolNames
+  };
+}
+
+function collectClassificationFromTags(tags: string[]): {
+  industryL1: Set<string>;
+  industryL2: Set<string>;
+  concepts: Set<string>;
+  hasClassification: boolean;
+} {
+  const industryL1 = new Set<string>();
+  const industryL2 = new Set<string>();
+  const concepts = new Set<string>();
+
+  tags.forEach((rawTag) => {
+    const tag = rawTag.trim();
+    if (!tag) return;
+    const lowered = tag.toLowerCase();
+    if (lowered.startsWith("ind:sw:l1:") || lowered.startsWith("industry:")) {
+      industryL1.add(tag);
+      return;
+    }
+    if (lowered.startsWith("ind:sw:l2:")) {
+      industryL2.add(tag);
+      return;
+    }
+    if (lowered.startsWith("theme:") || lowered.startsWith("concept:")) {
+      concepts.add(tag);
+    }
+  });
+
+  return {
+    industryL1,
+    industryL2,
+    concepts,
+    hasClassification: industryL1.size > 0 || industryL2.size > 0 || concepts.size > 0
+  };
+}
+
+function normalizeSymbolList(symbols: string[]): string[] {
+  return Array.from(
+    new Set(symbols.map((value) => value.trim().toUpperCase()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function addSymbolToCategoryMap(
+  target: Map<string, Set<string>>,
+  tag: string,
+  symbol: string
+) {
+  const key = tag.trim();
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  if (!key || !normalizedSymbol) return;
+  if (!target.has(key)) {
+    target.set(key, new Set<string>());
+  }
+  target.get(key)?.add(normalizedSymbol);
+}
+
+function buildCategoryDetailsFromTagSummaries(
+  tags: TagSummary[],
+  membersByTag: Map<string, string[]>
+): TargetPoolCategoryDetail[] {
+  return dedupeCategoryDetails(
+    tags.map((row) => ({
+      key: row.tag,
+      label: formatTargetPoolClassificationLabel(row.tag),
+      symbols: normalizeSymbolList(membersByTag.get(row.tag) ?? [])
+    }))
+  );
+}
+
+function buildCategoryDetailsFromCategoryMap(
+  map: Map<string, Set<string>>
+): TargetPoolCategoryDetail[] {
+  return dedupeCategoryDetails(
+    Array.from(map.entries()).map(([tag, symbols]) => ({
+      key: tag,
+      label: formatTargetPoolClassificationLabel(tag),
+      symbols: normalizeSymbolList(Array.from(symbols))
+    }))
+  );
+}
+
+function dedupeCategoryDetails(rows: TargetPoolCategoryDetail[]): TargetPoolCategoryDetail[] {
+  const map = new Map<string, TargetPoolCategoryDetail>();
+  rows.forEach((row) => {
+    const key = row.key.trim();
+    if (!key) return;
+    const symbols = normalizeSymbolList(row.symbols);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        key,
+        label: row.label.trim() || formatTargetPoolClassificationLabel(key),
+        symbols
+      });
+      return;
+    }
+    map.set(key, {
+      key,
+      label: existing.label,
+      symbols: normalizeSymbolList([...existing.symbols, ...symbols])
+    });
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.symbols.length !== a.symbols.length) {
+      return b.symbols.length - a.symbols.length;
+    }
+    return a.label.localeCompare(b.label);
+  });
+}
+
+async function mapWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  task: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  let cursor = 0;
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        await task(items[index], index);
+      }
+    })
+  );
 }
 
 function parseBatchSymbols(input: string): {
@@ -11291,20 +12375,20 @@ function describeDataQuality(level: DataQualityLevel): {
     case "ok":
       return {
         label: "可用",
-        badgeClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
-        textClass: "text-emerald-600 dark:text-emerald-400"
+        badgeClass: "ui-quality-badge ui-quality-ok",
+        textClass: "ui-tone-down"
       };
     case "partial":
       return {
         label: "有缺口",
-        badgeClass: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-        textClass: "text-amber-600 dark:text-amber-400"
+        badgeClass: "ui-quality-badge ui-quality-partial",
+        textClass: "ui-tone-warning"
       };
     default:
       return {
         label: "不可用",
-        badgeClass: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
-        textClass: "text-rose-600 dark:text-rose-400"
+        badgeClass: "ui-quality-badge ui-quality-unavailable",
+        textClass: "ui-tone-up"
       };
   }
 }
@@ -11721,13 +12805,20 @@ function PerformanceChart({ series }: { series: PortfolioPerformanceSeries }) {
       >
         <defs>
           <linearGradient id="performanceFill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--mt-chart-accent)" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="var(--mt-chart-accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
         <path d={areaPath} fill="url(#performanceFill)" />
-        <path d={path} fill="none" stroke="#0ea5e9" strokeWidth="2" />
-        <line x1="0" y1={baselineY} x2={width} y2={baselineY} stroke="#94a3b8" strokeDasharray="4 4" />
+        <path d={path} fill="none" stroke="var(--mt-chart-accent)" strokeWidth="2" />
+        <line
+          x1="0"
+          y1={baselineY}
+          x2={width}
+          y2={baselineY}
+          stroke="var(--mt-chart-baseline)"
+          strokeDasharray="4 4"
+        />
       </svg>
       <div className="flex items-center justify-between text-xs text-slate-500 mt-2">
         <span>{series.startDate}</span>

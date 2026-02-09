@@ -16,14 +16,14 @@
         theme: {
           extend: {
             colors: {
-              primary: "#2b8f9a",
-              "background-light": "#f8fafc",
+              primary: "#1ea7e1",
+              "background-light": "#f3f5f8",
               "background-dark": "#151312",
               "panel-dark": "#23201d",
               "field-dark": "#26221f",
               "surface-light": "#ffffff",
               "surface-dark": "#1d1a18",
-              "border-light": "#e2e8f0",
+              "border-light": "#d6dee8",
               "border-dark": "#4a433d",
             },
             fontFamily: {
@@ -41,12 +41,32 @@
       };
     </script>
     <script>
-        // Simple theme toggle logic
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark')
-        } else {
-            document.documentElement.classList.remove('dark')
-        }
+      (function () {
+        var key = "mytrader:ui:theme-mode";
+        var legacyKey = "theme";
+        var mode = "system";
+        try {
+          var stored = localStorage.getItem(key);
+          if (stored === "light" || stored === "dark" || stored === "system") {
+            mode = stored;
+          } else {
+            var legacy = localStorage.getItem(legacyKey);
+            if (legacy === "light" || legacy === "dark" || legacy === "system") {
+              mode = legacy;
+              localStorage.setItem(key, mode);
+              localStorage.removeItem(legacyKey);
+            }
+          }
+        } catch (_) {}
+
+        var prefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var resolved = mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+        var root = document.documentElement;
+        root.dataset.theme = resolved;
+        root.classList.toggle("dark", resolved === "dark");
+      })();
     </script>
     <style>
         body {font-family: 'Inter', sans-serif;}
@@ -65,7 +85,7 @@
         }
     </style>
   </head>
-  <body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col antialiased dark transition-colors duration-300">
+  <body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-200 min-h-screen flex flex-col antialiased transition-colors duration-300">
     <div id="root" class="flex-1 flex flex-col h-full"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

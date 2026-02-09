@@ -2,6 +2,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Dashboard } from "./components/Dashboard";
+import {
+  getThemeMode,
+  resolveTheme,
+  setThemeMode,
+  subscribeToSystemThemeChange,
+  type ResolvedTheme,
+  type ThemeMode
+} from "./theme/theme-mode";
 
 type ViewState =
   | { kind: "loading" }
@@ -32,6 +40,10 @@ export function App() {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [activePortfolioName, setActivePortfolioName] = useState<string | null>(null);
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode());
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
+    resolveTheme(getThemeMode())
+  );
   const hasDesktopApi = Boolean(window.mytrader);
   const isElectron = navigator.userAgent.toLowerCase().includes("electron");
   const isDev = import.meta.env.DEV;
@@ -44,6 +56,19 @@ export function App() {
 
   const [loginAccount, setLoginAccount] = useState<string>("");
   const [unlockPassword, setUnlockPassword] = useState("");
+
+  useEffect(() => {
+    const resolved = setThemeMode(themeMode, { persist: true });
+    setResolvedTheme(resolved);
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (themeMode !== "system") return;
+    return subscribeToSystemThemeChange(() => {
+      const resolved = setThemeMode("system", { persist: false });
+      setResolvedTheme(resolved);
+    });
+  }, [themeMode]);
 
   const accounts = useMemo(() => {
     if (state.kind !== "locked") return [];
@@ -226,6 +251,12 @@ export function App() {
     }
   }, [refreshAccounts, state]);
 
+  const themeOptions: { value: ThemeMode; label: string; icon: string }[] = [
+    { value: "system", label: "跟随系统", icon: "desktop_windows" },
+    { value: "light", label: "浅色", icon: "light_mode" },
+    { value: "dark", label: "深色", icon: "dark_mode" }
+  ];
+
   return (
     <div className="app h-screen flex flex-col overflow-hidden">
       <header className="topbar h-10 flex items-center justify-between px-3 bg-white/90 dark:bg-background-dark/80 backdrop-blur-md border-b border-border-light dark:border-border-dark flex-shrink-0 z-30">
@@ -234,6 +265,25 @@ export function App() {
           <h1 className="brand text-sm font-bold tracking-tight text-slate-900 dark:text-white">MyTrader</h1>
         </div>
         <div className="flex items-center gap-3">
+          <div className="themeModeSwitch" role="group" aria-label="主题模式">
+            {themeOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`themeModeButton ${themeMode === option.value ? "isActive" : ""}`}
+                onClick={() => setThemeModeState(option.value)}
+                title={
+                  option.value === "system"
+                    ? `跟随系统（当前：${resolvedTheme === "dark" ? "深色" : "浅色"}）`
+                    : option.label
+                }
+                aria-pressed={themeMode === option.value}
+              >
+                <span className="material-icons-outlined text-[14px]">{option.icon}</span>
+                <span className="themeModeButtonLabel">{option.label}</span>
+              </button>
+            ))}
+          </div>
           {state.kind === "unlocked" && (
             <div className="text-xs text-slate-600 dark:text-slate-300 font-medium">
               组合：{activePortfolioName ?? "--"}
@@ -287,7 +337,7 @@ export function App() {
                             </span>
                           </span>
                           <select
-                            className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary appearance-none transition-shadow text-sm"
+                            className="ui-auth-select w-full pl-9 pr-8 py-2 appearance-none transition-shadow text-sm"
                             value={loginAccount}
                             onChange={(e) => setLoginAccount(e.target.value)}
                           >
@@ -323,7 +373,7 @@ export function App() {
                             <span className="material-icons-outlined text-lg">lock</span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
                             placeholder="******"
                             type="password"
                             value={unlockPassword}
@@ -333,7 +383,7 @@ export function App() {
                         </div>
                         <div className="md:col-start-2 flex justify-end pt-1">
                           <button
-                            className="bg-primary hover:bg-[#06b6d4] text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md shadow-primary/20 transition-all hover:scale-[1.01] active:scale-95 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="ui-auth-btn ui-auth-btn-primary px-5 py-2 rounded-lg text-sm font-medium transition-all hover:scale-[1.01] active:scale-95 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                             type="button"
                             onClick={handleUnlock}
                             disabled={!loginAccount || !unlockPassword}
@@ -375,7 +425,7 @@ export function App() {
                             <span className="material-icons-outlined text-lg">badge</span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
                             placeholder="例如：个人"
                             type="text"
                             value={createLabel}
@@ -394,7 +444,7 @@ export function App() {
                             <span className="material-icons-outlined text-lg">vpn_key</span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
                             placeholder="设置密码"
                             type="password"
                             value={createPassword}
@@ -415,7 +465,7 @@ export function App() {
                             </span>
                           </span>
                           <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-field-dark dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_12px_rgba(0,0,0,0.35)] border border-border-light dark:border-border-dark rounded-lg text-slate-900 dark:text-slate-200 focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-400 dark:placeholder-slate-600 transition-shadow text-sm"
+                            className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
                             placeholder="再次输入密码"
                             type="password"
                             value={createPasswordConfirm}
@@ -435,14 +485,14 @@ export function App() {
                               <span className="material-icons-outlined text-lg">folder</span>
                             </span>
                             <input
-                            className="w-full pl-9 pr-3 py-2 bg-slate-100 dark:bg-background-dark border border-border-light dark:border-border-dark rounded-lg text-slate-500 dark:text-slate-400 focus:ring-0 focus:border-border-dark cursor-not-allowed text-xs"
+                            className="ui-auth-input w-full pl-9 pr-3 py-2 cursor-not-allowed text-xs text-slate-500 dark:text-slate-400"
                               readOnly
                               type="text"
                               value={createDataRootDir || "默认：应用数据目录"}
                             />
                           </div>
                           <button
-                            className="px-3 py-2 bg-slate-200 dark:bg-surface-dark hover:bg-slate-300 dark:hover:bg-background-dark/80 text-slate-700 dark:text-slate-200 rounded-lg border border-transparent text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                            className="ui-auth-btn ui-auth-btn-secondary px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
                             type="button"
                             onClick={chooseDataRootDir}
                             disabled={isChoosingDataRootDir}
@@ -456,7 +506,7 @@ export function App() {
 
                         <div className="md:col-start-2 flex justify-end pt-1">
                           <button
-                            className="bg-transparent border border-primary text-primary hover:bg-primary hover:text-white px-5 py-2 rounded-lg text-sm font-medium transition-all hover:shadow-md hover:shadow-primary/20 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="ui-auth-btn ui-auth-btn-outline px-5 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                             type="button"
                             onClick={handleCreateAccount}
                             disabled={
@@ -477,15 +527,15 @@ export function App() {
                 )}
 
                 {error && (
-                  <div className="mt-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 flex items-start gap-3">
-                    <span className="material-icons-outlined text-red-500 dark:text-red-400 shrink-0 text-base">
+                  <div className="ui-auth-alert ui-auth-alert-error mt-4 p-3 border flex items-start gap-3">
+                    <span className="material-icons-outlined shrink-0 text-base">
                       error_outline
                     </span>
                     <div className="text-xs">
-                      <p className="font-medium text-red-800 dark:text-red-300">
+                      <p className="font-medium">
                         系统错误
                       </p>
-                      <p className="text-red-600 dark:text-red-400 font-mono mt-0.5">
+                      <p className="font-mono mt-0.5">
                         {error}
                       </p>
                     </div>
@@ -493,15 +543,15 @@ export function App() {
                 )}
 
                 {!hasDesktopApi && !error && (
-                  <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3">
-                    <span className="material-icons-outlined text-blue-500 dark:text-blue-400 shrink-0 text-base">
+                  <div className="ui-auth-alert ui-auth-alert-info mt-4 p-3 border flex items-start gap-3">
+                    <span className="material-icons-outlined shrink-0 text-base">
                       info
                     </span>
                     <div className="text-xs">
-                      <p className="font-medium text-blue-800 dark:text-blue-300">
+                      <p className="font-medium">
                         环境信息
                       </p>
-                      <p className="text-blue-600 dark:text-blue-400 font-mono mt-0.5">
+                      <p className="font-mono mt-0.5">
                         {isElectron
                           ? "检测到 Electron，但预加载接口不可用。"
                           : "浏览器模式：未加载桌面端后端。"}

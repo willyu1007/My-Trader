@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json"
+    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
+    "verify:theme": "node scripts/verify-theme-contract.mjs"
   },
   "dependencies": {
     "@mytrader/shared": "workspace:*",

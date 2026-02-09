@@ -86,3 +86,7 @@
 - `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（“解析预览”改为输入框内“解析”，并保留应用流程）
 - `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（手动区去重：移除“当前手动标的”，按钮位置重排为输入/预览框右下角）
 - `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（手动区去重：移除“当前手动标的”，按钮位置重排为输入/预览框右下角）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（隐藏数据管理“注册标的”入口 + includeRegistryAutoIngest 强制收敛为 false）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（隐藏数据管理“注册标的”入口 + includeRegistryAutoIngest 强制收敛为 false）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（差异分组折叠 + 目标池编辑左右拖拽调宽）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（差异分组折叠 + 目标池编辑左右拖拽调宽）

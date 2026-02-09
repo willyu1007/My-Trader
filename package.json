@@ -14,7 +14,7 @@
     "start": "pnpm build && pnpm -C apps/backend start",
     "lint": "echo \"Add lint script\"",
     "test": "echo \"Add test script\"",
-    "typecheck": "pnpm -C packages/shared build && pnpm exec tsc --noEmit -p apps/backend/tsconfig.json && pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json"
+    "typecheck": "pnpm -C packages/shared build && pnpm exec tsc --noEmit -p apps/backend/tsconfig.json && pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json && pnpm -C apps/frontend verify:theme"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
