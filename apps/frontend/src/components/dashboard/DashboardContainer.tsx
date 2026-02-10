@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useState
 } from "react";
 
@@ -125,21 +124,12 @@ import { TopToolbar } from "./views/TopToolbar";
 import { useDashboardAnalysis } from "./hooks/use-dashboard-analysis";
 import { useDashboardAnalysisDerived } from "./hooks/use-dashboard-analysis-derived";
 import { useDashboardAnalysisRuntime } from "./hooks/use-dashboard-analysis-runtime";
-import {
-  useDashboardMarket,
-  useDashboardMarketManagementActions,
-  useDashboardMarketRuntimeEffects
-} from "./hooks/use-dashboard-market";
+import { useDashboardMarket } from "./hooks/use-dashboard-market";
 import { useDashboardMarketDerived } from "./hooks/use-dashboard-market-derived";
-import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-market-instrument-actions";
-import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-admin-refresh";
 import { useDashboardMarketAdminDerived } from "./hooks/use-dashboard-market-admin-derived";
-import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-admin-actions";
-import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
-import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
 import { useDashboardMarketTargetPoolDetail } from "./hooks/use-dashboard-market-target-pool-detail";
-import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
 import { useDashboardMarketResize } from "./hooks/use-dashboard-market-resize";
+import { useDashboardMarketOrchestration } from "./hooks/use-dashboard-market-orchestration";
 import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
 import { useDashboardLedgerActions } from "./hooks/use-dashboard-ledger-actions";
 import { useDashboardPortfolioDerived } from "./hooks/use-dashboard-portfolio-derived";
@@ -254,88 +244,34 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     formatInputDate
   });
   const {
-    setMarketCatalogSyncing,
-    setMarketCatalogSyncSummary,
     marketSearchQuery,
     marketSearchResults,
     marketScope,
-    setMarketScope,
     marketExplorerWidth,
     setMarketExplorerWidth,
     targetsEditorLeftPct,
     setTargetsEditorLeftPct,
-    setMarketTags,
-    setMarketTagsLoading,
     marketSelectedTag,
-    setMarketSelectedTag,
     marketTagMembers,
-    setMarketTagMembers,
-    setMarketTagMembersLoading,
     marketFilterMarket,
-    setMarketFilterMarket,
     marketFilterAssetClasses,
-    setMarketFilterAssetClasses,
     marketFilterKinds,
-    setMarketFilterKinds,
     marketQuotesBySymbol,
-    setMarketQuotesBySymbol,
-    setMarketQuotesLoading,
     marketChartBars,
-    setMarketChartBars,
-    setMarketChartLoading,
-    setMarketDemoSeeding,
     marketTagSeriesResult,
     marketTagSeriesBars,
-    marketInstrumentDetailsOpen,
     setMarketInstrumentDetailsOpen,
     setMarketTagMembersModalOpen,
     marketTokenStatus,
-    setMarketTokenStatus,
-    marketTokenDraft,
-    setMarketTokenDraft,
-    marketTokenProvider,
-    setMarketTokenSaving,
-    setMarketTokenTesting,
     marketIngestRuns,
-    setMarketIngestRuns,
-    setMarketIngestRunsLoading,
-    marketIngestTriggering,
-    setMarketIngestTriggering,
     marketSelectedSymbol,
-    setMarketSelectedSymbol,
     marketSelectedProfile,
-    setMarketSelectedProfile,
     marketSelectedUserTags,
-    setMarketSelectedUserTags,
-    marketUserTagDraft,
-    setMarketUserTagDraft,
-    setMarketShowProviderData,
-    marketManualThemeOptions,
-    setMarketManualThemeOptions,
-    setMarketManualThemeLoading,
-    marketManualThemeDraft,
-    setMarketManualThemeDraft,
     marketWatchlistItems,
-    setMarketWatchlistItems,
-    setMarketWatchlistLoading,
-    marketWatchlistGroupDraft,
     marketTargetsConfig,
-    setMarketTargetsConfig,
     marketTargetsSavedConfig,
-    setMarketTargetsSavedConfig,
     marketTargetsPreview,
-    setMarketTargetsPreview,
     marketTargetsDiffPreview,
-    setMarketTargetsDiffPreview,
-    setMarketTargetsLoading,
-    setMarketTargetsSaving,
-    marketTargetsSymbolDraft,
-    setMarketTargetsSymbolDraft,
-    marketManualSymbolPreview,
-    setMarketManualSymbolPreview,
-    marketTargetsTagDraft,
-    setMarketTargetsTagDraft,
-    marketTagManagementQuery,
     marketCurrentTargetsFilter,
     marketTargetPoolDetailMetric,
     marketTargetPoolDetailCategoryKey,
@@ -346,47 +282,14 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketDiffSectionOpen,
     marketTargetPoolStatsScope,
     marketTargetPoolStatsByScope,
-    setMarketTargetPoolStatsByScope,
-    marketTempTargets,
-    setMarketTempTargets,
-    setMarketTempTargetsLoading,
-    marketSelectedTempTargetSymbols,
-    setMarketSelectedTempTargetSymbols,
     marketIngestControlStatus,
-    setMarketIngestControlStatus,
     marketIngestControlUpdating,
-    setMarketIngestControlUpdating,
     marketSchedulerConfig,
-    setMarketSchedulerConfig,
     marketSchedulerSavedConfig,
-    setMarketSchedulerSavedConfig,
-    setMarketSchedulerLoading,
-    setMarketSchedulerSaving,
     marketUniversePoolConfig,
-    setMarketUniversePoolConfig,
     marketUniversePoolSavedConfig,
-    setMarketUniversePoolSavedConfig,
     marketUniversePoolOverview,
-    setMarketUniversePoolOverview,
-    setMarketUniversePoolLoading,
-    setMarketUniversePoolSaving,
-    setMarketTriggerIngestBlockedOpen,
-    setMarketTriggerIngestBlockedMessage,
-    marketRegistryResult,
-    setMarketRegistryResult,
-    setMarketRegistryLoading,
-    marketRegistryQuery,
-    marketRegistryAutoFilter,
-    marketRegistrySelectedSymbols,
-    setMarketRegistrySelectedSymbols,
-    setMarketRegistryUpdating,
-    marketSelectedIngestRunId,
-    setMarketSelectedIngestRunId,
-    setMarketSelectedIngestRun,
-    setMarketSelectedIngestRunLoading,
-    marketChartHoverDate,
-    setMarketChartHoverDate,
-    setMarketChartHoverPrice
+    marketChartHoverDate
   } = marketState;
   const {
     targetsEditorGridRef,
@@ -741,116 +644,20 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   });
 
   const {
-    refreshMarketWatchlist,
     refreshMarketTags,
-    refreshManualThemeOptions,
     resetMarketFilters,
-    loadMarketQuotes,
     refreshMarketTargets,
-    refreshMarketTargetsDiff
-  } = useDashboardMarketDataLoaders({
-    marketTargetsConfig,
-    toUserErrorMessage,
-    setError,
-    setMarketWatchlistLoading,
-    setMarketWatchlistItems,
-    setMarketTagsLoading,
-    setMarketTags,
-    setMarketManualThemeLoading,
-    setMarketManualThemeOptions,
-    setMarketManualThemeDraft,
-    setMarketFilterMarket,
-    setMarketFilterAssetClasses,
-    setMarketFilterKinds,
-    setMarketQuotesLoading,
-    setMarketQuotesBySymbol,
-    setMarketTargetsLoading,
-    setMarketTargetsSavedConfig,
-    setMarketTargetsConfig,
-    setMarketTargetsDiffPreview,
-    setMarketTargetsPreview,
-    setMarketTempTargetsLoading,
-    setMarketTempTargets,
-    setMarketManualSymbolPreview
-  });
-
-  const refreshMarketTargetPoolStats = useDashboardMarketTargetPoolStats({
-    marketFocusTargetSymbols,
-    marketUniversePoolEnabledBuckets: marketUniversePoolConfig?.enabledBuckets,
-    universePoolBucketOrder: UNIVERSE_POOL_BUCKET_ORDER,
-    toUserErrorMessage,
-    setMarketTargetPoolStatsByScope
-  });
-
-  const {
-    refreshMarketTokenStatus,
+    refreshMarketTargetsDiff,
     refreshMarketIngestRuns,
-    refreshMarketIngestControl,
-    refreshMarketSchedulerConfig,
-    refreshMarketUniversePool,
-    refreshMarketUniversePoolOverview,
     refreshMarketRegistry,
-    refreshMarketIngestRunDetail
-  } = useDashboardMarketAdminRefresh({
-    marketRegistryQuery,
-    marketRegistryAutoFilter,
-    toUserErrorMessage,
-    setError,
-    setMarketTokenStatus,
-    setMarketIngestRuns,
-    setMarketIngestRunsLoading,
-    setMarketIngestControlStatus,
-    setMarketSchedulerConfig,
-    setMarketSchedulerSavedConfig,
-    setMarketSchedulerLoading,
-    setMarketUniversePoolConfig,
-    setMarketUniversePoolSavedConfig,
-    setMarketUniversePoolOverview,
-    setMarketUniversePoolLoading,
-    setMarketRegistryResult,
-    setMarketRegistryLoading,
-    setMarketRegistrySelectedSymbols,
-    setMarketSelectedIngestRunId,
-    setMarketSelectedIngestRun,
-    setMarketSelectedIngestRunLoading
-  });
-
-  const {
+    refreshMarketIngestRunDetail,
     handleOpenMarketProvider,
     handleSaveMarketToken,
     handleClearMarketToken,
     handleTestMarketToken,
     handleToggleUniversePoolBucket,
     handleSaveUniversePoolConfig,
-    handleTriggerMarketIngest
-  } = useDashboardMarketAdminActions({
-    marketTokenProvider,
-    marketTokenDraft,
-    marketUniversePoolConfig,
-    refreshMarketTokenStatus,
-    refreshMarketIngestRuns,
-    refreshMarketIngestControl,
-    refreshMarketTargetPoolStats,
-    toUserErrorMessage,
-    universePoolBucketOrder: UNIVERSE_POOL_BUCKET_ORDER,
-    setError,
-    setNotice,
-    setMarketTokenStatus,
-    setMarketTokenDraft,
-    setMarketTokenSaving,
-    setMarketTokenTesting,
-    setMarketUniversePoolConfig,
-    setMarketUniversePoolSavedConfig,
-    setMarketUniversePoolOverview,
-    setMarketUniversePoolSaving,
-    setMarketIngestTriggering
-  });
-
-  const setMarketScopeToTags = useCallback(() => {
-    setMarketScope("tags");
-  }, [setMarketScope]);
-
-  const {
+    handleTriggerMarketIngest,
     handleSyncInstrumentCatalog,
     handleSelectInstrument,
     handleSelectTag,
@@ -859,65 +666,8 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     handleRemoveUserTag,
     handleAddManualTheme,
     handleAddSelectedToWatchlist,
-    handleRemoveWatchlistItem
-  } = useDashboardMarketInstrumentActions({
-    activePortfolioId,
-    marketSelectedSymbol,
-    marketUserTagDraft,
-    marketManualThemeDraft,
-    marketManualThemeOptions,
-    marketSelectedUserTags,
-    marketSelectedProfile,
-    marketWatchlistGroupDraft,
-    toUserErrorMessage,
-    loadSnapshot,
-    loadMarketQuotes,
-    refreshMarketTargets,
-    refreshMarketWatchlist,
-    refreshMarketTags,
-    setMarketScopeToTags,
-    setError,
-    setNotice,
-    setMarketCatalogSyncing,
-    setMarketCatalogSyncSummary,
-    setMarketInstrumentDetailsOpen,
-    setMarketTagMembersModalOpen,
-    setMarketSelectedSymbol,
-    setMarketSelectedProfile,
-    setMarketSelectedUserTags,
-    setMarketShowProviderData,
-    setMarketChartHoverDate,
-    setMarketChartHoverPrice,
-    setMarketChartLoading,
-    setMarketTempTargets,
-    setMarketTargetsPreview,
-    setMarketSelectedTag,
-    setMarketTagMembers,
-    setMarketChartBars,
-    setMarketTagMembersLoading,
-    setMarketDemoSeeding,
-    setMarketUserTagDraft
-  });
-
-  const handleAddTargetTag = useCallback(
-    (raw?: string) => {
-      const tag = (raw ?? marketTargetsTagDraft).trim();
-      if (!tag) return;
-      if (!tag.includes(":")) {
-        setError("标签必须包含命名空间，例如 industry:白酒。");
-        return;
-      }
-      setMarketTargetsConfig((prev) => {
-        if (prev.tagFilters.includes(tag)) return prev;
-        return { ...prev, tagFilters: [...prev.tagFilters, tag] };
-      });
-      setError(null);
-      if (raw === undefined) setMarketTargetsTagDraft("");
-    },
-    [marketTargetsTagDraft]
-  );
-
-  const {
+    handleRemoveWatchlistItem,
+    handleAddTargetTag,
     handlePreviewManualTargetSymbols,
     handleApplyManualTargetSymbols,
     handleRemoveManualPreviewSymbol,
@@ -929,32 +679,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     handleSelectAllTempTargets,
     handleBatchPromoteTempTargets,
     handleBatchRemoveTempTargets,
-    handleBatchExtendTempTargets
-  } = useDashboardMarketTargetActions({
-    marketTargetsConfig,
-    marketTargetsSavedConfig,
-    marketTargetsSymbolDraft,
-    marketManualSymbolPreview,
-    marketSelectedTempTargetSymbols,
-    marketTempTargets,
-    toUserErrorMessage,
-    refreshMarketTargets,
-    refreshMarketTargetsDiff,
-    setError,
-    setNotice,
-    setMarketTargetsConfig,
-    setMarketTargetsSavedConfig,
-    setMarketTargetsSymbolDraft,
-    setMarketManualSymbolPreview,
-    setMarketTargetsDiffPreview,
-    setMarketTargetsPreview,
-    setMarketTargetsSaving,
-    setMarketTempTargets,
-    setMarketTempTargetsLoading,
-    setMarketSelectedTempTargetSymbols
-  });
-
-  const {
+    handleBatchExtendTempTargets,
     handlePauseMarketIngest,
     handleResumeMarketIngest,
     handleCancelMarketIngest,
@@ -965,80 +690,26 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     handleToggleSelectAllRegistry,
     handleSetRegistryAutoIngest,
     handleBatchSetRegistryAutoIngest
-  } = useDashboardMarketManagementActions({
-    marketSchedulerConfig,
-    marketIngestControlState,
-    marketIngestTriggering,
-    marketRegistryResult,
-    marketRegistrySelectedSymbols,
-    toUserErrorMessage,
-    handleTriggerMarketIngest,
-    refreshMarketIngestRuns,
-    refreshMarketRegistry,
-    refreshMarketTargetsDiff,
-    setError,
-    setNotice,
-    setMarketIngestControlStatus,
-    setMarketIngestControlUpdating,
-    setMarketSchedulerConfig,
-    setMarketSchedulerSavedConfig,
-    setMarketSchedulerSaving,
-    setMarketTriggerIngestBlockedOpen,
-    setMarketTriggerIngestBlockedMessage,
-    setMarketRegistrySelectedSymbols,
-    setMarketRegistryUpdating
-  });
-
-  const restoreDataManagementView = useCallback(() => {
-    setActiveView("other");
-    setOtherTab("data-management");
-  }, []);
-
-  useDashboardMarketRuntimeEffects({
+  } = useDashboardMarketOrchestration({
     activeView,
     otherTab,
-    analysisInstrumentViewActive:
-      activeView === "data-analysis" && analysisTab === "instrument",
+    analysisTab,
+    activePortfolioId,
+    marketState,
     marketEffectiveScope,
-    holdingsScopeValue: "holdings",
-    searchScopeValue: "search",
-    tagsScopeValue: "tags",
-    holdingsSymbols: marketHoldingsSymbolsFiltered,
-    searchSymbols: marketSearchResultSymbols,
-    loadMarketQuotes,
-    marketSelectedSymbol,
-    marketSelectedTag,
-    marketSearchQuery,
-    marketTagManagementQuery,
-    marketWatchlistCount: marketWatchlistItems.length,
-    marketInstrumentDetailsOpen,
-    marketIngestRuns,
-    marketSelectedIngestRunId,
-    marketRegistryEntryEnabled,
-    marketRegistryAutoFilter,
-    marketRegistryQuery,
-    marketTargetsConfig,
+    marketHoldingsSymbolsFiltered,
+    marketSearchResultSymbols,
     marketFocusTargetSymbols,
     marketTargetsDirty,
-    restoreDataManagementView,
-    setMarketSelectedIngestRunId,
-    setMarketSelectedIngestRun,
-    setMarketScope,
-    selectDefaultTag: handleSelectTag,
-    refreshMarketTokenStatus,
-    refreshMarketTargets,
-    refreshMarketIngestRuns,
-    refreshMarketIngestControl,
-    refreshMarketSchedulerConfig,
-    refreshMarketUniversePool,
-    refreshMarketRegistry,
-    refreshMarketTargetsDiff,
-    refreshMarketTargetPoolStats,
-    refreshMarketUniversePoolOverview,
-    refreshMarketWatchlist,
-    refreshMarketTags,
-    refreshManualThemeOptions,
-    refreshMarketIngestRunDetail
+    marketIngestControlState,
+    marketRegistryEntryEnabled,
+    toUserErrorMessage,
+    loadSnapshot,
+    setError,
+    setNotice,
+    setActiveView,
+    setOtherTab,
+    universePoolBucketOrder: UNIVERSE_POOL_BUCKET_ORDER
   });
 
   return (
