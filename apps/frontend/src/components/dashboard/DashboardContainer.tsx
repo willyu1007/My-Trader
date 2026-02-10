@@ -145,6 +145,7 @@ import {
 } from "./hooks/use-dashboard-market";
 import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-market-instrument-actions";
 import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-admin-refresh";
+import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-admin-actions";
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
 import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
@@ -2423,17 +2424,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketTargetPoolStatsByScope
   });
 
-  const handleOpenMarketProvider = useCallback(async () => {
-    if (!window.mytrader) return;
-    try {
-      await window.mytrader.market.openProviderHomepage({
-        provider: marketTokenProvider
-      });
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, [marketTokenProvider]);
-
   const {
     refreshMarketTokenStatus,
     refreshMarketIngestRuns,
@@ -2467,128 +2457,36 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketSelectedIngestRunLoading
   });
 
-  const handleSaveMarketToken = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    setMarketTokenSaving(true);
-    try {
-      const token = marketTokenDraft.trim();
-      const status = await window.mytrader.market.setToken({
-        token: token ? token : null
-      });
-      setMarketTokenStatus(status);
-      setMarketTokenDraft("");
-      setNotice(token ? "令牌已保存（本地加密存储）。" : "本地令牌已清除。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTokenSaving(false);
-    }
-  }, [marketTokenDraft]);
-
-  const handleClearMarketToken = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    setMarketTokenSaving(true);
-    try {
-      const status = await window.mytrader.market.setToken({ token: null });
-      setMarketTokenStatus(status);
-      setMarketTokenDraft("");
-      setNotice("本地令牌已清除。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTokenSaving(false);
-    }
-  }, []);
-
-  const handleTestMarketToken = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    setMarketTokenTesting(true);
-    try {
-      const token = marketTokenDraft.trim() || null;
-      await window.mytrader.market.testToken({ token });
-      setNotice("连接测试成功。");
-      await refreshMarketTokenStatus();
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTokenTesting(false);
-    }
-  }, [marketTokenDraft, refreshMarketTokenStatus]);
-
-  const handleToggleUniversePoolBucket = useCallback((bucket: UniversePoolBucketId) => {
-    setMarketUniversePoolConfig((prev) => {
-      const current = prev ?? { enabledBuckets: [...UNIVERSE_POOL_BUCKET_ORDER] };
-      const enabled = new Set(current.enabledBuckets);
-      if (enabled.has(bucket)) {
-        if (enabled.size === 1) return current;
-        enabled.delete(bucket);
-      } else {
-        enabled.add(bucket);
-      }
-      const nextBuckets = UNIVERSE_POOL_BUCKET_ORDER.filter((item) => enabled.has(item));
-      return { enabledBuckets: nextBuckets };
-    });
-  }, []);
-
-  const handleSaveUniversePoolConfig = useCallback(async () => {
-    if (!window.mytrader) return;
-    if (!marketUniversePoolConfig) return;
-    const buckets = marketUniversePoolConfig.enabledBuckets;
-    if (buckets.length === 0) {
-      setError("全量池配置至少保留一个分类。");
-      return;
-    }
-    setError(null);
-    setNotice(null);
-    setMarketUniversePoolSaving(true);
-    try {
-      const saved = await window.mytrader.market.setUniversePoolConfig({
-        enabledBuckets: buckets
-      });
-      setMarketUniversePoolConfig(saved);
-      setMarketUniversePoolSavedConfig(saved);
-      const overview = await window.mytrader.market.getUniversePoolOverview();
-      setMarketUniversePoolOverview(overview);
-      setNotice("全量池配置已保存。");
-      await refreshMarketTargetPoolStats();
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketUniversePoolSaving(false);
-    }
-  }, [marketUniversePoolConfig, refreshMarketTargetPoolStats]);
-
-  const handleTriggerMarketIngest = useCallback(
-    async (scope: "targets" | "universe" | "both") => {
-      if (!window.mytrader) return;
-      setError(null);
-      setNotice(null);
-      setMarketIngestTriggering(true);
-      try {
-        await window.mytrader.market.triggerIngest({ scope });
-        setNotice("拉取任务已加入队列。");
-        await Promise.all([
-          refreshMarketIngestRuns(),
-          refreshMarketIngestControl()
-        ]);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-        await Promise.all([
-          refreshMarketIngestRuns(),
-          refreshMarketIngestControl()
-        ]);
-      } finally {
-        setMarketIngestTriggering(false);
-      }
-    },
-    [refreshMarketIngestControl, refreshMarketIngestRuns]
-  );
+  const {
+    handleOpenMarketProvider,
+    handleSaveMarketToken,
+    handleClearMarketToken,
+    handleTestMarketToken,
+    handleToggleUniversePoolBucket,
+    handleSaveUniversePoolConfig,
+    handleTriggerMarketIngest
+  } = useDashboardMarketAdminActions({
+    marketTokenProvider,
+    marketTokenDraft,
+    marketUniversePoolConfig,
+    refreshMarketTokenStatus,
+    refreshMarketIngestRuns,
+    refreshMarketIngestControl,
+    refreshMarketTargetPoolStats,
+    toUserErrorMessage,
+    universePoolBucketOrder: UNIVERSE_POOL_BUCKET_ORDER,
+    setError,
+    setNotice,
+    setMarketTokenStatus,
+    setMarketTokenDraft,
+    setMarketTokenSaving,
+    setMarketTokenTesting,
+    setMarketUniversePoolConfig,
+    setMarketUniversePoolSavedConfig,
+    setMarketUniversePoolOverview,
+    setMarketUniversePoolSaving,
+    setMarketIngestTriggering
+  });
 
   const setMarketScopeToTags = useCallback(() => {
     setMarketScope("tags");

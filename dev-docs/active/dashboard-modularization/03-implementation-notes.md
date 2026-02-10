@@ -61,7 +61,8 @@
   - 新增 `hooks/use-dashboard-market-admin-refresh.ts`，承接 token/ingest/scheduler/universe/registry/ingest-detail 刷新函数。
   - 新增 `hooks/use-dashboard-market-target-pool-stats.ts`，承接 `refreshMarketTargetPoolStats` 超长计算逻辑（并发拉取标签成员、分类聚合、focus/universe 结构统计）。
   - 新增 `hooks/use-dashboard-market-data-loaders.ts`，承接 market 数据加载函数（watchlist/tags/manual-themes/quotes/targets/targets-diff）。
-  - `DashboardContainer.tsx` 进一步下降到 `3459` 行；`use-dashboard-market.ts` `1360` 行，`use-dashboard-market-target-actions.ts` `420` 行，`use-dashboard-market-instrument-actions.ts` `397` 行，`use-dashboard-market-admin-refresh.ts` `227` 行，`use-dashboard-market-target-pool-stats.ts` `271` 行，`use-dashboard-market-data-loaders.ts` `235` 行。
+  - 新增 `hooks/use-dashboard-market-admin-actions.ts`，承接 token/provider/universe-pool/ingest-trigger 操作函数（含一次类型阻断修复：bucket 参数改为 `MarketUniversePoolConfig["enabledBuckets"][number]`）。
+  - `DashboardContainer.tsx` 进一步下降到 `3357` 行；`use-dashboard-market.ts` `1360` 行，`use-dashboard-market-target-actions.ts` `420` 行，`use-dashboard-market-instrument-actions.ts` `397` 行，`use-dashboard-market-admin-refresh.ts` `227` 行，`use-dashboard-market-target-pool-stats.ts` `271` 行，`use-dashboard-market-data-loaders.ts` `235` 行，`use-dashboard-market-admin-actions.ts` `230` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -113,7 +114,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `3459` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `3357` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).
