@@ -143,7 +143,8 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `547` 行，已低于 `800`；后续重点从“减行”转向“类型收敛与 props/view-model 清晰化”（当前 layout/orchestration 使用了宽类型入口，需逐步收紧）。
+- `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `755` 行，均低于 `800`。
+- `DashboardContainerLayoutProps` 的 `any` 宽类型已全部移除（改为 hook 返回类型与明确函数签名），后续重点从“减行”转向“manual smoke 覆盖 + view-model 结构继续清晰化”。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

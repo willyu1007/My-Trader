@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import type {
+  LedgerEntry,
   PerformanceRangeKey,
   Portfolio,
   PortfolioPerformanceRangeResult,
@@ -81,10 +82,21 @@ import {
 import type {
   AnalysisTab,
   DashboardProps,
+  LedgerFilter,
+  LedgerFormState,
+  MarketChartRangeKey,
+  MarketFilterMarket,
+  MarketScope,
   OtherTab,
+  PositionFormState,
   PortfolioTab,
+  RiskFormState,
+  TargetPoolStatsScope,
+  TargetPoolStructureStats,
   WorkspaceView
 } from "../types";
+import type { UseDashboardAnalysisResult } from "../hooks/use-dashboard-analysis";
+import type { UseDashboardPortfolioResult } from "../hooks/use-dashboard-portfolio";
 import { AccountView } from "./AccountView";
 import { DataAnalysisView } from "./DataAnalysisView";
 import { DashboardOverlays } from "./DashboardOverlays";
@@ -94,6 +106,43 @@ import { PortfolioView } from "./PortfolioView";
 import { RiskView } from "./RiskView";
 import { SidebarNav } from "./SidebarNav";
 import { TopToolbar } from "./TopToolbar";
+
+type DashboardMarketState = ReturnType<
+  typeof import("../hooks/use-dashboard-market").useDashboardMarket<
+    MarketScope,
+    MarketFilterMarket,
+    MarketChartRangeKey,
+    TargetPoolStatsScope,
+    TargetPoolStructureStats
+  >
+>;
+type DashboardMarketAdminDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-market-admin-derived").useDashboardMarketAdminDerived<TargetPoolStatsScope>
+>;
+type DashboardMarketTargetPoolDetail = ReturnType<
+  typeof import("../hooks/use-dashboard-market-target-pool-detail").useDashboardMarketTargetPoolDetail
+>;
+type DashboardMarketDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-market-derived").useDashboardMarketDerived
+>;
+type DashboardAnalysisDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-analysis-derived").useDashboardAnalysisDerived
+>;
+type DashboardPortfolioDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-portfolio-derived").useDashboardPortfolioDerived
+>;
+type DashboardPortfolioActions = ReturnType<
+  typeof import("../hooks/use-dashboard-portfolio-actions").useDashboardPortfolioActions
+>;
+type DashboardLedgerActions = ReturnType<
+  typeof import("../hooks/use-dashboard-ledger-actions").useDashboardLedgerActions
+>;
+type DashboardMarketOrchestration = ReturnType<
+  typeof import("../hooks/use-dashboard-market-orchestration").useDashboardMarketOrchestration
+>;
+type DashboardMarketResizeResult = ReturnType<
+  typeof import("../hooks/use-dashboard-market-resize").useDashboardMarketResize
+>;
 
 interface DashboardContainerLayoutProps {
   account: DashboardProps["account"];
@@ -130,25 +179,34 @@ interface DashboardContainerLayoutProps {
   setShowAllSymbolContribution: Dispatch<SetStateAction<boolean>>;
   showAllAssetContribution: boolean;
   setShowAllAssetContribution: Dispatch<SetStateAction<boolean>>;
-  portfolioState: any;
-  analysisState: any;
-  marketState: any;
-  marketAdminDerived: any;
-  marketTargetPoolDetail: any;
-  marketDerived: any;
-  analysisDerived: any;
-  portfolioDerived: any;
-  portfolioActions: any;
-  ledgerActions: any;
-  marketOrchestration: any;
-  loadLedgerEntries: (...args: any[]) => Promise<void>;
-  loadPerformance: (...args: any[]) => Promise<void>;
-  loadAnalysisInstrument: (...args: any[]) => Promise<void>;
-  targetsEditorGridRef: any;
-  handleMarketExplorerResizePointerDown: (...args: any[]) => void;
-  handleMarketExplorerResizeKeyDown: (...args: any[]) => void;
-  handleTargetsEditorResizePointerDown: (...args: any[]) => void;
-  handleTargetsEditorResizeKeyDown: (...args: any[]) => void;
+  portfolioState: UseDashboardPortfolioResult<
+    PositionFormState,
+    RiskFormState,
+    LedgerFormState,
+    LedgerEntry,
+    LedgerFilter
+  >;
+  analysisState: UseDashboardAnalysisResult<MarketChartRangeKey>;
+  marketState: DashboardMarketState;
+  marketAdminDerived: DashboardMarketAdminDerived;
+  marketTargetPoolDetail: DashboardMarketTargetPoolDetail;
+  marketDerived: DashboardMarketDerived;
+  analysisDerived: DashboardAnalysisDerived;
+  portfolioDerived: DashboardPortfolioDerived;
+  portfolioActions: DashboardPortfolioActions;
+  ledgerActions: DashboardLedgerActions;
+  marketOrchestration: DashboardMarketOrchestration;
+  loadLedgerEntries: (portfolioId: string) => Promise<void>;
+  loadPerformance: (
+    portfolioId: string,
+    range: PerformanceRangeKey
+  ) => Promise<void>;
+  loadAnalysisInstrument: (symbol: string) => Promise<void>;
+  targetsEditorGridRef: DashboardMarketResizeResult["targetsEditorGridRef"];
+  handleMarketExplorerResizePointerDown: DashboardMarketResizeResult["handleMarketExplorerResizePointerDown"];
+  handleMarketExplorerResizeKeyDown: DashboardMarketResizeResult["handleMarketExplorerResizeKeyDown"];
+  handleTargetsEditorResizePointerDown: DashboardMarketResizeResult["handleTargetsEditorResizePointerDown"];
+  handleTargetsEditorResizeKeyDown: DashboardMarketResizeResult["handleTargetsEditorResizeKeyDown"];
 }
 
 export function DashboardContainerLayout({
