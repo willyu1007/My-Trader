@@ -385,3 +385,14 @@
     - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
   - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
     - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after moving dashboard local domain types/constants to shared module files):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/types.ts apps/frontend/src/components/dashboard/constants.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `1793` lines
+    - `types.ts`: `206` lines
+    - `constants.ts`: `237` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)

@@ -1,13 +1,20 @@
 import type {
+  AssetClass,
   AccountSummary,
+  CorporateActionKind,
   InstrumentProfile,
   InstrumentProfileSummary,
   LedgerEntry,
+  LedgerEventType,
+  LedgerSide,
+  LedgerSource,
   MarketDailyBar,
+  MarketUniversePoolBucketStatus,
   MarketQuote,
   Portfolio,
   PortfolioPerformanceRangeResult,
   PortfolioSnapshot,
+  RiskLimitType,
   TagSummary,
   WatchlistItem
 } from "@mytrader/shared";
@@ -107,4 +114,93 @@ export interface MarketViewModel {
 
 export interface OtherViewModel {
   activeTab: OtherTab;
+}
+
+export interface PositionFormState {
+  id?: string;
+  symbol: string;
+  name: string;
+  assetClass: AssetClass;
+  market: string;
+  currency: string;
+  quantity: string;
+  cost: string;
+  openDate: string;
+}
+
+export interface RiskFormState {
+  id?: string;
+  limitType: RiskLimitType;
+  target: string;
+  thresholdPct: string;
+}
+
+export type CorporateActionKindUi = CorporateActionKind | "dividend";
+
+export interface LedgerFormState {
+  id?: string;
+  eventType: LedgerEventType;
+  tradeDate: string;
+  eventTime: string;
+  sequence: string;
+  accountKey: string;
+  instrumentId: string;
+  symbol: string;
+  side: LedgerSide | "";
+  quantity: string;
+  price: string;
+  priceCurrency: string;
+  cashAmount: string;
+  cashCurrency: string;
+  fee: string;
+  tax: string;
+  feeRate: string;
+  taxRate: string;
+  cashAmountAuto: boolean;
+  note: string;
+  source: LedgerSource;
+  externalId: string;
+  corporateKind: CorporateActionKindUi;
+  corporateAfterShares: string;
+}
+
+export type LedgerFilter = "all" | LedgerEventType;
+export type MarketScope = "tags" | "holdings" | "search";
+export type MarketChartRangeKey =
+  | "1D"
+  | "1W"
+  | "1M"
+  | "3M"
+  | "6M"
+  | "YTD"
+  | "1Y"
+  | "2Y"
+  | "5Y"
+  | "10Y";
+export type MarketFilterMarket = "all" | "CN";
+export type TargetPoolStatsScope = "universe" | "focus";
+export type UniversePoolBucketId = MarketUniversePoolBucketStatus["bucket"];
+
+export interface TargetPoolCategoryDetail {
+  key: string;
+  label: string;
+  symbols: string[];
+}
+
+export interface TargetPoolStructureStats {
+  totalSymbols: number;
+  industryL1Count: number;
+  industryL2Count: number;
+  conceptCount: number;
+  unclassifiedCount: number;
+  classificationCoverage: number | null;
+  allSymbols: string[];
+  classifiedSymbols: string[];
+  industryL1Details: TargetPoolCategoryDetail[];
+  industryL2Details: TargetPoolCategoryDetail[];
+  conceptDetails: TargetPoolCategoryDetail[];
+  unclassifiedSymbols: string[];
+  symbolNames: Record<string, string | null>;
+  loading: boolean;
+  error: string | null;
 }

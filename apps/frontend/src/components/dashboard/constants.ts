@@ -1,4 +1,16 @@
-import type { AnalysisTab } from "./types";
+import type {
+  AssetClass,
+  LedgerEventType,
+  RiskLimitType
+} from "@mytrader/shared";
+
+import type {
+  AnalysisTab,
+  PositionFormState,
+  RiskFormState,
+  TargetPoolStructureStats,
+  UniversePoolBucketId
+} from "./types";
 
 export const DEFAULT_LEDGER_START_DATE = "2000-01-01";
 export const DEFAULT_LEDGER_END_DATE = "2099-12-31";
@@ -152,3 +164,74 @@ export const schedulerTimezoneDefaults = [
   "Europe/London",
   "UTC"
 ];
+
+export const UNIVERSE_POOL_BUCKET_ORDER: UniversePoolBucketId[] = [
+  "cn_a",
+  "etf",
+  "precious_metal"
+];
+
+export const emptyPositionForm: PositionFormState = {
+  symbol: "",
+  name: "",
+  assetClass: "stock",
+  market: "CN",
+  currency: "CNY",
+  quantity: "",
+  cost: "",
+  openDate: ""
+};
+
+export const emptyRiskForm: RiskFormState = {
+  limitType: "position_weight",
+  target: "",
+  thresholdPct: ""
+};
+
+export const assetClassLabels: Record<AssetClass, string> = {
+  stock: "股票",
+  etf: "ETF",
+  cash: "现金"
+};
+
+export const riskLimitTypeLabels: Record<RiskLimitType, string> = {
+  position_weight: "持仓权重",
+  asset_class_weight: "资产类别权重"
+};
+
+export const ledgerEventTypeLabels: Record<LedgerEventType, string> = {
+  trade: "交易",
+  cash: "现金流",
+  fee: "费用（历史）",
+  tax: "税费（历史）",
+  dividend: "公司行为·分红",
+  adjustment: "调整（历史）",
+  corporate_action: "公司行为"
+};
+
+export const ledgerEventTypeOptions: { value: LedgerEventType; label: string }[] = [
+  { value: "trade", label: ledgerEventTypeLabels.trade },
+  { value: "cash", label: ledgerEventTypeLabels.cash },
+  { value: "corporate_action", label: ledgerEventTypeLabels.corporate_action }
+];
+
+export const TARGET_POOL_STRUCTURE_EMPTY: TargetPoolStructureStats = {
+  totalSymbols: 0,
+  industryL1Count: 0,
+  industryL2Count: 0,
+  conceptCount: 0,
+  unclassifiedCount: 0,
+  classificationCoverage: null,
+  allSymbols: [],
+  classifiedSymbols: [],
+  industryL1Details: [],
+  industryL2Details: [],
+  conceptDetails: [],
+  unclassifiedSymbols: [],
+  symbolNames: {},
+  loading: false,
+  error: null
+};
+
+export const CONTRIBUTION_TOP_N = 5;
+export const HHI_WARN_THRESHOLD = 0.25;

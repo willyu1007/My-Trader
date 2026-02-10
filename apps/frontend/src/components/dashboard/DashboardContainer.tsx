@@ -6,41 +6,54 @@ import {
 } from "react";
 
 import type {
-  AssetClass,
-  CorporateActionKind,
   LedgerEntry,
-  LedgerEventType,
-  LedgerSide,
-  LedgerSource,
   MarketUniversePoolBucketStatus,
   PerformanceRangeKey,
   Portfolio,
   PortfolioPerformanceRangeResult,
-  PortfolioSnapshot,
-  RiskLimitType,
+  PortfolioSnapshot
 } from "@mytrader/shared";
 import {
+  CONTRIBUTION_TOP_N,
   DEFAULT_LEDGER_END_DATE,
   DEFAULT_LEDGER_START_DATE,
+  HHI_WARN_THRESHOLD,
   MARKET_EXPLORER_DEFAULT_WIDTH,
   MARKET_EXPLORER_MAX_WIDTH,
   MARKET_EXPLORER_MIN_WIDTH,
   MARKET_EXPLORER_WIDTH_STORAGE_KEY,
+  TARGET_POOL_STRUCTURE_EMPTY,
   TARGETS_EDITOR_SPLIT_DEFAULT,
   TARGETS_EDITOR_SPLIT_MAX,
   TARGETS_EDITOR_SPLIT_MIN,
   TARGETS_EDITOR_SPLIT_STORAGE_KEY,
+  UNIVERSE_POOL_BUCKET_ORDER,
   analysisTabs,
+  assetClassLabels,
+  emptyPositionForm,
+  emptyRiskForm,
+  ledgerEventTypeOptions,
   marketChartRanges,
   navItems,
   otherTabs,
   performanceRanges,
   portfolioTabs,
+  riskLimitTypeLabels,
   schedulerTimezoneDefaults
 } from "./constants";
 import type {
   DashboardProps,
+  LedgerFilter,
+  LedgerFormState,
+  MarketChartRangeKey,
+  MarketFilterMarket,
+  MarketScope,
+  PositionFormState,
   PortfolioTab,
+  RiskFormState,
+  TargetPoolStatsScope,
+  TargetPoolStructureStats,
+  UniversePoolBucketId,
   WorkspaceView
 } from "./types";
 import {
@@ -142,165 +155,6 @@ import {
 import { useDashboardPortfolioRuntime } from "./hooks/use-dashboard-portfolio-runtime";
 import { useDashboardUiEffects } from "./hooks/use-dashboard-ui-effects";
 import { useDashboardUi } from "./hooks/use-dashboard-ui";
-
-interface PositionFormState {
-  id?: string;
-  symbol: string;
-  name: string;
-  assetClass: AssetClass;
-  market: string;
-  currency: string;
-  quantity: string;
-  cost: string;
-  openDate: string;
-}
-
-interface RiskFormState {
-  id?: string;
-  limitType: RiskLimitType;
-  target: string;
-  thresholdPct: string;
-}
-
-interface LedgerFormState {
-  id?: string;
-  eventType: LedgerEventType;
-  tradeDate: string;
-  eventTime: string;
-  sequence: string;
-  accountKey: string;
-  instrumentId: string;
-  symbol: string;
-  side: LedgerSide | "";
-  quantity: string;
-  price: string;
-  priceCurrency: string;
-  cashAmount: string;
-  cashCurrency: string;
-  fee: string;
-  tax: string;
-  feeRate: string;
-  taxRate: string;
-  cashAmountAuto: boolean;
-  note: string;
-  source: LedgerSource;
-  externalId: string;
-  corporateKind: CorporateActionKindUi;
-  corporateAfterShares: string;
-}
-
-type LedgerFilter = "all" | LedgerEventType;
-type CorporateActionKindUi = CorporateActionKind | "dividend";
-type MarketScope = "tags" | "holdings" | "search";
-type MarketChartRangeKey =
-  | "1D"
-  | "1W"
-  | "1M"
-  | "3M"
-  | "6M"
-  | "YTD"
-  | "1Y"
-  | "2Y"
-  | "5Y"
-  | "10Y";
-
-type MarketFilterMarket = "all" | "CN";
-type TargetPoolStatsScope = "universe" | "focus";
-type UniversePoolBucketId = MarketUniversePoolBucketStatus["bucket"];
-
-interface TargetPoolCategoryDetail {
-  key: string;
-  label: string;
-  symbols: string[];
-}
-
-interface TargetPoolStructureStats {
-  totalSymbols: number;
-  industryL1Count: number;
-  industryL2Count: number;
-  conceptCount: number;
-  unclassifiedCount: number;
-  classificationCoverage: number | null;
-  allSymbols: string[];
-  classifiedSymbols: string[];
-  industryL1Details: TargetPoolCategoryDetail[];
-  industryL2Details: TargetPoolCategoryDetail[];
-  conceptDetails: TargetPoolCategoryDetail[];
-  unclassifiedSymbols: string[];
-  symbolNames: Record<string, string | null>;
-  loading: boolean;
-  error: string | null;
-}
-
-const UNIVERSE_POOL_BUCKET_ORDER: UniversePoolBucketId[] = [
-  "cn_a",
-  "etf",
-  "precious_metal"
-];
-
-const emptyPositionForm: PositionFormState = {
-  symbol: "",
-  name: "",
-  assetClass: "stock",
-  market: "CN",
-  currency: "CNY",
-  quantity: "",
-  cost: "",
-  openDate: ""
-};
-
-const emptyRiskForm: RiskFormState = {
-  limitType: "position_weight",
-  target: "",
-  thresholdPct: ""
-};
-
-const assetClassLabels: Record<AssetClass, string> = {
-  stock: "股票",
-  etf: "ETF",
-  cash: "现金"
-};
-
-const riskLimitTypeLabels: Record<RiskLimitType, string> = {
-  position_weight: "持仓权重",
-  asset_class_weight: "资产类别权重"
-};
-
-const ledgerEventTypeLabels: Record<LedgerEventType, string> = {
-  trade: "交易",
-  cash: "现金流",
-  fee: "费用（历史）",
-  tax: "税费（历史）",
-  dividend: "公司行为·分红",
-  adjustment: "调整（历史）",
-  corporate_action: "公司行为"
-};
-
-const ledgerEventTypeOptions: { value: LedgerEventType; label: string }[] = [
-  { value: "trade", label: ledgerEventTypeLabels.trade },
-  { value: "cash", label: ledgerEventTypeLabels.cash },
-  { value: "corporate_action", label: ledgerEventTypeLabels.corporate_action }
-];
-const TARGET_POOL_STRUCTURE_EMPTY: TargetPoolStructureStats = {
-  totalSymbols: 0,
-  industryL1Count: 0,
-  industryL2Count: 0,
-  conceptCount: 0,
-  unclassifiedCount: 0,
-  classificationCoverage: null,
-  allSymbols: [],
-  classifiedSymbols: [],
-  industryL1Details: [],
-  industryL2Details: [],
-  conceptDetails: [],
-  unclassifiedSymbols: [],
-  symbolNames: {},
-  loading: false,
-  error: null
-};
-
-const CONTRIBUTION_TOP_N = 5;
-const HHI_WARN_THRESHOLD = 0.25;
 
 export function Dashboard({ account, onLock, onActivePortfolioChange }: DashboardProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
