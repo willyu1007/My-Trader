@@ -225,6 +225,20 @@
     - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
   - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
     - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after extracting target-pool stats refresher to dedicated hook file):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market-target-pool-stats.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market-target-actions.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market-instrument-actions.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market-admin-refresh.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `3553` lines
+    - `use-dashboard-market-target-pool-stats.ts`: `271` lines
+    - `use-dashboard-market.ts`: `1360` lines
+    - `use-dashboard-market-target-actions.ts`: `420` lines
+    - `use-dashboard-market-instrument-actions.ts`: `397` lines
+    - `use-dashboard-market-admin-refresh.ts`: `227` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
 
 ## Manual smoke checks
 - 本轮未执行（仅完成结构迁移与自动化回归）。待执行并记录：

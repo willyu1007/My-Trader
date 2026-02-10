@@ -59,7 +59,8 @@
   - 新增 `hooks/use-dashboard-market-target-actions.ts`，承接 targets/temp-target 处理器（手动标的预览与应用、临时标的单项/批量操作、目标池保存与重置）。
   - 新增 `hooks/use-dashboard-market-instrument-actions.ts`，承接 instrument/tag/watchlist/demo-seed 处理器（选股/选标签、标签增删、手动主题、自选增删、标的库同步、示例数据注入）。
   - 新增 `hooks/use-dashboard-market-admin-refresh.ts`，承接 token/ingest/scheduler/universe/registry/ingest-detail 刷新函数。
-  - `DashboardContainer.tsx` 进一步下降到 `3769` 行；`use-dashboard-market.ts` `1360` 行，`use-dashboard-market-target-actions.ts` `420` 行，`use-dashboard-market-instrument-actions.ts` `397` 行，`use-dashboard-market-admin-refresh.ts` `227` 行。
+  - 新增 `hooks/use-dashboard-market-target-pool-stats.ts`，承接 `refreshMarketTargetPoolStats` 超长计算逻辑（并发拉取标签成员、分类聚合、focus/universe 结构统计）。
+  - `DashboardContainer.tsx` 进一步下降到 `3553` 行；`use-dashboard-market.ts` `1360` 行，`use-dashboard-market-target-actions.ts` `420` 行，`use-dashboard-market-instrument-actions.ts` `397` 行，`use-dashboard-market-admin-refresh.ts` `227` 行，`use-dashboard-market-target-pool-stats.ts` `271` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -111,7 +112,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `3769` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `3553` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).
