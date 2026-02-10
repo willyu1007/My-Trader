@@ -2,7 +2,29 @@ import type { ChangeEvent } from "react";
 
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementTokenProviderPanel(props: OtherViewProps) {
+export type OtherDataManagementTokenProviderPanelProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "HelpHint"
+  | "Input"
+  | "PopoverSelect"
+  | "handleClearMarketToken"
+  | "handleOpenMarketProvider"
+  | "handleSaveMarketToken"
+  | "handleTestMarketToken"
+  | "marketTokenDraft"
+  | "marketTokenProvider"
+  | "marketTokenSaving"
+  | "marketTokenTesting"
+  | "setMarketTokenDraft"
+  | "setMarketTokenProvider"
+>;
+
+export function OtherDataManagementTokenProviderPanel(
+  props: OtherDataManagementTokenProviderPanelProps
+) {
+  const marketTokenFieldId = "market-token-draft";
+
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-center">
@@ -40,15 +62,31 @@ export function OtherDataManagementTokenProviderPanel(props: OtherViewProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-center">
+      <form
+        className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-center"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden="true"
+          className="sr-only"
+          name="marketTokenProviderAlias"
+          autoComplete="username"
+          value={props.marketTokenProvider}
+          readOnly
+        />
         <div className="relative">
           <props.Input
+            id={marketTokenFieldId}
+            name="marketTokenDraft"
             type="password"
             value={props.marketTokenDraft}
             onChange={(event: ChangeEvent<HTMLInputElement>) =>
               props.setMarketTokenDraft(event.target.value)
             }
             placeholder="输入数据源令牌"
+            autoComplete="current-password"
             className="font-mono text-xs pr-8"
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
@@ -81,7 +119,7 @@ export function OtherDataManagementTokenProviderPanel(props: OtherViewProps) {
             测试连接
           </props.Button>
         </div>
-      </div>
+      </form>
     </>
   );
 }

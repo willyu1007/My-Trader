@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useState
 } from "react";
 
@@ -120,6 +121,10 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     useState(false);
   const [riskAnnualized, setRiskAnnualized] = useState(true);
 
+  const reportMarketError = useCallback((message: string) => {
+    setError((prev) => (prev === message ? prev : message));
+  }, []);
+
   const marketState = useDashboardMarket({
     clampNumber,
     defaultMarketScope: "holdings" as MarketScope,
@@ -166,7 +171,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     activeView,
     snapshotPriceAsOf: snapshot?.priceAsOf ?? null,
     toUserErrorMessage,
-    reportError: (message) => setError(message),
+    reportError: reportMarketError,
     resolveMarketChartDateRange,
     formatInputDate
   });

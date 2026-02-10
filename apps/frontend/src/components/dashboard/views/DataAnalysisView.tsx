@@ -738,6 +738,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                       <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300 ml-2">
                         <input
                           type="checkbox"
+                          name="analysisRiskAnnualized"
                           checked={riskAnnualized}
                           onChange={(e) => setRiskAnnualized(e.target.checked)}
                           className="h-3.5 w-3.5 rounded-none border-slate-300 text-primary focus:ring-primary"

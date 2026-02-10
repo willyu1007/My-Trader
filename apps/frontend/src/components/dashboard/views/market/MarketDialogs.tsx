@@ -4,7 +4,73 @@ import type { TagSummary } from "@mytrader/shared";
 
 import type { MarketTagFacetItem, MarketViewProps } from "../MarketView";
 
-export function MarketDialogs(props: MarketViewProps) {
+export type MarketDialogsProps = Pick<
+  MarketViewProps,
+  | "Button"
+  | "FormGroup"
+  | "Input"
+  | "Modal"
+  | "PopoverSelect"
+  | "formatCnWanYiNullable"
+  | "formatNumber"
+  | "formatSignedPctNullable"
+  | "formatThemeLabel"
+  | "getCnChangeTone"
+  | "getCnToneTextClass"
+  | "handleAddManualTheme"
+  | "handleAddSelectedToWatchlist"
+  | "handleAddTargetTag"
+  | "handleAddUserTag"
+  | "handleRemoveUserTag"
+  | "handleSelectInstrument"
+  | "handleSelectTag"
+  | "marketFilterAssetClasses"
+  | "marketFilterKinds"
+  | "marketFilterMarket"
+  | "marketFiltersActiveCount"
+  | "marketFiltersOpen"
+  | "marketInstrumentDetailsOpen"
+  | "marketManualThemeDraft"
+  | "marketManualThemeLoading"
+  | "marketManualThemeOptions"
+  | "marketQuotesBySymbol"
+  | "marketSelectedIndustry"
+  | "marketSelectedManualThemes"
+  | "marketSelectedPlainUserTags"
+  | "marketSelectedProfile"
+  | "marketSelectedSymbol"
+  | "marketSelectedTag"
+  | "marketSelectedTagAggregate"
+  | "marketSelectedThemes"
+  | "marketShowProviderData"
+  | "marketTagMembers"
+  | "marketTagMembersLoading"
+  | "marketTagMembersModalOpen"
+  | "marketTagPickerOpen"
+  | "marketTagPickerQuery"
+  | "marketTags"
+  | "marketTagsLoading"
+  | "marketUserTagDraft"
+  | "marketWatchlistGroupDraft"
+  | "refreshMarketTags"
+  | "resetMarketFilters"
+  | "setMarketFilterAssetClasses"
+  | "setMarketFilterKinds"
+  | "setMarketFilterMarket"
+  | "setMarketFiltersOpen"
+  | "setMarketInstrumentDetailsOpen"
+  | "setMarketManualThemeDraft"
+  | "setMarketScope"
+  | "setMarketShowProviderData"
+  | "setMarketTagMembersModalOpen"
+  | "setMarketTagPickerOpen"
+  | "setMarketTagPickerQuery"
+  | "setMarketUserTagDraft"
+  | "setMarketWatchlistGroupDraft"
+  | "sortTagMembersByChangePct"
+>;
+
+export function MarketDialogs(props: MarketDialogsProps) {
   return (
     <>
       <props.Modal
@@ -51,6 +117,7 @@ export function MarketDialogs(props: MarketViewProps) {
                 <label key={item.key} className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    name="marketFilterAssetClasses"
                     checked={props.marketFilterAssetClasses.includes(item.key)}
                     onChange={() =>
                       props.setMarketFilterAssetClasses((prev) =>
@@ -75,6 +142,7 @@ export function MarketDialogs(props: MarketViewProps) {
                 <label key={item.key} className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    name="marketFilterKinds"
                     checked={props.marketFilterKinds.includes(item.key)}
                     onChange={() =>
                       props.setMarketFilterKinds((prev) =>

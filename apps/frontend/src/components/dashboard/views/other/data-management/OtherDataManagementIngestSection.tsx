@@ -1,6 +1,16 @@
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementIngestSection(props: OtherViewProps) {
+export type OtherDataManagementIngestSectionProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "handleTriggerMarketIngest"
+  | "marketIngestTriggering"
+  | "setOtherTab"
+>;
+
+export function OtherDataManagementIngestSection(
+  props: OtherDataManagementIngestSectionProps
+) {
   return (
     <>
       <section className="space-y-3">

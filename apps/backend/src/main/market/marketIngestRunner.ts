@@ -1,13 +1,18 @@
 import type {
   IngestRunMode,
   MarketDataSource,
-  TushareIngestItem
+  TushareIngestItem,
+  UniversePoolBucketId
 } from "@mytrader/shared";
 
 import { config } from "../config";
 import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analysisDuckdb";
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import type { SqliteDatabase } from "../storage/sqlite";
+import {
+  getMarketUniversePoolConfig,
+  updateMarketUniversePoolBucketStates
+} from "../storage/marketSettingsRepository";
 import { upsertDailyBasics } from "./dailyBasicRepository";
 import { upsertDailyMoneyflows } from "./dailyMoneyflowRepository";
 import { createIngestRun, finishIngestRun } from "./ingestRunsRepository";
@@ -15,6 +20,7 @@ import { ingestLock } from "./ingestLock";
 import { upsertInstrumentProfiles } from "./instrumentCatalogRepository";
 import { upsertInstruments, upsertPrices } from "./marketRepository";
 import { getMarketProvider } from "./providers";
+import { hasUniversePoolTag } from "./universePoolBuckets";
 import {
   fetchTusharePaged,
   normalizeDate,
@@ -201,11 +207,13 @@ export async function runUniverseIngest(input: {
 
       await syncDuckdbTradeCalendar(handle, input.marketDb, "CN", today);
 
-      const { stockSymbols, etfSymbols, catalogInserted, catalogUpdated } =
+      const universePoolConfig = await getMarketUniversePoolConfig(input.businessDb);
+      const { stockSymbols, etfSymbols, catalogInserted, catalogUpdated, bucketCounts } =
         await syncUniverseInstrumentMeta(
         input.marketDb,
         handle,
         token,
+        universePoolConfig.enabledBuckets,
         input.control
       );
 
@@ -247,10 +255,20 @@ export async function runUniverseIngest(input: {
         meta: {
           ...(input.meta ?? {}),
           windowYears: 3,
+          selectedBuckets: universePoolConfig.enabledBuckets,
           instrumentCatalog: { inserted: catalogInserted, updated: catalogUpdated },
           lastTradeDate: lastDone,
-          universeCounts: { stocks: stockSymbols.size, etfs: etfSymbols.size }
+          universeCounts: { stocks: stockSymbols.size, etfs: etfSymbols.size },
+          bucketCounts
         }
+      });
+      const updatedBuckets = universePoolConfig.enabledBuckets.filter(
+        (bucket) => (bucketCounts[bucket] ?? 0) > 0
+      );
+      await updateMarketUniversePoolBucketStates(input.businessDb, {
+        buckets: updatedBuckets,
+        asOfTradeDate,
+        runAt: Date.now()
       });
     } catch (err) {
       if (err instanceof IngestCanceledError) {
@@ -426,20 +444,39 @@ async function syncUniverseInstrumentMeta(
   marketDb: SqliteDatabase,
   analysisHandle: Awaited<ReturnType<typeof openAnalysisDuckdb>>,
   token: string,
+  selectedBuckets: UniversePoolBucketId[],
   control?: IngestExecutionControl
 ): Promise<{
   stockSymbols: Set<string>;
   etfSymbols: Set<string>;
   catalogInserted: number;
   catalogUpdated: number;
+  bucketCounts: Record<UniversePoolBucketId, number>;
 }> {
   const provider = getMarketProvider("tushare");
   const profiles = await provider.fetchInstrumentCatalog({ token });
 
-  const stocks = profiles.filter((profile) => profile.assetClass === "stock");
-  const etfs = profiles.filter((profile) => profile.assetClass === "etf");
+  const selectedSet = new Set(selectedBuckets);
+  const eligible = profiles.filter((profile) => {
+    if (selectedSet.size === 0) return true;
+    for (const bucket of selectedSet) {
+      if (hasUniversePoolTag(profile.tags ?? [], bucket)) return true;
+    }
+    return false;
+  });
+
+  const stocks = eligible.filter((profile) => profile.assetClass === "stock");
+  const etfs = eligible.filter((profile) => profile.assetClass === "etf");
 
   const catalogResult = await upsertInstrumentProfiles(marketDb, profiles);
+  const bucketCounts = createEmptyBucketCounts();
+  eligible.forEach((profile) => {
+    for (const bucket of selectedSet) {
+      if (hasUniversePoolTag(profile.tags ?? [], bucket)) {
+        bucketCounts[bucket] += 1;
+      }
+    }
+  });
 
   await upsertInstruments(
     marketDb,
@@ -457,7 +494,7 @@ async function syncUniverseInstrumentMeta(
     await conn.query("begin transaction;");
     const now = Date.now();
 
-    for (const profile of [...stocks, ...etfs]) {
+    for (const profile of eligible) {
       await checkpointOrThrow(control);
       await conn.query(
         `
@@ -486,7 +523,16 @@ async function syncUniverseInstrumentMeta(
     stockSymbols: new Set(stocks.map((p) => p.symbol)),
     etfSymbols: new Set(etfs.map((p) => p.symbol)),
     catalogInserted: catalogResult.inserted,
-    catalogUpdated: catalogResult.updated
+    catalogUpdated: catalogResult.updated,
+    bucketCounts
+  };
+}
+
+function createEmptyBucketCounts(): Record<UniversePoolBucketId, number> {
+  return {
+    cn_a: 0,
+    etf: 0,
+    precious_metal: 0
   };
 }
 

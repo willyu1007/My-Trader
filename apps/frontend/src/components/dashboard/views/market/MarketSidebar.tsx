@@ -4,7 +4,51 @@ import type { InstrumentProfileSummary, TagSummary } from "@mytrader/shared";
 
 import type { MarketViewProps } from "../MarketView";
 
-export function MarketSidebar(props: MarketViewProps) {
+export type MarketSidebarProps = Pick<
+  MarketViewProps,
+  | "Button"
+  | "IconButton"
+  | "Input"
+  | "PopoverSelect"
+  | "formatNumber"
+  | "formatSignedPctNullable"
+  | "getCnChangeTone"
+  | "getCnToneTextClass"
+  | "handleRemoveWatchlistItem"
+  | "handleSelectInstrument"
+  | "handleSelectTag"
+  | "handleSyncInstrumentCatalog"
+  | "marketCatalogSyncSummary"
+  | "marketCatalogSyncing"
+  | "marketCollectionSelectValue"
+  | "marketEffectiveScope"
+  | "marketExplorerWidth"
+  | "marketFilteredListSymbols"
+  | "marketFiltersActiveCount"
+  | "marketHoldingsSymbols"
+  | "marketHoldingsSymbolsFiltered"
+  | "marketNameBySymbol"
+  | "marketQuotesBySymbol"
+  | "marketQuotesLoading"
+  | "marketSearchLoading"
+  | "marketSearchQuery"
+  | "marketSearchResults"
+  | "marketSearchResultsFiltered"
+  | "marketSelectedSymbol"
+  | "marketSelectedTag"
+  | "marketSelectedTagAggregate"
+  | "marketTagMembersLoading"
+  | "marketTags"
+  | "marketWatchlistLoading"
+  | "setMarketFiltersOpen"
+  | "setMarketScope"
+  | "setMarketSearchQuery"
+  | "setMarketSelectedSymbol"
+  | "setMarketSelectedTag"
+  | "snapshot"
+>;
+
+export function MarketSidebar(props: MarketSidebarProps) {
   return (
     <aside
       className="flex-shrink-0 min-h-0 flex flex-col border-r border-border-light dark:border-border-dark bg-white/70 dark:bg-background-dark/65 backdrop-blur-lg"

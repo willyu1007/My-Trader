@@ -1,6 +1,8 @@
+import { useMemo } from "react";
+
 import type { OtherViewProps } from "../OtherView";
 
-type OtherDataStatusTabProps = Pick<
+export type OtherDataStatusTabProps = Pick<
   OtherViewProps,
   | "Button"
   | "dataQuality"
@@ -48,6 +50,15 @@ export function OtherDataStatusTab({
   refreshMarketIngestRuns,
   snapshot
 }: OtherDataStatusTabProps) {
+  const dedupedIngestRuns = useMemo(() => {
+    const seen = new Set<string>();
+    return marketIngestRuns.filter((run) => {
+      if (seen.has(run.id)) return false;
+      seen.add(run.id);
+      return true;
+    });
+  }, [marketIngestRuns]);
+
   return (
     <>
       <div className="flex items-center justify-between gap-3">
@@ -161,7 +172,7 @@ export function OtherDataStatusTab({
             <div className="text-xs text-slate-500 dark:text-slate-400">
               {marketIngestRunsLoading
                 ? "加载中..."
-                : `${marketIngestRuns.length} 条记录`}
+                : `${dedupedIngestRuns.length} 条记录`}
             </div>
             <Button
               variant="secondary"
@@ -181,13 +192,13 @@ export function OtherDataStatusTab({
           </div>
         )}
 
-        {!marketIngestRunsLoading && marketIngestRuns.length === 0 && (
+        {!marketIngestRunsLoading && dedupedIngestRuns.length === 0 && (
           <div className="text-sm text-slate-500 dark:text-slate-400">
             暂无拉取记录。
           </div>
         )}
 
-        {!marketIngestRunsLoading && marketIngestRuns.length > 0 && (
+        {!marketIngestRunsLoading && dedupedIngestRuns.length > 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-[1.6fr_1fr] gap-3">
             <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
               <table className="w-full text-sm">
@@ -211,7 +222,7 @@ export function OtherDataStatusTab({
                   </tr>
                 </thead>
                 <tbody>
-                  {marketIngestRuns.slice(0, 200).map((run) => {
+                  {dedupedIngestRuns.slice(0, 200).map((run) => {
                     const statusTone = formatIngestRunTone(run.status);
                     const selected = marketSelectedIngestRunId === run.id;
                     return (

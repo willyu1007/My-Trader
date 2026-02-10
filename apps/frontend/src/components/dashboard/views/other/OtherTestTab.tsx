@@ -1,6 +1,6 @@
 import type { OtherViewProps } from "../OtherView";
 
-type OtherTestTabProps = Pick<
+export type OtherTestTabProps = Pick<
   OtherViewProps,
   | "Button"
   | "FormGroup"

@@ -78,6 +78,13 @@
 - 2026-02-08: `pnpm -C apps/frontend typecheck` -> ✅ (Other/数据管理 UI 重构 + 新 IPC 调用)
 - 2026-02-08: `pnpm typecheck` -> ✅ (shared/backend/frontend 联合类型校验通过)
 - 2026-02-08: `pnpm -C apps/backend build && pnpm -C apps/frontend build` -> ✅ (前后端构建通过)
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/packages/shared build` -> ✅（新增 Universe Pool IPC 类型与 channel）
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/backend typecheck` -> ✅（Universe Pool 配置存储 + runner 过滤 + IPC handlers）
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` -> ✅（数据来源区并入全量池配置 + 全量标的统计口径联动）
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/backend build` -> ✅（后端构建通过）
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` -> ✅（前端构建通过）
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/backend typecheck && pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/backend build` -> ✅（修正 universe pool 默认状态对象后复验通过）
+- 2026-02-09: `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck && pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` -> ✅（前端联动口径复验通过）
 
 ## Manual functional test checklist
 > 说明：本次在 CLI 环境完成后端验证；涉及 UI / 有效 token 的项目需在桌面端手工补测。

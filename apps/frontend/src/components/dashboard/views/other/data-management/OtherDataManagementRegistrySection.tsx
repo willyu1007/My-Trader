@@ -4,7 +4,30 @@ import type { InstrumentRegistryEntry } from "@mytrader/shared";
 
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementRegistrySection(props: OtherViewProps) {
+export type OtherDataManagementRegistrySectionProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "Input"
+  | "PopoverSelect"
+  | "handleBatchSetRegistryAutoIngest"
+  | "handleSetRegistryAutoIngest"
+  | "handleToggleRegistrySymbol"
+  | "handleToggleSelectAllRegistry"
+  | "marketRegistryAutoFilter"
+  | "marketRegistryEntryEnabled"
+  | "marketRegistryLoading"
+  | "marketRegistryQuery"
+  | "marketRegistryResult"
+  | "marketRegistrySelectedSymbols"
+  | "marketRegistryUpdating"
+  | "refreshMarketRegistry"
+  | "setMarketRegistryAutoFilter"
+  | "setMarketRegistryQuery"
+>;
+
+export function OtherDataManagementRegistrySection(
+  props: OtherDataManagementRegistrySectionProps
+) {
   return (
     <>
       {props.marketRegistryEntryEnabled && (
@@ -112,6 +135,7 @@ export function OtherDataManagementRegistrySection(props: OtherViewProps) {
                     <td className="px-2 py-1">
                       <input
                         type="checkbox"
+                        name={`marketRegistrySelectedSymbol-${item.symbol}`}
                         checked={props.marketRegistrySelectedSymbols.includes(
                           item.symbol
                         )}
@@ -130,6 +154,7 @@ export function OtherDataManagementRegistrySection(props: OtherViewProps) {
                       <label className="inline-flex items-center gap-2">
                         <input
                           type="checkbox"
+                          name={`marketRegistryAutoIngest-${item.symbol}`}
                           checked={item.autoIngest}
                           onChange={(event) => {
                             void props.handleSetRegistryAutoIngest(

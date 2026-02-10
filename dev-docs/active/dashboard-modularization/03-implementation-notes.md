@@ -161,6 +161,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
+- 手工冒烟（2026-02-10）曾复现阻断：进入 `市场行情` 后点击标的行触发页面卡死并持续报 `Maximum update depth exceeded`（`DashboardContainer.tsx:63:29`）；该问题已于同日修复并复验通过（见下方新增记录与 `04-verification.md` 最新条目）。
 - `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `752` 行，均低于 `800`。
 - `DashboardContainerLayoutProps` 的 `any` 宽类型已全部移除（改为 hook 返回类型与明确函数签名），后续重点从“减行”转向“manual smoke 覆盖 + view-model 结构继续清晰化”。
 - `PortfolioView.tsx`、`DataAnalysisView.tsx`、`MarketView.tsx`、`OtherView.tsx` 的 `any` 宽类型均已清零；后续重点转为按业务块继续降低超大视图文件复杂度（优先 `PortfolioView`，随后继续拆 `OtherView` 的 `data-management` 与 `instrument-management`）。
@@ -202,3 +203,48 @@
   - 新增 `OtherDataManagementUniversePoolPanel.tsx`，承接全量池配置（bucket 开关 + 最后更新时间展示）。
   - `OtherDataManagementSourceSection.tsx` 收敛为编排层（顶部摘要 + 数据来源壳 + 两个子面板拼装）。
   - 行数变化：`SourceSection.tsx` `259` -> `107`。
+- 2026-02-10（收尾修复：停止继续结构拆分，仅修复审查问题）
+  - `views/market/MarketSidebar.tsx`、`views/market/MarketDetailWorkspace.tsx`、`views/market/MarketDialogs.tsx`：新增文件内最小契约类型 `Pick<MarketViewProps, ...>`，移除 `props: MarketViewProps`。
+  - `views/MarketView.tsx`：停止对子组件整包 spread；改为显式构造 `sidebarProps/detailProps/dialogProps`（使用 `satisfies` 约束）后传入子组件。
+  - `views/other/OtherInstrumentManagementTab.tsx`：改为最小契约类型 `Pick<OtherViewProps, ...>`。
+  - `views/other/data-management/*`：
+    - `OtherDataManagementSourceSection.tsx` / `OtherDataManagementTargetPoolSection.tsx`：停止对子面板整包 spread，改为显式构造子面板 props。
+    - `OtherDataManagementTokenProviderPanel.tsx` / `OtherDataManagementUniversePoolPanel.tsx` / `OtherDataManagementSchedulerSection.tsx` / `OtherDataManagementTargetPoolEditorPane.tsx` / `OtherDataManagementTargetPoolDiffPane.tsx` / `OtherDataManagementRegistrySection.tsx` / `OtherDataManagementIngestSection.tsx`：统一改为最小 `Pick<OtherViewProps, ...>` 契约。
+    - `OtherDataManagementTab.tsx`：停止 `<Section {...props} />`，改为按 section 显式构造并传参。
+  - `views/OtherView.tsx`：停止对 `OtherDataManagementTab` 与 `OtherInstrumentManagementTab` 的整包 spread，改为显式构造最小 props 对象再传入。
+  - 一致性补齐：`OtherDataStatusTab.tsx`、`OtherTestTab.tsx` 导出其 `*Props` 类型，`OtherView.tsx` 同步改为显式构造 props 传入，消除该层剩余 spread。
+  - 变更边界：仅收敛前端内部 props 契约；未改 `Dashboard` 对外接口、未改 `App.tsx` 导入路径、未改 IPC/shared DTO/backend。
+- 2026-02-10（阻断修复：运行时更新深度循环 + data-status 重复 key）
+  - `App.tsx`：将 `onActivePortfolioChange` 从 JSX 内联函数改为稳定 `useCallback`（`handleActivePortfolioChange`），并对 `activePortfolioName` 做幂等更新，避免同值重复写入。
+  - `hooks/use-dashboard-portfolio-state.ts`：`onActivePortfolioChange` 改为 ref 持有最新回调，新增上次已通知组合的去重比较（仅在 `id/name` 变化时触发通知）。
+  - `DashboardContainer.tsx`：传入 `useDashboardMarket` 的 `reportError` 改为稳定 `useCallback`（`reportMarketError`），消除由回调引用变化触发的 effect 频繁重跑。
+  - `hooks/use-dashboard-market.ts`：搜索词为空分支改为幂等 setState（仅在状态真实变化时更新），避免空数组/false 的重复写入触发 render 风暴。
+  - `views/other/OtherDataStatusTab.tsx`：在渲染前按 `run.id` 去重 `marketIngestRuns`，表格和计数统一基于去重列表，避免重复 key 警告。
+  - 结果：`Maximum update depth exceeded` 不再复现；`OtherDataStatusTab` 不再出现重复 key 告警。
+- 2026-02-10（审查收尾：清理表单语义提示，不继续结构拆分）
+  - `App.tsx`：
+    - 登录/创建账号表单补齐 `label htmlFor` 与字段 `id/name/autocomplete`。
+    - 登录表单增加隐藏 `username` 字段（`autocomplete="username"`）以满足密码管理器可访问性建议。
+  - `views/other/data-management/OtherDataManagementTokenProviderPanel.tsx`：
+    - 将 token 密码输入放入语义化 `<form>`（`onSubmit` 仅 `preventDefault`，不改业务流程）。
+    - 为 token 字段补齐 `id/name/autocomplete`，并增加隐藏 `username` 字段。
+  - `shared.tsx`：
+    - `FormGroup` 由无关联 `label` 改为 `fieldset/legend` 语义，避免“label 未关联控件”噪音。
+    - `Input` / `Select` 原语在调用方未提供时自动补 `id/name`（使用 `useId` 生成），降低漏配概率。
+  - 其他视图原生表单项补齐 `name`：
+    - `PortfolioView.tsx`、`DataAnalysisView.tsx`、`MarketDialogs.tsx`、
+      `OtherInstrumentManagementTab.tsx`、
+      `OtherDataManagementRegistrySection.tsx`、
+      `OtherDataManagementTargetPoolEditorPane.tsx`、
+      `OtherDataManagementSchedulerSection.tsx`。
+  - 范围约束：本轮仅做审查问题修复；未新增拆分层级，未改 `Dashboard` 外部接口，未改 IPC/shared DTO/backend。
+- 2026-02-10（审查收尾：清理 Tailwind CDN 开发告警）
+  - `apps/frontend/index.html`：
+    - 移除 `https://cdn.tailwindcss.com?plugins=forms,typography` 与内联 `tailwind.config` 脚本。
+  - `apps/frontend` 新增本地构建配置：
+    - `tailwind.config.cjs`（迁移原有 `colors/fontFamily/borderRadius/boxShadow` 扩展，保留 `darkMode: "class"`）。
+    - `postcss.config.cjs`（接入 `tailwindcss + autoprefixer`）。
+    - `src/tailwind.css`（`@tailwind base/components/utilities`）。
+  - `apps/frontend/src/main.tsx`：接入 `./tailwind.css` 作为样式入口。
+  - `apps/frontend/package.json`：新增前端构建依赖 `tailwindcss`、`postcss`、`autoprefixer`、`@tailwindcss/forms`、`@tailwindcss/typography`。
+  - 范围约束：仅替换 Tailwind 运行方式（CDN -> 本地编译），不改页面交互与 Dashboard 对外接口。

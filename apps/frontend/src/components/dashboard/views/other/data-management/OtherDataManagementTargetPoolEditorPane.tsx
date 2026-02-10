@@ -4,7 +4,25 @@ import type { MarketTargetsConfig } from "@mytrader/shared";
 
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementTargetPoolEditorPane(props: OtherViewProps) {
+export type OtherDataManagementTargetPoolEditorPaneProps = Pick<
+  OtherViewProps,
+  | "handleApplyManualTargetSymbols"
+  | "handlePreviewManualTargetSymbols"
+  | "handleRemoveManualPreviewSymbol"
+  | "handleToggleTargetsSection"
+  | "marketManualSymbolPreview"
+  | "marketRegistryEntryEnabled"
+  | "marketTargetsConfig"
+  | "marketTargetsSectionOpen"
+  | "marketTargetsSymbolDraft"
+  | "setMarketManualSymbolPreview"
+  | "setMarketTargetsConfig"
+  | "setMarketTargetsSymbolDraft"
+>;
+
+export function OtherDataManagementTargetPoolEditorPane(
+  props: OtherDataManagementTargetPoolEditorPaneProps
+) {
   return (
     <div className="space-y-3 min-w-0">
       <div className="rounded-md bg-slate-50/45 dark:bg-background-dark/25">
@@ -28,6 +46,7 @@ export function OtherDataManagementTargetPoolEditorPane(props: OtherViewProps) {
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
+                  name="marketTargetsIncludeHoldings"
                   checked={props.marketTargetsConfig.includeHoldings}
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     props.setMarketTargetsConfig((prev: MarketTargetsConfig) => ({
@@ -41,6 +60,7 @@ export function OtherDataManagementTargetPoolEditorPane(props: OtherViewProps) {
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
+                  name="marketTargetsIncludeWatchlist"
                   checked={props.marketTargetsConfig.includeWatchlist}
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     props.setMarketTargetsConfig((prev: MarketTargetsConfig) => ({
@@ -55,6 +75,7 @@ export function OtherDataManagementTargetPoolEditorPane(props: OtherViewProps) {
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    name="marketTargetsIncludeRegistryAutoIngest"
                     checked={
                       props.marketTargetsConfig.includeRegistryAutoIngest
                     }
@@ -92,6 +113,7 @@ export function OtherDataManagementTargetPoolEditorPane(props: OtherViewProps) {
           <div className="px-3 pb-3 space-y-3">
             <div className="relative">
               <textarea
+                name="marketTargetsSymbolDraft"
                 value={props.marketTargetsSymbolDraft}
                 onChange={(event) => {
                   props.setMarketTargetsSymbolDraft(event.target.value);

@@ -608,6 +608,25 @@ export interface MarketIngestSchedulerConfig {
   catchUpMissed: boolean;
 }
 
+export type UniversePoolBucketId = "cn_a" | "etf" | "precious_metal";
+
+export interface MarketUniversePoolConfig {
+  enabledBuckets: UniversePoolBucketId[];
+}
+
+export interface MarketUniversePoolBucketStatus {
+  bucket: UniversePoolBucketId;
+  enabled: boolean;
+  lastAsOfTradeDate: string | null;
+  lastRunAt: number | null;
+}
+
+export interface MarketUniversePoolOverview {
+  config: MarketUniversePoolConfig;
+  buckets: MarketUniversePoolBucketStatus[];
+  updatedAt: number;
+}
+
 export interface InstrumentRegistryEntry {
   symbol: string;
   name: string | null;
@@ -764,6 +783,9 @@ export interface MyTraderApi {
     setIngestSchedulerConfig(
       input: MarketIngestSchedulerConfig
     ): Promise<MarketIngestSchedulerConfig>;
+    getUniversePoolConfig(): Promise<MarketUniversePoolConfig>;
+    setUniversePoolConfig(input: MarketUniversePoolConfig): Promise<MarketUniversePoolConfig>;
+    getUniversePoolOverview(): Promise<MarketUniversePoolOverview>;
     listTempTargets(): Promise<TempTargetSymbol[]>;
     touchTempTarget(input: TouchTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
     removeTempTarget(input: RemoveTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
@@ -837,6 +859,9 @@ export const IPC_CHANNELS = {
   MARKET_INGEST_CONTROL_CANCEL: "market:ingest:cancel",
   MARKET_INGEST_SCHEDULER_GET: "market:ingestScheduler:get",
   MARKET_INGEST_SCHEDULER_SET: "market:ingestScheduler:set",
+  MARKET_UNIVERSE_POOL_GET_CONFIG: "market:universePool:getConfig",
+  MARKET_UNIVERSE_POOL_SET_CONFIG: "market:universePool:setConfig",
+  MARKET_UNIVERSE_POOL_GET_OVERVIEW: "market:universePool:getOverview",
   MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",
   MARKET_TEMP_TARGETS_TOUCH: "market:targetsTemp:touch",
   MARKET_TEMP_TARGETS_REMOVE: "market:targetsTemp:remove",

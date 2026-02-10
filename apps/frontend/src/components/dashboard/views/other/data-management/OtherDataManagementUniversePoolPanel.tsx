@@ -2,7 +2,25 @@ import type { UniversePoolBucketId } from "@mytrader/shared";
 
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementUniversePoolPanel(props: OtherViewProps) {
+export type OtherDataManagementUniversePoolPanelProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "UNIVERSE_POOL_BUCKET_ORDER"
+  | "formatCnDate"
+  | "getUniversePoolBucketLabel"
+  | "handleSaveUniversePoolConfig"
+  | "handleToggleUniversePoolBucket"
+  | "marketUniverseBucketStatusById"
+  | "marketUniverseEnabledBuckets"
+  | "marketUniversePoolConfig"
+  | "marketUniversePoolDirty"
+  | "marketUniversePoolLoading"
+  | "marketUniversePoolSaving"
+>;
+
+export function OtherDataManagementUniversePoolPanel(
+  props: OtherDataManagementUniversePoolPanelProps
+) {
   return (
     <div className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50/55 dark:bg-background-dark/35 p-2.5 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">

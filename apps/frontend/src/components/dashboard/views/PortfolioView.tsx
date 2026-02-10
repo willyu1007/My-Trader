@@ -920,6 +920,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                       <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300 ml-2">
                         <input
                           type="checkbox"
+                          name="portfolioRiskAnnualized"
                           checked={riskAnnualized}
                           onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             setRiskAnnualized(event.target.checked)

@@ -35,6 +35,11 @@
 - 2026-02-08：调度器改为读 `market_settings.ingest_scheduler_config_v1`（enabled/runAt/timezone/scope/runOnStartup/catchUpMissed）；控制状态持久化 `ingest_control_state_v1`（paused）。
 - 2026-02-08：Other/数据管理 UI 重构：新增“调度与运行控制”区、Targets 草稿编辑（重置/保存/差异预览/批量粘贴导入/结构化标签选择/临时标的批量操作）、注册标的管理（搜索/筛选/单条与批量 auto_ingest）、Data Status 的 run 详情侧栏。
 - 2026-02-08：离开「其他/数据管理」时，若 Targets 草稿未保存会弹确认，避免误操作丢失编辑上下文。
+- 2026-02-09：新增“全量池配置”能力并并入「数据来源」区：新增账号级配置 `universe_pool_config_v1`（A股/ETF/贵金属）与状态 `universe_pool_state_v1`（每分类 lastAsOfTradeDate/lastRunAt），前端支持草稿编辑与保存。
+- 2026-02-09：新增 shared/preload/main IPC：`getUniversePoolConfig`、`setUniversePoolConfig`、`getUniversePoolOverview`，用于数据管理页配置与展示。
+- 2026-02-09：Tushare provider 标的目录写入系统标签 `pool:cn_a` / `pool:etf` / `pool:precious_metal`（贵金属采用规则映射）；Universe ingest 在目录全量同步后按配置过滤实际拉取范围。
+- 2026-02-09：Universe ingest run meta 增加 `selectedBuckets/bucketCounts`；成功/部分成功后更新对应分类的最后更新日期，实现“停更不删、但保留最后更新可见”。
+- 2026-02-09：目标池看板“全量标的”统计口径调整为“仅统计当前全量池配置纳入的分类集合”；“强相关标的”口径保持不变。
 
 ## Pending decisions / TODO
 - trading_calendar 的 market 维度与来源（v1 先 CN；后续预留多市场）。

@@ -1,9 +1,64 @@
-import { OtherDataManagementTokenProviderPanel } from "./OtherDataManagementTokenProviderPanel";
-import { OtherDataManagementUniversePoolPanel } from "./OtherDataManagementUniversePoolPanel";
+import { createElement } from "react";
+
+import {
+  OtherDataManagementTokenProviderPanel,
+  type OtherDataManagementTokenProviderPanelProps
+} from "./OtherDataManagementTokenProviderPanel";
+import {
+  OtherDataManagementUniversePoolPanel,
+  type OtherDataManagementUniversePoolPanelProps
+} from "./OtherDataManagementUniversePoolPanel";
 
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementSourceSection(props: OtherViewProps) {
+export type OtherDataManagementSourceSectionProps = Pick<
+  OtherViewProps,
+  | "formatDateTime"
+  | "formatIngestRunStatusLabel"
+  | "formatIngestRunTone"
+  | "formatMarketTokenSource"
+  | "latestMarketIngestRun"
+  | "marketTempTargets"
+  | "marketTokenStatus"
+  | "snapshot"
+> &
+  OtherDataManagementTokenProviderPanelProps &
+  OtherDataManagementUniversePoolPanelProps;
+
+export function OtherDataManagementSourceSection(
+  props: OtherDataManagementSourceSectionProps
+) {
+  const tokenProviderPanelProps = {
+    Button: props.Button,
+    HelpHint: props.HelpHint,
+    Input: props.Input,
+    PopoverSelect: props.PopoverSelect,
+    handleClearMarketToken: props.handleClearMarketToken,
+    handleOpenMarketProvider: props.handleOpenMarketProvider,
+    handleSaveMarketToken: props.handleSaveMarketToken,
+    handleTestMarketToken: props.handleTestMarketToken,
+    marketTokenDraft: props.marketTokenDraft,
+    marketTokenProvider: props.marketTokenProvider,
+    marketTokenSaving: props.marketTokenSaving,
+    marketTokenTesting: props.marketTokenTesting,
+    setMarketTokenDraft: props.setMarketTokenDraft,
+    setMarketTokenProvider: props.setMarketTokenProvider
+  } satisfies OtherDataManagementTokenProviderPanelProps;
+  const universePoolPanelProps = {
+    Button: props.Button,
+    UNIVERSE_POOL_BUCKET_ORDER: props.UNIVERSE_POOL_BUCKET_ORDER,
+    formatCnDate: props.formatCnDate,
+    getUniversePoolBucketLabel: props.getUniversePoolBucketLabel,
+    handleSaveUniversePoolConfig: props.handleSaveUniversePoolConfig,
+    handleToggleUniversePoolBucket: props.handleToggleUniversePoolBucket,
+    marketUniverseBucketStatusById: props.marketUniverseBucketStatusById,
+    marketUniverseEnabledBuckets: props.marketUniverseEnabledBuckets,
+    marketUniversePoolConfig: props.marketUniversePoolConfig,
+    marketUniversePoolDirty: props.marketUniversePoolDirty,
+    marketUniversePoolLoading: props.marketUniversePoolLoading,
+    marketUniversePoolSaving: props.marketUniversePoolSaving
+  } satisfies OtherDataManagementUniversePoolPanelProps;
+
   return (
     <>
       <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark overflow-hidden">
@@ -98,8 +153,8 @@ export function OtherDataManagementSourceSection(props: OtherViewProps) {
         </div>
 
         <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-2 space-y-2">
-          <OtherDataManagementTokenProviderPanel {...props} />
-          <OtherDataManagementUniversePoolPanel {...props} />
+          {createElement(OtherDataManagementTokenProviderPanel, tokenProviderPanelProps)}
+          {createElement(OtherDataManagementUniversePoolPanel, universePoolPanelProps)}
         </div>
       </section>
     </>

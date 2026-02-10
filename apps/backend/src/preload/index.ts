@@ -108,6 +108,12 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_GET),
     setIngestSchedulerConfig: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_SET, input),
+    getUniversePoolConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_CONFIG),
+    setUniversePoolConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_SET_CONFIG, input),
+    getUniversePoolOverview: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_OVERVIEW),
     listTempTargets: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST),
     touchTempTarget: (input) =>

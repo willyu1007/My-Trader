@@ -550,3 +550,86 @@
     - `OtherDataManagementSourceSection.tsx`: `107` lines
     - `OtherDataManagementTokenProviderPanel.tsx`: `87` lines
     - `OtherDataManagementUniversePoolPanel.tsx`: `83` lines
+- 2026-02-10 (收尾修复：Market/Other props 契约收敛)
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+    - 产物摘要：`dist/assets/index-D78sdBnP.js`，Vite chunk size warning 仍存在（既有提醒，非本次回归阻断）。
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `rg -n "props: (MarketViewProps|OtherViewProps)" apps/frontend/src/components/dashboard/views/market apps/frontend/src/components/dashboard/views/other`
+    - 结果：`(no matches)` ✅
+  - `rg -n "<Market(Sidebar|DetailWorkspace|Dialogs) \{\.\.\." apps/frontend/src/components/dashboard/views/MarketView.tsx`
+    - 结果：`(no matches)` ✅
+  - `rg -n "<Other(DataManagementTab|InstrumentManagementTab) \{\.\.\." apps/frontend/src/components/dashboard/views/OtherView.tsx`
+    - 结果：`(no matches)` ✅
+  - 结论：本轮“整包 props 透传”审查项已修复并通过自动化检查。
+  - 残余风险声明：本轮未执行手工冒烟与 E2E；行为级回归风险为已知残余风险，需后续补充人工场景验证（尤其 market/other 高交互路径）。
+- 2026-02-10（补充手工冒烟：本地浏览器 + `window.mytrader` mock）
+  - 说明：当前在非 Electron 环境执行，需注入内存版 `window.mytrader` mock 以进入 Dashboard；本轮手工仅用于前端交互路径回归，不覆盖真实 IPC/后端链路。
+  - 场景 D（Market 搜索/详情/targets/ingest/scheduler）：
+    - ✅ 可进入 `市场行情` 视图并看到列表、筛选、右侧工作区骨架。
+    - ❌ 阻断：点击标的行（复现样例：`600519.SH`）后页面卡死，DevTools 操作超时（60s）。
+    - 控制台出现大量 `Maximum update depth exceeded`，栈顶定位 `DashboardContainer.tsx:63:29`（需单独修复后复验 D）。
+  - 场景 E（Other 四个子 tab）：
+    - ✅ `数据管理`：点击“执行拉取”成功，出现成功 toast（`拉取任务已加入队列。`）。
+    - ✅ `标的管理`：临时标的执行“转长期”成功，计数从 `1` 变为 `0`。
+    - ✅ `数据状态`：可进入并执行“刷新”。
+    - ✅ `测试`：执行“注入示例数据”成功，出现成功 toast，并可跳转到 `市场行情`。
+  - 场景 F（锁定账号与顶部状态）：
+    - ✅ 在 `账号` 页点击“锁定”后，正确返回登录页。
+    - ✅ 顶部栏中的“组合/账号”信息在锁定后不再展示，行为符合预期。
+  - 本轮结论：
+    - `E/F` 通过；
+    - `D` 存在阻断（点击标的行触发页面卡死 + `Maximum update depth exceeded`），尚不满足“Market 全路径手工冒烟通过”验收。
+- 2026-02-10（阻断修复后二次验证：`Maximum update depth` + `run.id` 重复 key）
+  - 自动化检查：
+    - `pnpm -C apps/frontend typecheck` -> ✅ pass
+    - `pnpm -C apps/frontend build` -> ✅ pass
+      - 产物摘要：`dist/assets/index-C3GL0Dni.js`，仍有 Vite chunk size warning（既有提示，非阻断）。
+    - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - 手工复验（本地浏览器 + `window.mytrader` mock）：
+    - ✅ 登录后进入 `市场行情` 页面，点击标的行（`600519.SH`）可正常进入右侧详情工作区，不再卡死。
+    - ✅ 右侧详情区图表/指标区块正常渲染，可继续交互（按钮、区间切换等）。
+    - ✅ 进入 `其他 -> 数据状态`，run 列表正常显示，无重复 key 报错。
+  - 控制台复核：
+    - ✅ 未再出现 `Maximum update depth exceeded`。
+    - ✅ 未再出现 `Encountered two children with the same key`（`run.id`）错误。
+    - ℹ️ 仍有既有无障碍提示（label/id/name、password form）`issue/verbose` 级别，非本轮阻断修复范围。
+  - 本轮结论：
+    - 先前 D 阻断已修复并通过复验；
+    - E/F 维持通过；
+    - 当前剩余为非阻断级别前端可访问性提示。
+- 2026-02-10（审查收尾：表单语义提示清理）
+  - 自动化检查：
+    - `pnpm -C apps/frontend typecheck` -> ✅ pass
+    - `pnpm -C apps/frontend build` -> ✅ pass
+      - 产物摘要：`dist/assets/index-C2vMq3eQ.js`，仍有 Vite chunk size warning（既有提示，非阻断）。
+    - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - 静态专项检查：
+    - `rg -nP "(?s)<input(?![^>]*\\bname=)[^>]*>" apps/frontend/src/App.tsx apps/frontend/src/components/dashboard -g"*.tsx"` -> 无匹配 ✅
+    - `rg -nP "(?s)<select(?![^>]*\\bname=)[^>]*>" apps/frontend/src/App.tsx apps/frontend/src/components/dashboard -g"*.tsx"` -> 无匹配 ✅
+    - `rg -nP "(?s)<textarea(?![^>]*\\bname=)[^>]*>" apps/frontend/src/App.tsx apps/frontend/src/components/dashboard -g"*.tsx"` -> 无匹配 ✅
+  - 浏览器控制台复核（`http://127.0.0.1:5173/` reload 后）：
+    - ✅ 不再出现：
+      - `No label associated with a form field`
+      - `A form field element should have an id or name attribute`
+      - `Password field is not contained in a form`
+      - `Password forms should have username fields`
+    - ℹ️ 剩余开发环境提示（非本轮阻断）：
+      - `cdn.tailwindcss.com should not be used in production`
+      - Vite 连接日志（`[vite] connecting/connected`）
+      - React DevTools 提示
+  - 残余风险声明：
+    - 本轮未新增 E2E/自动化 UI 回归，仅完成自动化构建检查 + 控制台复核；
+    - Electron 真 IPC 端到端行为仍建议继续以手工冒烟覆盖（若继续推进交付）。
+- 2026-02-10（审查收尾：Tailwind CDN 告警清理）
+  - 自动化检查：
+    - `pnpm -C apps/frontend typecheck` -> ✅ pass
+    - `pnpm -C apps/frontend build` -> ✅ pass
+      - 产物摘要：`dist/assets/index-CEJ1K1gU.css`，CSS 体积提升属预期（Tailwind 由 CDN 运行时改为本地编译产物）。
+    - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - 浏览器控制台复核（`http://127.0.0.1:5173/` reload 后）：
+    - ✅ 不再出现：`cdn.tailwindcss.com should not be used in production`
+    - ℹ️ 剩余开发提示：Vite 连接日志、React DevTools 提示（均为开发环境常规信息）。
+  - 本轮结论：
+    - Tailwind CDN 相关告警已清理完毕；
+    - 页面功能与主题契约检查未见回归。

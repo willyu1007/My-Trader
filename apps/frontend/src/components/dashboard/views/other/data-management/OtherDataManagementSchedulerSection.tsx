@@ -2,7 +2,43 @@ import type { ChangeEvent } from "react";
 
 import type { OtherViewProps } from "../../OtherView";
 
-export function OtherDataManagementSchedulerSection(props: OtherViewProps) {
+export type OtherDataManagementSchedulerSectionProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "FormGroup"
+  | "HelpHint"
+  | "Input"
+  | "Modal"
+  | "PopoverSelect"
+  | "formatIngestControlStateLabel"
+  | "getIngestControlStateDotClass"
+  | "handleCancelMarketIngest"
+  | "handlePauseMarketIngest"
+  | "handleResumeMarketIngest"
+  | "handleRunMarketIngestNow"
+  | "handleSaveMarketSchedulerConfig"
+  | "marketCanCancelIngest"
+  | "marketCanPauseIngest"
+  | "marketCanResumeIngest"
+  | "marketCanTriggerIngestNow"
+  | "marketIngestControlStatus"
+  | "marketSchedulerAdvancedOpen"
+  | "marketSchedulerConfig"
+  | "marketSchedulerDirty"
+  | "marketSchedulerLoading"
+  | "marketSchedulerSaving"
+  | "marketSchedulerTimezoneOptions"
+  | "marketTokenStatus"
+  | "marketTriggerIngestBlockedMessage"
+  | "marketTriggerIngestBlockedOpen"
+  | "setMarketSchedulerAdvancedOpen"
+  | "setMarketTriggerIngestBlockedOpen"
+  | "updateMarketSchedulerConfig"
+>;
+
+export function OtherDataManagementSchedulerSection(
+  props: OtherDataManagementSchedulerSectionProps
+) {
   return (
     <>
       <section className="space-y-3">
@@ -216,6 +252,7 @@ export function OtherDataManagementSchedulerSection(props: OtherViewProps) {
               <label className="flex items-start gap-3">
                 <input
                   type="checkbox"
+                  name="marketSchedulerEnabled"
                   className="mt-1 h-4 w-4 accent-primary"
                   checked={props.marketSchedulerConfig.enabled}
                   onChange={(event) =>
@@ -256,6 +293,7 @@ export function OtherDataManagementSchedulerSection(props: OtherViewProps) {
                   <span className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--mt-text)]">
                     <input
                       type="checkbox"
+                      name="marketSchedulerRunOnStartup"
                       className="h-4 w-4 accent-primary"
                       checked={props.marketSchedulerConfig.runOnStartup}
                       onChange={(event) =>
@@ -276,6 +314,7 @@ export function OtherDataManagementSchedulerSection(props: OtherViewProps) {
                   <span className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--mt-text)]">
                     <input
                       type="checkbox"
+                      name="marketSchedulerCatchUpMissed"
                       className="h-4 w-4 accent-primary"
                       checked={props.marketSchedulerConfig.catchUpMissed}
                       onChange={(event) =>

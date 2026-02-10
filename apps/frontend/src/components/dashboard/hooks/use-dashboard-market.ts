@@ -375,8 +375,8 @@ export function useDashboardMarket<
     if (!window.mytrader) return;
     const query = marketSearchQuery.trim();
     if (!query) {
-      setMarketSearchResults([]);
-      setMarketSearchLoading(false);
+      setMarketSearchResults((prev) => (prev.length === 0 ? prev : []));
+      setMarketSearchLoading((prev) => (prev ? false : prev));
       return;
     }
 

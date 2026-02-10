@@ -4,7 +4,31 @@ import type { TagSummary, TempTargetSymbol } from "@mytrader/shared";
 
 import type { OtherViewProps } from "../OtherView";
 
-export function OtherInstrumentManagementTab(props: OtherViewProps) {
+export type OtherInstrumentManagementTabProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "Input"
+  | "formatDateTime"
+  | "formatTagSourceLabel"
+  | "handleBatchExtendTempTargets"
+  | "handleBatchPromoteTempTargets"
+  | "handleBatchRemoveTempTargets"
+  | "handlePromoteTempTarget"
+  | "handleRemoveTempTarget"
+  | "handleSelectAllTempTargets"
+  | "handleToggleTempTargetSelection"
+  | "marketSelectedTempTargetSymbols"
+  | "marketTagManagementQuery"
+  | "marketTags"
+  | "marketTagsLoading"
+  | "marketTargetsSaving"
+  | "marketTempTargets"
+  | "marketTempTargetsLoading"
+  | "refreshMarketTags"
+  | "setMarketTagManagementQuery"
+>;
+
+export function OtherInstrumentManagementTab(props: OtherInstrumentManagementTabProps) {
   return (
     <>
       <div className="flex items-center justify-between gap-3">
@@ -154,6 +178,7 @@ export function OtherInstrumentManagementTab(props: OtherViewProps) {
                     <div className="min-w-0 flex items-center gap-2">
                       <input
                         type="checkbox"
+                        name={`marketSelectedTempTargetSymbol-${item.symbol}`}
                         checked={props.marketSelectedTempTargetSymbols.includes(
                           item.symbol
                         )}

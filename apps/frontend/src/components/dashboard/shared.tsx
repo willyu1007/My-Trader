@@ -228,15 +228,20 @@ export function Modal({
 
 export function FormGroup({ label, children }: { label: React.ReactNode, children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <label className="ui-form-label block text-sm font-medium">{label}</label>
+    <fieldset className="space-y-1.5 border-0 m-0 p-0 min-w-0">
+      <legend className="ui-form-label block w-full px-0 text-sm font-medium">
+        {label}
+      </legend>
       {children}
-    </div>
+    </fieldset>
   );
 }
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
-export function Input({ className, ...props }: InputProps) {
+export function Input({ className, id, name, ...props }: InputProps) {
+  const generatedId = useId();
+  const resolvedId = id ?? `mt-input-${generatedId.replace(/:/g, "")}`;
+  const resolvedName = name ?? resolvedId;
   const isDateInput =
     props.type === "date" || props.type === "datetime-local";
   const isEmpty =
@@ -245,8 +250,10 @@ export function Input({ className, ...props }: InputProps) {
     isDateInput && isEmpty ? "ui-tone-neutral" : "";
 
   return (
-    <input 
+    <input
       className={`ui-input block w-full rounded-md py-1.5 focus:ring-2 focus:ring-primary sm:text-sm sm:leading-6 disabled:opacity-50 ${dateHintClass} ${className}`}
+      id={resolvedId}
+      name={resolvedName}
       {...props}
     />
   );
@@ -255,10 +262,16 @@ export function Input({ className, ...props }: InputProps) {
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   options: { value: string, label: string, disabled?: boolean }[];
 }
-export function Select({ className, options, ...props }: SelectProps) {
+export function Select({ className, options, id, name, ...props }: SelectProps) {
+  const generatedId = useId();
+  const resolvedId = id ?? `mt-select-${generatedId.replace(/:/g, "")}`;
+  const resolvedName = name ?? resolvedId;
+
   return (
     <select
       className={`ui-select block w-full rounded-md py-1.5 pl-3 pr-10 focus:ring-2 focus:ring-primary sm:text-sm sm:leading-6 ${className}`}
+      id={resolvedId}
+      name={resolvedName}
       {...props}
     >
       {options.map(opt => (

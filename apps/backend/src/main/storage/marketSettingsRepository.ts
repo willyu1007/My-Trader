@@ -1,6 +1,10 @@
 import type {
   MarketIngestSchedulerConfig,
-  MarketTargetsConfig
+  MarketTargetsConfig,
+  MarketUniversePoolBucketStatus,
+  MarketUniversePoolConfig,
+  MarketUniversePoolOverview,
+  UniversePoolBucketId
 } from "@mytrader/shared";
 
 import { get, run } from "./sqlite";
@@ -10,11 +14,23 @@ const TARGETS_KEY = "targets_config_v1";
 const TEMP_TARGETS_KEY = "targets_temp_symbols_v1";
 const INGEST_SCHEDULER_KEY = "ingest_scheduler_config_v1";
 const INGEST_CONTROL_STATE_KEY = "ingest_control_state_v1";
+const UNIVERSE_POOL_CONFIG_KEY = "universe_pool_config_v1";
+const UNIVERSE_POOL_STATE_KEY = "universe_pool_state_v1";
 
 export interface PersistedIngestControlState {
   paused: boolean;
   updatedAt: number;
 }
+
+type PersistedUniversePoolBucketState = {
+  lastAsOfTradeDate: string | null;
+  lastRunAt: number | null;
+};
+
+type PersistedUniversePoolState = {
+  buckets: Record<UniversePoolBucketId, PersistedUniversePoolBucketState>;
+  updatedAt: number;
+};
 
 export type TempTargetSymbolRow = {
   symbol: string;
@@ -30,6 +46,18 @@ const DEFAULT_INGEST_SCHEDULER_CONFIG: MarketIngestSchedulerConfig = {
   runOnStartup: true,
   catchUpMissed: true
 };
+
+const UNIVERSE_POOL_BUCKETS: UniversePoolBucketId[] = [
+  "cn_a",
+  "etf",
+  "precious_metal"
+];
+
+const DEFAULT_UNIVERSE_POOL_CONFIG: MarketUniversePoolConfig = {
+  enabledBuckets: [...UNIVERSE_POOL_BUCKETS]
+};
+
+const DEFAULT_UNIVERSE_POOL_STATE: PersistedUniversePoolState = buildDefaultUniversePoolState();
 
 export async function getMarketTargetsConfig(
   db: SqliteDatabase
@@ -305,6 +333,117 @@ export async function setPersistedIngestControlState(
   return normalized;
 }
 
+export async function getMarketUniversePoolConfig(
+  db: SqliteDatabase
+): Promise<MarketUniversePoolConfig> {
+  const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [UNIVERSE_POOL_CONFIG_KEY]
+  );
+  if (!row?.value_json) {
+    await setMarketUniversePoolConfig(db, DEFAULT_UNIVERSE_POOL_CONFIG);
+    return { ...DEFAULT_UNIVERSE_POOL_CONFIG };
+  }
+  const parsed = safeParseMarketUniversePoolConfig(row.value_json);
+  if (!parsed) {
+    await setMarketUniversePoolConfig(db, DEFAULT_UNIVERSE_POOL_CONFIG);
+    return { ...DEFAULT_UNIVERSE_POOL_CONFIG };
+  }
+  return parsed;
+}
+
+export async function setMarketUniversePoolConfig(
+  db: SqliteDatabase,
+  input: MarketUniversePoolConfig
+): Promise<MarketUniversePoolConfig> {
+  const normalized = normalizeMarketUniversePoolConfig(input);
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [UNIVERSE_POOL_CONFIG_KEY, JSON.stringify(normalized)]
+  );
+  return normalized;
+}
+
+export async function getMarketUniversePoolOverview(
+  db: SqliteDatabase
+): Promise<MarketUniversePoolOverview> {
+  const [config, state] = await Promise.all([
+    getMarketUniversePoolConfig(db),
+    getPersistedUniversePoolState(db)
+  ]);
+  const enabled = new Set(config.enabledBuckets);
+  const buckets: MarketUniversePoolBucketStatus[] = UNIVERSE_POOL_BUCKETS.map((bucket) => ({
+    bucket,
+    enabled: enabled.has(bucket),
+    lastAsOfTradeDate: state.buckets[bucket]?.lastAsOfTradeDate ?? null,
+    lastRunAt: state.buckets[bucket]?.lastRunAt ?? null
+  }));
+  return {
+    config,
+    buckets,
+    updatedAt: state.updatedAt
+  };
+}
+
+export async function updateMarketUniversePoolBucketStates(
+  db: SqliteDatabase,
+  input: {
+    buckets: UniversePoolBucketId[];
+    asOfTradeDate: string | null;
+    runAt?: number | null;
+  }
+): Promise<MarketUniversePoolOverview> {
+  if (input.buckets.length === 0) {
+    return await getMarketUniversePoolOverview(db);
+  }
+  const now = normalizeEpoch(input.runAt);
+  const current = await getPersistedUniversePoolState(db);
+  const next: PersistedUniversePoolState = {
+    buckets: { ...current.buckets },
+    updatedAt: now
+  };
+
+  for (const bucket of input.buckets) {
+    next.buckets[bucket] = {
+      lastAsOfTradeDate: input.asOfTradeDate ?? current.buckets[bucket]?.lastAsOfTradeDate ?? null,
+      lastRunAt: now
+    };
+  }
+
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [UNIVERSE_POOL_STATE_KEY, JSON.stringify(next)]
+  );
+  return await getMarketUniversePoolOverview(db);
+}
+
+async function getPersistedUniversePoolState(
+  db: SqliteDatabase
+): Promise<PersistedUniversePoolState> {
+  const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [UNIVERSE_POOL_STATE_KEY]
+  );
+  if (!row?.value_json) return buildDefaultUniversePoolState();
+  const parsed = safeParsePersistedUniversePoolState(row.value_json);
+  if (!parsed) return buildDefaultUniversePoolState();
+  return parsed;
+}
+
 function safeParseMarketIngestSchedulerConfig(
   value: string
 ): MarketIngestSchedulerConfig | null {
@@ -314,6 +453,64 @@ function safeParseMarketIngestSchedulerConfig(
     return normalizeMarketIngestSchedulerConfig(
       parsed as Partial<MarketIngestSchedulerConfig>
     );
+  } catch {
+    return null;
+  }
+}
+
+function safeParseMarketUniversePoolConfig(
+  value: string
+): MarketUniversePoolConfig | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return normalizeMarketUniversePoolConfig(parsed as Partial<MarketUniversePoolConfig>);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMarketUniversePoolConfig(
+  input: Partial<MarketUniversePoolConfig>
+): MarketUniversePoolConfig {
+  const enabledSet = new Set<UniversePoolBucketId>();
+  if (Array.isArray(input.enabledBuckets)) {
+    input.enabledBuckets.forEach((value) => {
+      const key = String(value).trim() as UniversePoolBucketId;
+      if (UNIVERSE_POOL_BUCKETS.includes(key)) {
+        enabledSet.add(key);
+      }
+    });
+  }
+  const enabledBuckets =
+    enabledSet.size > 0 ? Array.from(enabledSet.values()) : [...DEFAULT_UNIVERSE_POOL_CONFIG.enabledBuckets];
+  return { enabledBuckets };
+}
+
+function safeParsePersistedUniversePoolState(
+  value: string
+): PersistedUniversePoolState | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const valueObj = parsed as {
+      buckets?: Record<string, { lastAsOfTradeDate?: string | null; lastRunAt?: number | null }>;
+      updatedAt?: number;
+    };
+    const buckets = { ...DEFAULT_UNIVERSE_POOL_STATE.buckets };
+    for (const key of UNIVERSE_POOL_BUCKETS) {
+      const raw = valueObj.buckets?.[key];
+      const lastAsOfTradeDate =
+        typeof raw?.lastAsOfTradeDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.lastAsOfTradeDate)
+          ? raw.lastAsOfTradeDate
+          : null;
+      const lastRunAt = normalizeOptionalEpoch(raw?.lastRunAt);
+      buckets[key] = { lastAsOfTradeDate, lastRunAt };
+    }
+    return {
+      buckets,
+      updatedAt: normalizeEpoch(valueObj.updatedAt)
+    };
   } catch {
     return null;
   }
@@ -372,4 +569,27 @@ function normalizeTimezone(input: string): string {
   } catch {
     return DEFAULT_INGEST_SCHEDULER_CONFIG.timezone;
   }
+}
+
+function normalizeOptionalEpoch(value: unknown): number | null {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  return Math.floor(raw);
+}
+
+function normalizeEpoch(value: unknown): number {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return Date.now();
+  return Math.floor(raw);
+}
+
+function buildDefaultUniversePoolState(): PersistedUniversePoolState {
+  return {
+    buckets: {
+      cn_a: { lastAsOfTradeDate: null, lastRunAt: null },
+      etf: { lastAsOfTradeDate: null, lastRunAt: null },
+      precious_metal: { lastAsOfTradeDate: null, lastRunAt: null }
+    },
+    updatedAt: Date.now()
+  };
 }

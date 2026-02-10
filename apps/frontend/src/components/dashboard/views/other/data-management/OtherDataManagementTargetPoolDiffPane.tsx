@@ -11,7 +11,28 @@ interface TargetPoolMetricCard {
   value: string | number;
 }
 
-export function OtherDataManagementTargetPoolDiffPane(props: OtherViewProps) {
+export type OtherDataManagementTargetPoolDiffPaneProps = Pick<
+  OtherViewProps,
+  | "formatTargetsReasons"
+  | "handleToggleDiffSection"
+  | "marketActiveTargetPoolStats"
+  | "marketDiffSectionOpen"
+  | "marketFilteredAddedSymbols"
+  | "marketFilteredReasonChangedSymbols"
+  | "marketFilteredRemovedSymbols"
+  | "marketTargetPoolMetricCards"
+  | "marketTargetPoolStatsScope"
+  | "marketTargetsDiffPreview"
+  | "marketTargetsPreview"
+  | "refreshMarketTargetsDiff"
+  | "setMarketCurrentTargetsModalOpen"
+  | "setMarketTargetPoolDetailMetric"
+  | "setMarketTargetPoolStatsScope"
+>;
+
+export function OtherDataManagementTargetPoolDiffPane(
+  props: OtherDataManagementTargetPoolDiffPaneProps
+) {
   return (
     <div className="min-w-0 rounded-md bg-slate-50/70 dark:bg-background-dark/45 p-3 space-y-3 lg:sticky lg:top-3">
       <div className="rounded-md bg-white/65 dark:bg-background-dark/55 p-2.5 space-y-2">

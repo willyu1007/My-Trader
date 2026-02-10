@@ -26,6 +26,7 @@ import type {
   ListTagsInput,
   MarketIngestSchedulerConfig,
   MarketTargetsConfig,
+  MarketUniversePoolConfig,
   PreviewTargetsDraftInput,
   PortfolioPerformanceRangeInput,
   SearchInstrumentsInput,
@@ -112,10 +113,13 @@ import {
 import { config } from "../config";
 import {
   getMarketTargetsConfig,
+  getMarketUniversePoolConfig,
+  getMarketUniversePoolOverview,
   getMarketIngestSchedulerConfig,
   listTempTargetSymbols,
   removeTempTargetSymbol,
   setMarketIngestSchedulerConfig,
+  setMarketUniversePoolConfig,
   setMarketTargetsConfig,
   touchTempTargetSymbol
 } from "../storage/marketSettingsRepository";
@@ -957,6 +961,25 @@ export async function registerIpcHandlers() {
       return saved;
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_CONFIG, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketUniversePoolConfig(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_UNIVERSE_POOL_SET_CONFIG,
+    async (_event, input: MarketUniversePoolConfig) => {
+      const businessDb = requireActiveBusinessDb();
+      const saved = await setMarketUniversePoolConfig(businessDb, input);
+      return saved;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_OVERVIEW, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketUniversePoolOverview(businessDb);
+  });
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST, async () => {
     const businessDb = requireActiveBusinessDb();

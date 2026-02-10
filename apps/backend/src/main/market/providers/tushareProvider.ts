@@ -1,6 +1,7 @@
 import type { AssetClass } from "@mytrader/shared";
 
 import type { PriceInput } from "../marketRepository";
+import { matchUniversePoolBuckets, getUniversePoolTag } from "../universePoolBuckets";
 import { fetchTushareDailyPrices } from "../tushareClient";
 import type {
   MarketProvider,
@@ -252,12 +253,21 @@ async function fetchStockBasic(token: string): Promise<ProviderInstrumentProfile
       listDate
     };
 
-    const tags = buildProviderTags({
-      kind: "stock",
-      industry,
-      board,
-      exchange
-    });
+    const tags = appendUniversePoolTags(
+      buildProviderTags({
+        kind: "stock",
+        industry,
+        board,
+        exchange
+      }),
+      {
+        assetClass: "stock",
+        market: "CN",
+        name,
+        symbol,
+        tags: []
+      }
+    );
 
     return {
       provider: "tushare",
@@ -301,53 +311,62 @@ async function fetchFundBasic(token: string): Promise<ProviderInstrumentProfile[
 
   return rows
     .map((row): FundProfile | null => {
-    const symbol = String(row[idxTsCode]);
-    const name = idxName === -1 ? null : normalizeString(row[idxName]);
-    const fundType = idxFundType === -1 ? null : normalizeString(row[idxFundType]);
-    const investType = idxInvestType === -1 ? null : normalizeString(row[idxInvestType]);
-    const type = idxType === -1 ? null : normalizeString(row[idxType]);
-    const market = idxMarket === -1 ? null : normalizeString(row[idxMarket]);
-    const status = idxStatus === -1 ? null : normalizeString(row[idxStatus]);
-    const listDate = idxListDate === -1 ? null : normalizeDate(row[idxListDate]);
+      const symbol = String(row[idxTsCode]);
+      const name = idxName === -1 ? null : normalizeString(row[idxName]);
+      const fundType = idxFundType === -1 ? null : normalizeString(row[idxFundType]);
+      const investType = idxInvestType === -1 ? null : normalizeString(row[idxInvestType]);
+      const type = idxType === -1 ? null : normalizeString(row[idxType]);
+      const market = idxMarket === -1 ? null : normalizeString(row[idxMarket]);
+      const status = idxStatus === -1 ? null : normalizeString(row[idxStatus]);
+      const listDate = idxListDate === -1 ? null : normalizeDate(row[idxListDate]);
 
-    const isEtf =
-      (fundType ?? "").toUpperCase().includes("ETF") ||
-      (investType ?? "").toUpperCase().includes("ETF") ||
-      (type ?? "").toUpperCase().includes("ETF");
-    const isDelisted = Boolean(status && status.toUpperCase() !== "L");
-    if (!isEtf || isDelisted) return null;
+      const isEtf =
+        (fundType ?? "").toUpperCase().includes("ETF") ||
+        (investType ?? "").toUpperCase().includes("ETF") ||
+        (type ?? "").toUpperCase().includes("ETF");
+      const isDelisted = Boolean(status && status.toUpperCase() !== "L");
+      if (!isEtf || isDelisted) return null;
 
-    const providerData: Record<string, unknown> = {
-      kind: "fund_basic",
-      raw: buildRowObject(fields, row),
-      fundType,
-      investType,
-      type,
-      market,
-      status,
-      listDate
-    };
+      const providerData: Record<string, unknown> = {
+        kind: "fund_basic",
+        raw: buildRowObject(fields, row),
+        fundType,
+        investType,
+        type,
+        market,
+        status,
+        listDate
+      };
 
-    const tags = buildProviderTags({
-      kind: "fund",
-      fund_type: fundType,
-      invest_type: investType,
-      type,
-      market
-    });
+      const tags = appendUniversePoolTags(
+        buildProviderTags({
+          kind: "fund",
+          fund_type: fundType,
+          invest_type: investType,
+          type,
+          market
+        }),
+        {
+          assetClass: "etf",
+          market: "CN",
+          name,
+          symbol,
+          tags: []
+        }
+      );
 
-    return {
-      provider: "tushare",
-      kind: "fund",
-      symbol,
-      name,
-      assetClass: "etf" satisfies AssetClass,
-      market: "CN",
-      currency: "CNY",
-      tags,
-      providerData
-    } satisfies FundProfile;
-  })
+      return {
+        provider: "tushare",
+        kind: "fund",
+        symbol,
+        name,
+        assetClass: "etf" satisfies AssetClass,
+        market: "CN",
+        currency: "CNY",
+        tags,
+        providerData
+      } satisfies FundProfile;
+    })
     .filter((row): row is FundProfile => row !== null);
 }
 
@@ -427,4 +446,26 @@ function buildProviderTags(input: Record<string, string | null>): string[] {
     tags.push(`${key}:${value}`);
   });
   return tags;
+}
+
+function appendUniversePoolTags(
+  baseTags: string[],
+  input: {
+    assetClass: AssetClass | null;
+    market: string | null;
+    name: string | null;
+    symbol: string;
+    tags: string[];
+  }
+): string[] {
+  const tags = new Set(baseTags.map((value) => value.trim()).filter(Boolean));
+  const buckets = matchUniversePoolBuckets({
+    assetClass: input.assetClass,
+    market: input.market,
+    name: input.name,
+    symbol: input.symbol,
+    tags: [...tags.values(), ...input.tags]
+  });
+  buckets.forEach((bucket) => tags.add(getUniversePoolTag(bucket)));
+  return Array.from(tags.values());
 }

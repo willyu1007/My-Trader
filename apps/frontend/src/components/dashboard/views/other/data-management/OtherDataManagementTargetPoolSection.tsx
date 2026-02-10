@@ -1,10 +1,71 @@
 import type * as React from "react";
+import { createElement } from "react";
 
 import type { OtherViewProps } from "../../OtherView";
-import { OtherDataManagementTargetPoolDiffPane } from "./OtherDataManagementTargetPoolDiffPane";
-import { OtherDataManagementTargetPoolEditorPane } from "./OtherDataManagementTargetPoolEditorPane";
+import {
+  OtherDataManagementTargetPoolDiffPane,
+  type OtherDataManagementTargetPoolDiffPaneProps
+} from "./OtherDataManagementTargetPoolDiffPane";
+import {
+  OtherDataManagementTargetPoolEditorPane,
+  type OtherDataManagementTargetPoolEditorPaneProps
+} from "./OtherDataManagementTargetPoolEditorPane";
 
-export function OtherDataManagementTargetPoolSection(props: OtherViewProps) {
+export type OtherDataManagementTargetPoolSectionProps = Pick<
+  OtherViewProps,
+  | "Button"
+  | "handleResetTargetsDraft"
+  | "handleSaveTargets"
+  | "handleTargetsEditorResizeKeyDown"
+  | "handleTargetsEditorResizePointerDown"
+  | "marketTargetsDiffPreview"
+  | "marketTargetsDirty"
+  | "marketTargetsLoading"
+  | "marketTargetsPreview"
+  | "marketTargetsSaving"
+  | "refreshMarketTargets"
+  | "refreshMarketTargetsDiff"
+  | "targetsEditorGridRef"
+  | "targetsEditorLeftPct"
+> &
+  OtherDataManagementTargetPoolEditorPaneProps &
+  OtherDataManagementTargetPoolDiffPaneProps;
+
+export function OtherDataManagementTargetPoolSection(
+  props: OtherDataManagementTargetPoolSectionProps
+) {
+  const editorPaneProps = {
+    handleApplyManualTargetSymbols: props.handleApplyManualTargetSymbols,
+    handlePreviewManualTargetSymbols: props.handlePreviewManualTargetSymbols,
+    handleRemoveManualPreviewSymbol: props.handleRemoveManualPreviewSymbol,
+    handleToggleTargetsSection: props.handleToggleTargetsSection,
+    marketManualSymbolPreview: props.marketManualSymbolPreview,
+    marketRegistryEntryEnabled: props.marketRegistryEntryEnabled,
+    marketTargetsConfig: props.marketTargetsConfig,
+    marketTargetsSectionOpen: props.marketTargetsSectionOpen,
+    marketTargetsSymbolDraft: props.marketTargetsSymbolDraft,
+    setMarketManualSymbolPreview: props.setMarketManualSymbolPreview,
+    setMarketTargetsConfig: props.setMarketTargetsConfig,
+    setMarketTargetsSymbolDraft: props.setMarketTargetsSymbolDraft
+  } satisfies OtherDataManagementTargetPoolEditorPaneProps;
+  const diffPaneProps = {
+    formatTargetsReasons: props.formatTargetsReasons,
+    handleToggleDiffSection: props.handleToggleDiffSection,
+    marketActiveTargetPoolStats: props.marketActiveTargetPoolStats,
+    marketDiffSectionOpen: props.marketDiffSectionOpen,
+    marketFilteredAddedSymbols: props.marketFilteredAddedSymbols,
+    marketFilteredReasonChangedSymbols: props.marketFilteredReasonChangedSymbols,
+    marketFilteredRemovedSymbols: props.marketFilteredRemovedSymbols,
+    marketTargetPoolMetricCards: props.marketTargetPoolMetricCards,
+    marketTargetPoolStatsScope: props.marketTargetPoolStatsScope,
+    marketTargetsDiffPreview: props.marketTargetsDiffPreview,
+    marketTargetsPreview: props.marketTargetsPreview,
+    refreshMarketTargetsDiff: props.refreshMarketTargetsDiff,
+    setMarketCurrentTargetsModalOpen: props.setMarketCurrentTargetsModalOpen,
+    setMarketTargetPoolDetailMetric: props.setMarketTargetPoolDetailMetric,
+    setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope
+  } satisfies OtherDataManagementTargetPoolDiffPaneProps;
+
   return (
     <>
       <section className="space-y-3">
@@ -83,7 +144,7 @@ export function OtherDataManagementTargetPoolSection(props: OtherViewProps) {
               } as React.CSSProperties
             }
           >
-            <OtherDataManagementTargetPoolEditorPane {...props} />
+            {createElement(OtherDataManagementTargetPoolEditorPane, editorPaneProps)}
 
             <div
               role="separator"
@@ -97,7 +158,7 @@ export function OtherDataManagementTargetPoolSection(props: OtherViewProps) {
               <span className="h-full w-px bg-slate-300/95 dark:bg-border-dark pointer-events-none" />
             </div>
 
-            <OtherDataManagementTargetPoolDiffPane {...props} />
+            {createElement(OtherDataManagementTargetPoolDiffPane, diffPaneProps)}
           </div>
         </div>
       </section>

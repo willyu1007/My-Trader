@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import type { Portfolio } from "@mytrader/shared";
 
@@ -81,6 +81,16 @@ export function useDashboardPortfolioState<
   TLedgerEntry,
   TLedgerFilter
 > {
+  const onActivePortfolioChangeRef = useRef(options.onActivePortfolioChange);
+  const lastReportedPortfolioRef = useRef<{
+    id: string | null;
+    name: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    onActivePortfolioChangeRef.current = options.onActivePortfolioChange;
+  }, [options.onActivePortfolioChange]);
+
   const activePortfolio = useMemo(
     () =>
       options.portfolios.find(
@@ -109,12 +119,24 @@ export function useDashboardPortfolioState<
   });
 
   useEffect(() => {
-    if (!options.onActivePortfolioChange) return;
-    options.onActivePortfolioChange({
+    const callback = onActivePortfolioChangeRef.current;
+    if (!callback) return;
+
+    const nextPortfolio = {
       id: activePortfolio?.id ?? null,
       name: activePortfolio?.name ?? null
-    });
-  }, [activePortfolio?.id, activePortfolio?.name, options.onActivePortfolioChange]);
+    };
+    const lastReported = lastReportedPortfolioRef.current;
+    if (
+      lastReported?.id === nextPortfolio.id &&
+      lastReported?.name === nextPortfolio.name
+    ) {
+      return;
+    }
+
+    lastReportedPortfolioRef.current = nextPortfolio;
+    callback(nextPortfolio);
+  }, [activePortfolio?.id, activePortfolio?.name]);
 
   return {
     activePortfolio,
