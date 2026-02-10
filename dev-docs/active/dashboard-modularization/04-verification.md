@@ -542,3 +542,11 @@
     - `OtherDataManagementTargetPoolSection.tsx`: `106` lines
     - `OtherDataManagementTargetPoolEditorPane.tsx`: `243` lines
     - `OtherDataManagementTargetPoolDiffPane.tsx`: `241` lines
+- 2026-02-10 (after splitting `OtherDataManagementSourceSection` into token/provider and universe-pool panels):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementSourceSection.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTokenProviderPanel.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementUniversePoolPanel.tsx`
+    - `OtherDataManagementSourceSection.tsx`: `107` lines
+    - `OtherDataManagementTokenProviderPanel.tsx`: `87` lines
+    - `OtherDataManagementUniversePoolPanel.tsx`: `83` lines

@@ -197,3 +197,8 @@
   - 新增 `OtherDataManagementTargetPoolDiffPane.tsx`，承接目标池差异右栏（结构看板、added/removed/reasonChanged 差异列表）。
   - `OtherDataManagementTargetPoolSection.tsx` 收敛为壳层（标题+顶部操作+两栏布局+resizer），通过子组件组合渲染。
   - 行数变化：`TargetPoolSection.tsx` `572` -> `106`。
+- 2026-02-10（继续拆分 `SourceSection`）
+  - 新增 `OtherDataManagementTokenProviderPanel.tsx`，承接 token/provider 配置与连接测试操作。
+  - 新增 `OtherDataManagementUniversePoolPanel.tsx`，承接全量池配置（bucket 开关 + 最后更新时间展示）。
+  - `OtherDataManagementSourceSection.tsx` 收敛为编排层（顶部摘要 + 数据来源壳 + 两个子面板拼装）。
+  - 行数变化：`SourceSection.tsx` `259` -> `107`。
