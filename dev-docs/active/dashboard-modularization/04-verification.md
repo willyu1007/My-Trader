@@ -500,3 +500,14 @@
   - `pnpm -C apps/frontend verify:theme` -> ✅ pass
   - `rg -n "\\bany\\b|as any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx`
     - no matches ✅（`MarketView/OtherView` 已无 `any`）
+- 2026-02-10 (after extracting `OtherView` data-status/test tabs + removing `MarketView` legacy commented block):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/views/OtherView.tsx apps/frontend/src/components/dashboard/views/other/OtherDataStatusTab.tsx apps/frontend/src/components/dashboard/views/other/OtherTestTab.tsx apps/frontend/src/components/dashboard/views/MarketView.tsx`
+    - `OtherView.tsx`: `1908` lines
+    - `OtherDataStatusTab.tsx`: `362` lines
+    - `OtherTestTab.tsx`: `124` lines
+    - `MarketView.tsx`: `1707` lines
+  - `rg -n "\\bany\\b|as any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx apps/frontend/src/components/dashboard/views/other/OtherDataStatusTab.tsx apps/frontend/src/components/dashboard/views/other/OtherTestTab.tsx`
+    - no matches ✅（新增子组件与主视图均无 `any`）

@@ -104,6 +104,11 @@
   - `views/MarketView.tsx` 与 `views/OtherView.tsx` 去除最后两处索引签名（`[key: string]: any`），改为基于 `marketState/portfolioState/marketDerived/marketAdminDerived/marketOrchestration` 与 shared 原语函数的组合 props 类型。
   - `views/DashboardContainerLayout.tsx` 为 `MarketView/OtherView` 补齐完整透传对象（`...marketDerived`、`...marketAdminDerived`、`...marketTargetPoolDetail`、`...marketOrchestration`、`...ledgerActions`），与视图层组合 props 契约对齐，不改行为。
   - 本轮后 `MarketView/OtherView` 的 `any` 已完全清零（包含索引签名）。
+  - 新增 `views/other/OtherDataStatusTab.tsx`，将 `OtherView` 的 `data-status` 页签整块迁出，保留原有交互（缺失标的回补、run 列表、run detail）。
+  - 新增 `views/other/OtherTestTab.tsx`，将 `OtherView` 的 `test` 页签整块迁出，保留示例注入与 CSV 导入行为。
+  - `views/OtherView.tsx` 改为编排层：通过 `OtherDataStatusTab` / `OtherTestTab` 组合渲染，页面行为不变。
+  - 清理 `views/MarketView.tsx` 尾部历史注释遗留块（整段已废弃 UI 草稿，不参与运行），降低文件噪音与维护负担。
+  - 本轮后行数变化：`OtherView.tsx` 从 `2264` 行降至 `1908` 行，`MarketView.tsx` 从 `2269` 行降至 `1707` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -125,6 +130,7 @@
 - `apps/frontend/src/components/dashboard/constants.ts`
 - `apps/frontend/src/components/dashboard/hooks/*`
 - `apps/frontend/src/components/dashboard/views/*`
+- `apps/frontend/src/components/dashboard/views/other/*`
 - `apps/frontend/src/components/dashboard/views/portfolio/*`
 - `apps/frontend/src/components/dashboard/components/*`
 - `apps/frontend/src/components/dashboard/primitives/*`
@@ -157,7 +163,7 @@
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
 - `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `752` 行，均低于 `800`。
 - `DashboardContainerLayoutProps` 的 `any` 宽类型已全部移除（改为 hook 返回类型与明确函数签名），后续重点从“减行”转向“manual smoke 覆盖 + view-model 结构继续清晰化”。
-- `PortfolioView.tsx`、`DataAnalysisView.tsx`、`MarketView.tsx`、`OtherView.tsx` 的 `any` 宽类型均已清零；后续重点转为按业务块继续降低超大视图文件复杂度（优先 `PortfolioView`）。
+- `PortfolioView.tsx`、`DataAnalysisView.tsx`、`MarketView.tsx`、`OtherView.tsx` 的 `any` 宽类型均已清零；后续重点转为按业务块继续降低超大视图文件复杂度（优先 `PortfolioView`，随后继续拆 `OtherView` 的 `data-management` 与 `instrument-management`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).
