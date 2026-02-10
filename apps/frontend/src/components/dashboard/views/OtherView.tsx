@@ -1,9 +1,17 @@
-import type { ChangeEvent } from "react";
+import type {
+  ChangeEvent,
+  Dispatch,
+  SetStateAction
+} from "react";
 
 import type {
   InstrumentRegistryEntry,
+  LedgerEntry,
   MarketIngestRun,
+  MarketDataQuality,
   MarketTargetsConfig,
+  Portfolio,
+  PortfolioSnapshot,
   ResolvedTargetSymbol,
   TagSummary,
   TargetReasonsDiff,
@@ -11,11 +19,52 @@ import type {
   UniversePoolBucketId
 } from "@mytrader/shared";
 
-import type { OtherTab } from "../types";
+import type {
+  LedgerFilter,
+  LedgerFormState,
+  MarketChartRangeKey,
+  MarketFilterMarket,
+  MarketScope,
+  OtherTab,
+  PositionFormState,
+  RiskFormState,
+  TargetPoolStatsScope,
+  TargetPoolStructureStats,
+  WorkspaceView
+} from "../types";
 
-export interface OtherViewProps {
-  [key: string]: any;
-}
+type DashboardMarketState = ReturnType<
+  typeof import("../hooks/use-dashboard-market").useDashboardMarket<
+    MarketScope,
+    MarketFilterMarket,
+    MarketChartRangeKey,
+    TargetPoolStatsScope,
+    TargetPoolStructureStats
+  >
+>;
+type DashboardPortfolioState =
+  import("../hooks/use-dashboard-portfolio").UseDashboardPortfolioResult<
+    PositionFormState,
+    RiskFormState,
+    LedgerFormState,
+    LedgerEntry,
+    LedgerFilter
+  >;
+type DashboardMarketAdminDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-market-admin-derived").useDashboardMarketAdminDerived<TargetPoolStatsScope>
+>;
+type DashboardMarketTargetPoolDetail = ReturnType<
+  typeof import("../hooks/use-dashboard-market-target-pool-detail").useDashboardMarketTargetPoolDetail
+>;
+type DashboardMarketOrchestration = ReturnType<
+  typeof import("../hooks/use-dashboard-market-orchestration").useDashboardMarketOrchestration
+>;
+type DashboardLedgerActions = ReturnType<
+  typeof import("../hooks/use-dashboard-ledger-actions").useDashboardLedgerActions
+>;
+type DashboardMarketResizeResult = ReturnType<
+  typeof import("../hooks/use-dashboard-market-resize").useDashboardMarketResize
+>;
 
 interface OtherTabOption {
   key: OtherTab;
@@ -27,6 +76,52 @@ interface TargetPoolMetricCard {
   label: string;
   value: string | number;
 }
+
+interface OtherViewExternalProps {
+  Button: typeof import("../shared").Button;
+  FormGroup: typeof import("../shared").FormGroup;
+  HelpHint: typeof import("../shared").HelpHint;
+  Input: typeof import("../shared").Input;
+  Modal: typeof import("../shared").Modal;
+  Panel: typeof import("../shared").Panel;
+  PopoverSelect: typeof import("../shared").PopoverSelect;
+  UNIVERSE_POOL_BUCKET_ORDER: ReadonlyArray<UniversePoolBucketId>;
+  activePortfolio: Portfolio | null;
+  dataQuality: MarketDataQuality | null;
+  formatCnDate: typeof import("../shared").formatCnDate;
+  formatDateTime: typeof import("../shared").formatDateTime;
+  formatDurationMs: typeof import("../shared").formatDurationMs;
+  formatIngestControlStateLabel: typeof import("../shared").formatIngestControlStateLabel;
+  formatIngestRunModeLabel: typeof import("../shared").formatIngestRunModeLabel;
+  formatIngestRunScopeLabel: typeof import("../shared").formatIngestRunScopeLabel;
+  formatIngestRunStatusLabel: typeof import("../shared").formatIngestRunStatusLabel;
+  formatIngestRunTone: typeof import("../shared").formatIngestRunTone;
+  formatMarketTokenSource: typeof import("../shared").formatMarketTokenSource;
+  formatPctNullable: typeof import("../shared").formatPctNullable;
+  formatTagSourceLabel: typeof import("../shared").formatTagSourceLabel;
+  formatTargetsReasons: typeof import("../shared").formatTargetsReasons;
+  getIngestControlStateDotClass: typeof import("../shared").getIngestControlStateDotClass;
+  getUniversePoolBucketLabel: typeof import("../shared").getUniversePoolBucketLabel;
+  otherTab: OtherTab;
+  otherTabs: ReadonlyArray<OtherTabOption>;
+  setActiveView: Dispatch<SetStateAction<WorkspaceView>>;
+  setOtherTab: Dispatch<SetStateAction<OtherTab>>;
+  snapshot: PortfolioSnapshot | null;
+}
+
+export type OtherViewProps = DashboardMarketState &
+  DashboardPortfolioState &
+  DashboardMarketAdminDerived &
+  DashboardMarketTargetPoolDetail &
+  DashboardMarketOrchestration &
+  DashboardLedgerActions &
+  Pick<
+    DashboardMarketResizeResult,
+    | "targetsEditorGridRef"
+    | "handleTargetsEditorResizePointerDown"
+    | "handleTargetsEditorResizeKeyDown"
+  > &
+  OtherViewExternalProps;
 
 export function OtherView(props: OtherViewProps) {
   const {
@@ -510,11 +605,9 @@ export function OtherView(props: OtherViewProps) {
                                 >
                                   <PopoverSelect
                                     value={marketSchedulerConfig.scope}
-                                    onChangeValue={(
-                                      value: "targets" | "universe" | "both"
-                                    ) =>
+                                    onChangeValue={(value: string) =>
                                       updateMarketSchedulerConfig({
-                                        scope: value
+                                        scope: value as "targets" | "universe" | "both"
                                       })
                                     }
                                     options={[
@@ -1412,9 +1505,11 @@ export function OtherView(props: OtherViewProps) {
                           />
                           <PopoverSelect
                             value={marketRegistryAutoFilter}
-                            onChangeValue={(
-                              value: "all" | "enabled" | "disabled"
-                            ) => setMarketRegistryAutoFilter(value)}
+                            onChangeValue={(value: string) =>
+                              setMarketRegistryAutoFilter(
+                                value as "all" | "enabled" | "disabled"
+                              )
+                            }
                             options={[
                               { value: "all", label: "全部" },
                               { value: "enabled", label: "仅已启用" },

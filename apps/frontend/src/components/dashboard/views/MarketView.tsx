@@ -2,12 +2,73 @@ import type { ChangeEvent } from "react";
 
 import type {
   InstrumentProfileSummary,
+  PortfolioSnapshot,
   TagSummary
 } from "@mytrader/shared";
+import type {
+  MarketChartRangeKey,
+  MarketFilterMarket,
+  MarketScope,
+  TargetPoolStatsScope,
+  TargetPoolStructureStats
+} from "../types";
 
-export interface MarketViewProps {
-  [key: string]: any;
+type DashboardMarketState = ReturnType<
+  typeof import("../hooks/use-dashboard-market").useDashboardMarket<
+    MarketScope,
+    MarketFilterMarket,
+    MarketChartRangeKey,
+    TargetPoolStatsScope,
+    TargetPoolStructureStats
+  >
+>;
+type DashboardMarketAdminDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-market-admin-derived").useDashboardMarketAdminDerived<TargetPoolStatsScope>
+>;
+type DashboardMarketDerived = ReturnType<
+  typeof import("../hooks/use-dashboard-market-derived").useDashboardMarketDerived
+>;
+type DashboardMarketOrchestration = ReturnType<
+  typeof import("../hooks/use-dashboard-market-orchestration").useDashboardMarketOrchestration
+>;
+type DashboardMarketResizeResult = ReturnType<
+  typeof import("../hooks/use-dashboard-market-resize").useDashboardMarketResize
+>;
+
+interface MarketViewExternalProps {
+  Button: typeof import("../shared").Button;
+  ChartErrorBoundary: typeof import("../shared").ChartErrorBoundary;
+  FormGroup: typeof import("../shared").FormGroup;
+  IconButton: typeof import("../shared").IconButton;
+  Input: typeof import("../shared").Input;
+  MarketAreaChart: typeof import("../shared").MarketAreaChart;
+  MarketQuoteHeader: typeof import("../shared").MarketQuoteHeader;
+  MarketVolumeMiniChart: typeof import("../shared").MarketVolumeMiniChart;
+  Modal: typeof import("../shared").Modal;
+  PopoverSelect: typeof import("../shared").PopoverSelect;
+  formatCnDate: typeof import("../shared").formatCnDate;
+  formatCnWanYiNullable: typeof import("../shared").formatCnWanYiNullable;
+  formatNumber: typeof import("../shared").formatNumber;
+  formatSignedCnWanYiNullable: typeof import("../shared").formatSignedCnWanYiNullable;
+  formatSignedPctNullable: typeof import("../shared").formatSignedPctNullable;
+  formatThemeLabel: typeof import("../shared").formatThemeLabel;
+  getCnChangeTone: typeof import("../shared").getCnChangeTone;
+  getCnToneTextClass: typeof import("../shared").getCnToneTextClass;
+  marketChartRanges: ReadonlyArray<MarketRangeOption>;
+  snapshot: PortfolioSnapshot | null;
+  sortTagMembersByChangePct: typeof import("../shared").sortTagMembersByChangePct;
 }
+
+export type MarketViewProps = DashboardMarketState &
+  DashboardMarketAdminDerived &
+  DashboardMarketDerived &
+  DashboardMarketOrchestration &
+  Pick<
+    DashboardMarketResizeResult,
+    | "handleMarketExplorerResizePointerDown"
+    | "handleMarketExplorerResizeKeyDown"
+  > &
+  MarketViewExternalProps;
 
 interface MarketTagFacetItem {
   tag: string;
@@ -15,12 +76,8 @@ interface MarketTagFacetItem {
   name: string;
 }
 
-interface MarketThemeFacetItem {
-  tag: string;
-}
-
 interface MarketRangeOption {
-  key: string;
+  key: MarketChartRangeKey;
   label: string;
 }
 
@@ -28,9 +85,6 @@ interface MarketChartHoverDatum {
   date: string;
   close: number;
 }
-
-type MarketAssetFilterKey = "stock" | "etf";
-type MarketKindFilterKey = "stock" | "fund";
 
 export function MarketView(props: MarketViewProps) {
   const {
@@ -1139,9 +1193,9 @@ export function MarketView(props: MarketViewProps) {
                             type="checkbox"
                             checked={marketFilterAssetClasses.includes(item.key)}
                             onChange={() =>
-                              setMarketFilterAssetClasses((prev: MarketAssetFilterKey[]) =>
+                              setMarketFilterAssetClasses((prev) =>
                                 prev.includes(item.key)
-                                  ? prev.filter((value: MarketAssetFilterKey) => value !== item.key)
+                                  ? prev.filter((value) => value !== item.key)
                                   : [...prev, item.key]
                               )
                             }
@@ -1163,9 +1217,9 @@ export function MarketView(props: MarketViewProps) {
                             type="checkbox"
                             checked={marketFilterKinds.includes(item.key)}
                             onChange={() =>
-                              setMarketFilterKinds((prev: MarketKindFilterKey[]) =>
+                              setMarketFilterKinds((prev) =>
                                 prev.includes(item.key)
-                                  ? prev.filter((value: MarketKindFilterKey) => value !== item.key)
+                                  ? prev.filter((value) => value !== item.key)
                                   : [...prev, item.key]
                               )
                             }
@@ -1315,7 +1369,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketSelectedThemes.map((theme: MarketThemeFacetItem) => (
+                        {marketSelectedThemes.map((theme) => (
                           <button
                             key={theme.tag}
                             type="button"

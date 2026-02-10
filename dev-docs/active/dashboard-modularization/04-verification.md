@@ -494,3 +494,9 @@
   - `rg -n "\\[key: string\\]: any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx`
     - `apps/frontend/src/components/dashboard/views/MarketView.tsx:9:  [key: string]: any;`
     - `apps/frontend/src/components/dashboard/views/OtherView.tsx:17:  [key: string]: any;`
+- 2026-02-10 (after removing final index-signature `any` in `MarketView` + `OtherView` and aligning layout prop passthrough contracts):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `rg -n "\\bany\\b|as any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx`
+    - no matches ✅（`MarketView/OtherView` 已无 `any`）

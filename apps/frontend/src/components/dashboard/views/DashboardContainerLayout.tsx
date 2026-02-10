@@ -490,6 +490,9 @@ export function DashboardContainerLayout({
             <MarketView
               {...{
                 ...marketState,
+                ...marketDerived,
+                ...marketAdminDerived,
+                ...marketOrchestration,
                 Button,
                 ChartErrorBoundary,
                 FormGroup,
@@ -569,6 +572,10 @@ export function DashboardContainerLayout({
               {...{
                 ...marketState,
                 ...portfolioState,
+                ...marketAdminDerived,
+                ...marketTargetPoolDetail,
+                ...marketOrchestration,
+                ...ledgerActions,
                 Button,
                 FormGroup,
                 HelpHint,
