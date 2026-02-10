@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type {
@@ -761,6 +761,272 @@ export function useDashboardMarket<
     setMarketChartHoverDate,
     marketChartHoverPrice,
     setMarketChartHoverPrice
+  };
+}
+
+export interface UseDashboardMarketManagementActionsOptions {
+  marketSchedulerConfig: MarketIngestSchedulerConfig | null;
+  marketIngestControlState: MarketIngestControlStatus["state"] | "idle";
+  marketIngestTriggering: boolean;
+  marketRegistryResult: ListInstrumentRegistryResult | null;
+  marketRegistrySelectedSymbols: string[];
+  toUserErrorMessage: (err: unknown) => string;
+  handleTriggerMarketIngest: (scope: "targets" | "universe" | "both") => Promise<void>;
+  refreshMarketIngestRuns: () => Promise<void>;
+  refreshMarketRegistry: () => Promise<void>;
+  refreshMarketTargetsDiff: () => Promise<void>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setNotice: Dispatch<SetStateAction<string | null>>;
+  setMarketIngestControlStatus: Dispatch<
+    SetStateAction<MarketIngestControlStatus | null>
+  >;
+  setMarketIngestControlUpdating: Dispatch<SetStateAction<boolean>>;
+  setMarketSchedulerConfig: Dispatch<
+    SetStateAction<MarketIngestSchedulerConfig | null>
+  >;
+  setMarketSchedulerSavedConfig: Dispatch<
+    SetStateAction<MarketIngestSchedulerConfig | null>
+  >;
+  setMarketSchedulerSaving: Dispatch<SetStateAction<boolean>>;
+  setMarketTriggerIngestBlockedOpen: Dispatch<SetStateAction<boolean>>;
+  setMarketTriggerIngestBlockedMessage: Dispatch<SetStateAction<string>>;
+  setMarketRegistrySelectedSymbols: Dispatch<SetStateAction<string[]>>;
+  setMarketRegistryUpdating: Dispatch<SetStateAction<boolean>>;
+}
+
+export function useDashboardMarketManagementActions(
+  options: UseDashboardMarketManagementActionsOptions
+) {
+  const handlePauseMarketIngest = useCallback(async () => {
+    if (!window.mytrader) return;
+    options.setMarketIngestControlUpdating(true);
+    options.setError(null);
+    try {
+      const status = await window.mytrader.market.pauseIngest();
+      options.setMarketIngestControlStatus(status);
+      options.setNotice("已暂停自动拉取。");
+    } catch (err) {
+      options.setError(options.toUserErrorMessage(err));
+    } finally {
+      options.setMarketIngestControlUpdating(false);
+    }
+  }, [
+    options.setError,
+    options.setMarketIngestControlStatus,
+    options.setMarketIngestControlUpdating,
+    options.setNotice,
+    options.toUserErrorMessage
+  ]);
+
+  const handleResumeMarketIngest = useCallback(async () => {
+    if (!window.mytrader) return;
+    options.setMarketIngestControlUpdating(true);
+    options.setError(null);
+    try {
+      const status = await window.mytrader.market.resumeIngest();
+      options.setMarketIngestControlStatus(status);
+      options.setNotice("已继续执行当前拉取任务。");
+      await options.refreshMarketIngestRuns();
+    } catch (err) {
+      options.setError(options.toUserErrorMessage(err));
+    } finally {
+      options.setMarketIngestControlUpdating(false);
+    }
+  }, [
+    options.refreshMarketIngestRuns,
+    options.setError,
+    options.setMarketIngestControlStatus,
+    options.setMarketIngestControlUpdating,
+    options.setNotice,
+    options.toUserErrorMessage
+  ]);
+
+  const handleCancelMarketIngest = useCallback(async () => {
+    if (!window.mytrader) return;
+    options.setMarketIngestControlUpdating(true);
+    options.setError(null);
+    try {
+      const status = await window.mytrader.market.cancelIngest();
+      options.setMarketIngestControlStatus(status);
+      options.setNotice("已请求取消当前拉取任务。");
+    } catch (err) {
+      options.setError(options.toUserErrorMessage(err));
+    } finally {
+      options.setMarketIngestControlUpdating(false);
+    }
+  }, [
+    options.setError,
+    options.setMarketIngestControlStatus,
+    options.setMarketIngestControlUpdating,
+    options.setNotice,
+    options.toUserErrorMessage
+  ]);
+
+  const updateMarketSchedulerConfig = useCallback(
+    (patch: Partial<MarketIngestSchedulerConfig>) => {
+      options.setMarketSchedulerConfig((prev) =>
+        prev ? { ...prev, ...patch } : prev
+      );
+    },
+    [options.setMarketSchedulerConfig]
+  );
+
+  const handleSaveMarketSchedulerConfig = useCallback(async () => {
+    if (!window.mytrader || !options.marketSchedulerConfig) return;
+    options.setError(null);
+    options.setMarketSchedulerSaving(true);
+    try {
+      const saved = await window.mytrader.market.setIngestSchedulerConfig(
+        options.marketSchedulerConfig
+      );
+      options.setMarketSchedulerConfig(saved);
+      options.setMarketSchedulerSavedConfig(saved);
+      options.setNotice("调度配置已保存。");
+      return true;
+    } catch (err) {
+      options.setError(options.toUserErrorMessage(err));
+      return false;
+    } finally {
+      options.setMarketSchedulerSaving(false);
+    }
+  }, [
+    options.marketSchedulerConfig,
+    options.setError,
+    options.setMarketSchedulerConfig,
+    options.setMarketSchedulerSavedConfig,
+    options.setMarketSchedulerSaving,
+    options.setNotice,
+    options.toUserErrorMessage
+  ]);
+
+  const handleRunMarketIngestNow = useCallback(() => {
+    if (!options.marketSchedulerConfig) return;
+    if (options.marketIngestTriggering) {
+      options.setMarketTriggerIngestBlockedMessage("正在提交拉取请求，请稍后再试。");
+      options.setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    if (options.marketIngestControlState === "running") {
+      options.setMarketTriggerIngestBlockedMessage(
+        "当前已有拉取任务正在执行，请等待完成后再执行拉取。"
+      );
+      options.setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    if (options.marketIngestControlState === "paused") {
+      options.setMarketTriggerIngestBlockedMessage(
+        "当前任务已暂停，请先继续或取消后再执行拉取。"
+      );
+      options.setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    if (options.marketIngestControlState === "canceling") {
+      options.setMarketTriggerIngestBlockedMessage("当前任务正在取消中，请稍后再试。");
+      options.setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    void options.handleTriggerMarketIngest(options.marketSchedulerConfig.scope);
+  }, [
+    options.handleTriggerMarketIngest,
+    options.marketIngestControlState,
+    options.marketIngestTriggering,
+    options.marketSchedulerConfig,
+    options.setMarketTriggerIngestBlockedMessage,
+    options.setMarketTriggerIngestBlockedOpen
+  ]);
+
+  const handleToggleRegistrySymbol = useCallback(
+    (symbol: string) => {
+      const key = symbol.trim();
+      if (!key) return;
+      options.setMarketRegistrySelectedSymbols((prev) =>
+        prev.includes(key)
+          ? prev.filter((item) => item !== key)
+          : [...prev, key]
+      );
+    },
+    [options.setMarketRegistrySelectedSymbols]
+  );
+
+  const handleToggleSelectAllRegistry = useCallback(() => {
+    const symbols = options.marketRegistryResult?.items.map((item) => item.symbol) ?? [];
+    if (symbols.length === 0) return;
+    options.setMarketRegistrySelectedSymbols((prev) =>
+      prev.length === symbols.length ? [] : symbols
+    );
+  }, [options.marketRegistryResult?.items, options.setMarketRegistrySelectedSymbols]);
+
+  const handleSetRegistryAutoIngest = useCallback(
+    async (symbol: string, enabled: boolean) => {
+      if (!window.mytrader) return;
+      options.setMarketRegistryUpdating(true);
+      try {
+        await window.mytrader.market.setInstrumentAutoIngest({ symbol, enabled });
+        await Promise.all([
+          options.refreshMarketRegistry(),
+          options.refreshMarketTargetsDiff()
+        ]);
+      } catch (err) {
+        options.setError(options.toUserErrorMessage(err));
+      } finally {
+        options.setMarketRegistryUpdating(false);
+      }
+    },
+    [
+      options.refreshMarketRegistry,
+      options.refreshMarketTargetsDiff,
+      options.setError,
+      options.setMarketRegistryUpdating,
+      options.toUserErrorMessage
+    ]
+  );
+
+  const handleBatchSetRegistryAutoIngest = useCallback(
+    async (enabled: boolean) => {
+      if (!window.mytrader) return;
+      if (options.marketRegistrySelectedSymbols.length === 0) return;
+      options.setMarketRegistryUpdating(true);
+      options.setError(null);
+      try {
+        await window.mytrader.market.batchSetInstrumentAutoIngest({
+          symbols: options.marketRegistrySelectedSymbols,
+          enabled
+        });
+        options.setNotice(
+          `已批量${enabled ? "启用" : "禁用"}自动拉取：${options.marketRegistrySelectedSymbols.length} 个标的。`
+        );
+        await Promise.all([
+          options.refreshMarketRegistry(),
+          options.refreshMarketTargetsDiff()
+        ]);
+      } catch (err) {
+        options.setError(options.toUserErrorMessage(err));
+      } finally {
+        options.setMarketRegistryUpdating(false);
+      }
+    },
+    [
+      options.marketRegistrySelectedSymbols,
+      options.refreshMarketRegistry,
+      options.refreshMarketTargetsDiff,
+      options.setError,
+      options.setMarketRegistryUpdating,
+      options.setNotice,
+      options.toUserErrorMessage
+    ]
+  );
+
+  return {
+    handlePauseMarketIngest,
+    handleResumeMarketIngest,
+    handleCancelMarketIngest,
+    updateMarketSchedulerConfig,
+    handleSaveMarketSchedulerConfig,
+    handleRunMarketIngestNow,
+    handleToggleRegistrySymbol,
+    handleToggleSelectAllRegistry,
+    handleSetRegistryAutoIngest,
+    handleBatchSetRegistryAutoIngest
   };
 }
 

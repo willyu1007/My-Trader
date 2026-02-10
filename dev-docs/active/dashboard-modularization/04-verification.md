@@ -179,6 +179,16 @@
   - blocking issue fixed:
     - initial `typecheck` failed due to `Dispatch<SetStateAction<...>>` variance mismatch when passing `setActiveView/setOtherTab` into runtime hook.
     - resolved by replacing dual setter options with a single `restoreDataManagementView()` callback (behavior unchanged).
+- 2026-02-10 (after extracting market management action handlers to hook):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `4304` lines
+    - `use-dashboard-market.ts`: `1360` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
 
 ## Manual smoke checks
 - 本轮未执行（仅完成结构迁移与自动化回归）。待执行并记录：

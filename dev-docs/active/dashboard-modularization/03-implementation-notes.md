@@ -50,8 +50,13 @@
     - `data-management` / `data-status` 下 ingest 轮询刷新。
     - 离开 `data-management` 且存在未保存目标池草稿时的导航确认保护。
   - 为避免 `Dispatch<SetStateAction<...>>` 泛型不兼容导致的类型阻断，将 hook 参数收敛为 `restoreDataManagementView()` 单一回调，保持行为不变并修复 typecheck 错误。
+  - 新增 `useDashboardMarketManagementActions`（同文件导出），承接容器中的 ingest/scheduler/registry handlers：
+    - `handlePause/Resume/CancelMarketIngest`
+    - `updateMarketSchedulerConfig` / `handleSaveMarketSchedulerConfig` / `handleRunMarketIngestNow`
+    - `handleToggleRegistrySymbol` / `handleToggleSelectAllRegistry`
+    - `handleSetRegistryAutoIngest` / `handleBatchSetRegistryAutoIngest`
   - `DashboardContainer.tsx` 删除对应重复 `useState/useEffect`，改为消费 hook 返回值。
-  - `DashboardContainer.tsx` 进一步下降到 `4436` 行；`use-dashboard-market.ts` 增长到 `1094` 行（下一步继续把 market 行为按领域拆到更细粒度 hook / service utils）。
+  - `DashboardContainer.tsx` 进一步下降到 `4304` 行；`use-dashboard-market.ts` 增长到 `1360` 行（下一步将继续把 market 处理器分组下沉到更细粒度 hooks，避免单 hook 继续膨胀）。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -103,7 +108,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `4436` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `4304` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

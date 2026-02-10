@@ -18,7 +18,6 @@ import type {
   LedgerSource,
   MarketTargetsConfig,
   MarketDailyBar,
-  MarketIngestSchedulerConfig,
   MarketUniversePoolBucketStatus,
   PerformanceRangeKey,
   Portfolio,
@@ -155,6 +154,7 @@ import { TopToolbar } from "./views/TopToolbar";
 import { useDashboardAnalysis } from "./hooks/use-dashboard-analysis";
 import {
   useDashboardMarket,
+  useDashboardMarketManagementActions,
   useDashboardMarketRuntimeEffects
 } from "./hooks/use-dashboard-market";
 import {
@@ -3543,172 +3543,40 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     refreshMarketTargetsDiff
   ]);
 
-  const handlePauseMarketIngest = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketIngestControlUpdating(true);
-    setError(null);
-    try {
-      const status = await window.mytrader.market.pauseIngest();
-      setMarketIngestControlStatus(status);
-      setNotice("已暂停自动拉取。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketIngestControlUpdating(false);
-    }
-  }, []);
-
-  const handleResumeMarketIngest = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketIngestControlUpdating(true);
-    setError(null);
-    try {
-      const status = await window.mytrader.market.resumeIngest();
-      setMarketIngestControlStatus(status);
-      setNotice("已继续执行当前拉取任务。");
-      await refreshMarketIngestRuns();
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketIngestControlUpdating(false);
-    }
-  }, [refreshMarketIngestRuns]);
-
-  const handleCancelMarketIngest = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketIngestControlUpdating(true);
-    setError(null);
-    try {
-      const status = await window.mytrader.market.cancelIngest();
-      setMarketIngestControlStatus(status);
-      setNotice("已请求取消当前拉取任务。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketIngestControlUpdating(false);
-    }
-  }, []);
-
-  const updateMarketSchedulerConfig = useCallback(
-    (patch: Partial<MarketIngestSchedulerConfig>) => {
-      setMarketSchedulerConfig((prev) => (prev ? { ...prev, ...patch } : prev));
-    },
-    []
-  );
-
-  const handleSaveMarketSchedulerConfig = useCallback(async () => {
-    if (!window.mytrader || !marketSchedulerConfig) return;
-    setError(null);
-    setMarketSchedulerSaving(true);
-    try {
-      const saved = await window.mytrader.market.setIngestSchedulerConfig(
-        marketSchedulerConfig
-      );
-      setMarketSchedulerConfig(saved);
-      setMarketSchedulerSavedConfig(saved);
-      setNotice("调度配置已保存。");
-      return true;
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      return false;
-    } finally {
-      setMarketSchedulerSaving(false);
-    }
-  }, [marketSchedulerConfig]);
-
-  const handleRunMarketIngestNow = useCallback(() => {
-    if (!marketSchedulerConfig) return;
-    if (marketIngestTriggering) {
-      setMarketTriggerIngestBlockedMessage("正在提交拉取请求，请稍后再试。");
-      setMarketTriggerIngestBlockedOpen(true);
-      return;
-    }
-    if (marketIngestControlState === "running") {
-      setMarketTriggerIngestBlockedMessage(
-        "当前已有拉取任务正在执行，请等待完成后再执行拉取。"
-      );
-      setMarketTriggerIngestBlockedOpen(true);
-      return;
-    }
-    if (marketIngestControlState === "paused") {
-      setMarketTriggerIngestBlockedMessage(
-        "当前任务已暂停，请先继续或取消后再执行拉取。"
-      );
-      setMarketTriggerIngestBlockedOpen(true);
-      return;
-    }
-    if (marketIngestControlState === "canceling") {
-      setMarketTriggerIngestBlockedMessage("当前任务正在取消中，请稍后再试。");
-      setMarketTriggerIngestBlockedOpen(true);
-      return;
-    }
-    void handleTriggerMarketIngest(marketSchedulerConfig.scope);
-  }, [
-    handleTriggerMarketIngest,
+  const {
+    handlePauseMarketIngest,
+    handleResumeMarketIngest,
+    handleCancelMarketIngest,
+    updateMarketSchedulerConfig,
+    handleSaveMarketSchedulerConfig,
+    handleRunMarketIngestNow,
+    handleToggleRegistrySymbol,
+    handleToggleSelectAllRegistry,
+    handleSetRegistryAutoIngest,
+    handleBatchSetRegistryAutoIngest
+  } = useDashboardMarketManagementActions({
+    marketSchedulerConfig,
     marketIngestControlState,
     marketIngestTriggering,
-    marketSchedulerConfig
-  ]);
-
-  const handleToggleRegistrySymbol = useCallback((symbol: string) => {
-    const key = symbol.trim();
-    if (!key) return;
-    setMarketRegistrySelectedSymbols((prev) =>
-      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
-    );
-  }, []);
-
-  const handleToggleSelectAllRegistry = useCallback(() => {
-    const symbols = marketRegistryResult?.items.map((item) => item.symbol) ?? [];
-    if (symbols.length === 0) return;
-    setMarketRegistrySelectedSymbols((prev) =>
-      prev.length === symbols.length ? [] : symbols
-    );
-  }, [marketRegistryResult?.items]);
-
-  const handleSetRegistryAutoIngest = useCallback(
-    async (symbol: string, enabled: boolean) => {
-      if (!window.mytrader) return;
-      setMarketRegistryUpdating(true);
-      try {
-        await window.mytrader.market.setInstrumentAutoIngest({ symbol, enabled });
-        await Promise.all([refreshMarketRegistry(), refreshMarketTargetsDiff()]);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      } finally {
-        setMarketRegistryUpdating(false);
-      }
-    },
-    [refreshMarketRegistry, refreshMarketTargetsDiff]
-  );
-
-  const handleBatchSetRegistryAutoIngest = useCallback(
-    async (enabled: boolean) => {
-      if (!window.mytrader) return;
-      if (marketRegistrySelectedSymbols.length === 0) return;
-      setMarketRegistryUpdating(true);
-      setError(null);
-      try {
-        await window.mytrader.market.batchSetInstrumentAutoIngest({
-          symbols: marketRegistrySelectedSymbols,
-          enabled
-        });
-        setNotice(
-          `已批量${enabled ? "启用" : "禁用"}自动拉取：${marketRegistrySelectedSymbols.length} 个标的。`
-        );
-        await Promise.all([refreshMarketRegistry(), refreshMarketTargetsDiff()]);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      } finally {
-        setMarketRegistryUpdating(false);
-      }
-    },
-    [
-      marketRegistrySelectedSymbols,
-      refreshMarketRegistry,
-      refreshMarketTargetsDiff
-    ]
-  );
+    marketRegistryResult,
+    marketRegistrySelectedSymbols,
+    toUserErrorMessage,
+    handleTriggerMarketIngest,
+    refreshMarketIngestRuns,
+    refreshMarketRegistry,
+    refreshMarketTargetsDiff,
+    setError,
+    setNotice,
+    setMarketIngestControlStatus,
+    setMarketIngestControlUpdating,
+    setMarketSchedulerConfig,
+    setMarketSchedulerSavedConfig,
+    setMarketSchedulerSaving,
+    setMarketTriggerIngestBlockedOpen,
+    setMarketTriggerIngestBlockedMessage,
+    setMarketRegistrySelectedSymbols,
+    setMarketRegistryUpdating
+  });
 
   const handleMarketExplorerResizePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
