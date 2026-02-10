@@ -181,3 +181,14 @@
     - `MarketSidebar.tsx`: `381` 行
     - `MarketDetailWorkspace.tsx`: `555` 行
     - `MarketDialogs.tsx`: `566` 行
+- 2026-02-10（继续拆分 `OtherDataManagementTab`）
+  - 新增目录 `views/other/data-management/`，按功能块拆出 5 个子组件：
+    - `OtherDataManagementSourceSection.tsx`
+    - `OtherDataManagementSchedulerSection.tsx`
+    - `OtherDataManagementTargetPoolSection.tsx`
+    - `OtherDataManagementRegistrySection.tsx`
+    - `OtherDataManagementIngestSection.tsx`
+  - `views/other/OtherDataManagementTab.tsx` 收敛为编排壳，按顺序组合上述 5 个区块，行为保持不变。
+  - 本轮后行数变化：
+    - `OtherDataManagementTab.tsx`: `1373` -> `18`
+    - 新增子文件总计 `1409` 行（结构化拆分，无功能变更）。

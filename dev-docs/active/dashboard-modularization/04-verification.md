@@ -523,3 +523,14 @@
     - `MarketSidebar.tsx`: `381` lines
     - `MarketDetailWorkspace.tsx`: `555` lines
     - `MarketDialogs.tsx`: `566` lines
+- 2026-02-10 (after splitting `OtherDataManagementTab` into section components under `views/other/data-management/`):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/views/other/OtherDataManagementTab.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementSourceSection.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementSchedulerSection.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetPoolSection.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementRegistrySection.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementIngestSection.tsx`
+    - `OtherDataManagementTab.tsx`: `18` lines
+    - `OtherDataManagementSourceSection.tsx`: `259` lines
+    - `OtherDataManagementSchedulerSection.tsx`: `354` lines
+    - `OtherDataManagementTargetPoolSection.tsx`: `572` lines
+    - `OtherDataManagementRegistrySection.tsx`: `169` lines
+    - `OtherDataManagementIngestSection.tsx`: `55` lines
