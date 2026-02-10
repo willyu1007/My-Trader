@@ -89,6 +89,9 @@
   - `DashboardContainer.tsx` 继续下降到 `1475` 行。
   - 新增 `hooks/use-dashboard-market-orchestration.ts`，将 market 编排层（data loaders/admin refresh/admin actions/instrument actions/target actions/management actions/runtime effects）从容器下沉为单一组合 hook。
   - `DashboardContainer.tsx` 继续下降到 `1146` 行。
+  - 新增 `views/DashboardContainerLayout.tsx`，将 `DashboardContainer` 内部主渲染壳（导航/toolbar/tabs/各视图条件渲染/overlays）整体迁出，容器仅负责状态编排与数据装配。
+  - 将容器内多段 `derived/actions/orchestration` 调用从大解构改为对象持有，减少中间变量噪音并降低容器体积。
+  - `DashboardContainer.tsx` 继续下降到 `547` 行，达成本阶段 `<= 800` 目标。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -140,7 +143,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `1146` 行，仍偏大；后续需继续将主渲染 JSX 与视图透传编排收敛到独立渲染壳，逐步逼近 `<= 800` 目标。
+- `DashboardContainer.tsx` 当前 `547` 行，已低于 `800`；后续重点从“减行”转向“类型收敛与 props/view-model 清晰化”（当前 layout/orchestration 使用了宽类型入口，需逐步收紧）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

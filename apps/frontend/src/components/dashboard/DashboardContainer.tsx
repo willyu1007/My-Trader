@@ -10,10 +10,8 @@ import type {
   PortfolioSnapshot
 } from "@mytrader/shared";
 import {
-  CONTRIBUTION_TOP_N,
   DEFAULT_LEDGER_END_DATE,
   DEFAULT_LEDGER_START_DATE,
-  HHI_WARN_THRESHOLD,
   MARKET_EXPLORER_DEFAULT_WIDTH,
   MARKET_EXPLORER_MAX_WIDTH,
   MARKET_EXPLORER_MIN_WIDTH,
@@ -24,17 +22,8 @@ import {
   TARGETS_EDITOR_SPLIT_MIN,
   TARGETS_EDITOR_SPLIT_STORAGE_KEY,
   UNIVERSE_POOL_BUCKET_ORDER,
-  analysisTabs,
-  assetClassLabels,
   emptyPositionForm,
   emptyRiskForm,
-  ledgerEventTypeOptions,
-  marketChartRanges,
-  navItems,
-  otherTabs,
-  performanceRanges,
-  portfolioTabs,
-  riskLimitTypeLabels,
   schedulerTimezoneDefaults
 } from "./constants";
 import type {
@@ -48,79 +37,17 @@ import type {
   PortfolioTab,
   RiskFormState,
   TargetPoolStatsScope,
-  TargetPoolStructureStats,
-  WorkspaceView
+  TargetPoolStructureStats
 } from "./types";
 import {
-  Panel,
-  PlaceholderPanel,
-  Modal,
-  FormGroup,
-  Input,
-  Select,
-  PopoverSelect,
-  Button,
-  IconButton,
-  Badge,
-  MarketQuoteHeader,
-  ChartErrorBoundary,
-  MarketAreaChart,
-  MarketVolumeMiniChart,
-  SummaryCard,
-  EmptyState,
-  ErrorState,
-  HelpHint,
-  ConfirmDialog,
-  LedgerTable,
-  LedgerForm,
-  DataQualityCard,
   clampNumber,
-  formatNumber,
-  formatCnWanYiNullable,
-  formatSignedCnWanYiNullable,
-  formatCurrency,
   formatPct,
-  formatPctNullable,
-  formatSignedPctNullable,
-  getCnChangeTone,
-  getCnToneTextClass,
-  formatPerformanceMethod,
-  formatDateRange,
-  sortTagMembersByChangePct,
-  formatAssetClassLabel,
-  formatRiskLimitTypeLabel,
-  formatDateTime,
-  formatDurationMs,
-  formatMarketTokenSource,
-  formatTagSourceLabel,
-  formatIngestRunStatusLabel,
-  formatIngestRunScopeLabel,
-  formatIngestRunModeLabel,
-  formatTargetsReasons,
-  formatIngestRunTone,
-  formatIngestControlStateLabel,
-  getIngestControlStateDotClass,
-  getUniversePoolBucketLabel,
   toUserErrorMessage,
   formatInputDate,
-  formatCnDate,
-  formatThemeLabel,
   resolveMarketChartDateRange,
-  createEmptyLedgerForm,
-  DescriptionItem,
-  PerformanceChart,
-  ContributionTable,
-  RiskMetricCard
+  createEmptyLedgerForm
 } from "./shared";
-import { AccountView } from "./views/AccountView";
-import { DataAnalysisView } from "./views/DataAnalysisView";
-import { DashboardOverlays } from "./views/DashboardOverlays";
-import { MarketView } from "./views/MarketView";
-import { OtherView } from "./views/OtherView";
-import { PortfolioView } from "./views/PortfolioView";
-import { RiskView } from "./views/RiskView";
-import { SidebarNav } from "./views/SidebarNav";
-import { TopToolbar } from "./views/TopToolbar";
+import { DashboardContainerLayout } from "./views/DashboardContainerLayout";
 import { useDashboardAnalysis } from "./hooks/use-dashboard-analysis";
 import { useDashboardAnalysisDerived } from "./hooks/use-dashboard-analysis-derived";
 import { useDashboardAnalysisRuntime } from "./hooks/use-dashboard-analysis-runtime";
@@ -309,32 +236,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setTargetsEditorLeftPct
   });
 
-  const {
-    latestMarketIngestRun,
-    marketSelectedIndustry,
-    marketSelectedThemes,
-    marketSelectedManualThemes,
-    marketSelectedPlainUserTags,
-    marketTargetsDirty,
-    marketSchedulerDirty,
-    marketUniversePoolDirty,
-    marketIngestControlState,
-    marketCanTriggerIngestNow,
-    marketCanPauseIngest,
-    marketCanResumeIngest,
-    marketCanCancelIngest,
-    marketSchedulerTimezoneOptions,
-    marketRegistryEntryEnabled,
-    marketCurrentTargetsSource,
-    marketFilteredCurrentTargets,
-    marketFilteredAddedSymbols,
-    marketFilteredRemovedSymbols,
-    marketFilteredReasonChangedSymbols,
-    marketFocusTargetSymbols,
-    marketActiveTargetPoolStats,
-    marketUniverseEnabledBuckets,
-    marketUniverseBucketStatusById
-  } = useDashboardMarketAdminDerived({
+  const marketAdminDerived = useDashboardMarketAdminDerived({
     marketIngestRuns,
     marketSelectedProfile,
     marketSelectedUserTags,
@@ -357,19 +259,9 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     universePoolBucketOrder: UNIVERSE_POOL_BUCKET_ORDER
   });
 
-  const {
-    marketTargetPoolMetricCards,
-    marketTargetPoolDetailTitle,
-    marketTargetPoolDetailValue,
-    marketTargetPoolDetailDescription,
-    marketTargetPoolDetailCategoryRows,
-    marketTargetPoolActiveCategoryRow,
-    marketTargetPoolDetailMembers,
-    handleToggleTargetsSection,
-    handleToggleDiffSection
-  } = useDashboardMarketTargetPoolDetail({
+  const marketTargetPoolDetail = useDashboardMarketTargetPoolDetail({
     marketTargetPoolStatsScope,
-    marketActiveTargetPoolStats,
+    marketActiveTargetPoolStats: marketAdminDerived.marketActiveTargetPoolStats,
     marketTargetPoolDetailMetric,
     marketTargetPoolDetailCategoryKey,
     marketTargetPoolDetailMemberFilter,
@@ -453,30 +345,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setPerformanceResult
   });
 
-  const {
-    marketHoldingsSymbols,
-    marketHoldingsSymbolsFiltered,
-    marketSelectedQuote,
-    marketActiveVolume,
-    marketActiveMoneyflowVol,
-    marketActiveMoneyflowRatio,
-    marketNameBySymbol,
-    marketEffectiveScope,
-    marketCollectionSelectValue,
-    marketSearchResultsFiltered,
-    marketSearchResultSymbols,
-    marketFilteredListSymbols,
-    marketSelectedTagAggregate,
-    marketSelectedTagSeriesReturnPct,
-    marketSelectedTagSeriesTone,
-    marketTagSeriesLatestCoverageLabel,
-    marketFiltersActiveCount,
-    marketLatestBar,
-    marketChartHasEnoughData,
-    marketRangeSummary,
-    marketHoldingUnitCost,
-    marketTargetPrice
-  } = useDashboardMarketDerived({
+  const marketDerived = useDashboardMarketDerived({
     snapshot,
     marketFilterMarket,
     marketFilterAssetClasses,
@@ -498,17 +367,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     ledgerEntries
   });
 
-  const {
-    analysisInstrumentNameBySymbol,
-    analysisInstrumentQuickSymbols,
-    analysisInstrumentLatestBar,
-    analysisInstrumentHasEnoughData,
-    analysisInstrumentRangeSummary,
-    analysisInstrumentPositionValuation,
-    analysisInstrumentHoldingUnitCost,
-    analysisInstrumentTargetPrice,
-    analysisInstrumentTone
-  } = useDashboardAnalysisDerived({
+  const analysisDerived = useDashboardAnalysisDerived({
     snapshot,
     marketWatchlistItems,
     analysisInstrumentSearchResults,
@@ -526,7 +385,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     analysisInstrumentQuery,
     analysisInstrumentSymbol,
     analysisInstrumentRange,
-    analysisInstrumentQuickSymbols,
+    analysisInstrumentQuickSymbols: analysisDerived.analysisInstrumentQuickSymbols,
     snapshotPriceAsOf: snapshot?.priceAsOf,
     toUserErrorMessage,
     resolveMarketChartDateRange,
@@ -542,20 +401,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setAnalysisInstrumentBars
   });
 
-  const {
-    cashTotal,
-    performance,
-    performanceSeries,
-    contributionBreakdown,
-    riskMetrics,
-    dataQuality,
-    hhiValue,
-    filteredLedgerEntries,
-    cashFlowTotals,
-    ledgerDeleteSummary,
-    toastMessage,
-    selectedPerformance
-  } = useDashboardPortfolioDerived({
+  const portfolioDerived = useDashboardPortfolioDerived({
     snapshot,
     performanceResult,
     ledgerEntries,
@@ -582,19 +428,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setNotice
   });
 
-  const {
-    handleCreatePortfolio,
-    handleRenamePortfolio,
-    handleDeletePortfolio,
-    handleEditPosition,
-    handleCancelEditPosition,
-    handleSubmitPosition,
-    handleDeletePosition,
-    handleEditRiskLimit,
-    handleCancelRiskEdit,
-    handleSubmitRiskLimit,
-    handleDeleteRiskLimit
-  } = useDashboardPortfolioActions({
+  const portfolioActions = useDashboardPortfolioActions({
     activePortfolio,
     portfolioName,
     portfolioBaseCurrency,
@@ -613,19 +447,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setRiskForm
   });
 
-  const {
-    updateLedgerForm,
-    handleOpenLedgerForm,
-    handleEditLedgerEntry,
-    handleCancelLedgerEdit,
-    handleSubmitLedgerEntry,
-    handleRequestDeleteLedgerEntry,
-    handleConfirmDeleteLedgerEntry,
-    handleCancelDeleteLedgerEntry,
-    handleChooseCsv,
-    handleImportHoldings,
-    handleImportPrices
-  } = useDashboardLedgerActions({
+  const ledgerActions = useDashboardLedgerActions({
     activePortfolio,
     ledgerForm,
     ledgerDeleteTarget,
@@ -643,66 +465,19 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setPricesCsvPath
   });
 
-  const {
-    refreshMarketTags,
-    resetMarketFilters,
-    refreshMarketTargets,
-    refreshMarketTargetsDiff,
-    refreshMarketIngestRuns,
-    refreshMarketRegistry,
-    refreshMarketIngestRunDetail,
-    handleOpenMarketProvider,
-    handleSaveMarketToken,
-    handleClearMarketToken,
-    handleTestMarketToken,
-    handleToggleUniversePoolBucket,
-    handleSaveUniversePoolConfig,
-    handleTriggerMarketIngest,
-    handleSyncInstrumentCatalog,
-    handleSelectInstrument,
-    handleSelectTag,
-    handleSeedMarketDemoData,
-    handleAddUserTag,
-    handleRemoveUserTag,
-    handleAddManualTheme,
-    handleAddSelectedToWatchlist,
-    handleRemoveWatchlistItem,
-    handleAddTargetTag,
-    handlePreviewManualTargetSymbols,
-    handleApplyManualTargetSymbols,
-    handleRemoveManualPreviewSymbol,
-    handleRemoveTempTarget,
-    handlePromoteTempTarget,
-    handleSaveTargets,
-    handleResetTargetsDraft,
-    handleToggleTempTargetSelection,
-    handleSelectAllTempTargets,
-    handleBatchPromoteTempTargets,
-    handleBatchRemoveTempTargets,
-    handleBatchExtendTempTargets,
-    handlePauseMarketIngest,
-    handleResumeMarketIngest,
-    handleCancelMarketIngest,
-    updateMarketSchedulerConfig,
-    handleSaveMarketSchedulerConfig,
-    handleRunMarketIngestNow,
-    handleToggleRegistrySymbol,
-    handleToggleSelectAllRegistry,
-    handleSetRegistryAutoIngest,
-    handleBatchSetRegistryAutoIngest
-  } = useDashboardMarketOrchestration({
+  const marketOrchestration = useDashboardMarketOrchestration({
     activeView,
     otherTab,
     analysisTab,
     activePortfolioId,
     marketState,
-    marketEffectiveScope,
-    marketHoldingsSymbolsFiltered,
-    marketSearchResultSymbols,
-    marketFocusTargetSymbols,
-    marketTargetsDirty,
-    marketIngestControlState,
-    marketRegistryEntryEnabled,
+    marketEffectiveScope: marketDerived.marketEffectiveScope,
+    marketHoldingsSymbolsFiltered: marketDerived.marketHoldingsSymbolsFiltered,
+    marketSearchResultSymbols: marketDerived.marketSearchResultSymbols,
+    marketFocusTargetSymbols: marketAdminDerived.marketFocusTargetSymbols,
+    marketTargetsDirty: marketAdminDerived.marketTargetsDirty,
+    marketIngestControlState: marketAdminDerived.marketIngestControlState,
+    marketRegistryEntryEnabled: marketAdminDerived.marketRegistryEntryEnabled,
     toUserErrorMessage,
     loadSnapshot,
     setError,
@@ -713,434 +488,60 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   });
 
   return (
-    <div className="flex h-full bg-white/90 dark:bg-background-dark/80 backdrop-blur-xl overflow-hidden">
-      <SidebarNav
-        activeView={activeView}
-        isNavCollapsed={isNavCollapsed}
-        items={navItems}
-        onSelectView={(view) => setActiveView(view as WorkspaceView)}
-        onToggleCollapse={() => setIsNavCollapsed((prev) => !prev)}
-      />
-
-      {/* Main Content */}
-      <section className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white/85 dark:bg-background-dark/70 backdrop-blur-lg">
-        <TopToolbar
-          activeView={activeView}
-          otherTab={otherTab}
-          navItems={navItems}
-          marketPriceAsOf={snapshot?.priceAsOf ?? null}
-          onLock={onLock}
-        />
-
-        {activeView === "portfolio" && (
-          <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
-            <div className="flex items-center gap-0 overflow-x-auto px-3">
-              {portfolioTabs.map((tab) => {
-                const isActive = portfolioTab === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-	                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
-	                      isActive
-	                        ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
-	                        : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
-	                    }`}
-                    onClick={() => setPortfolioTab(tab.key)}
-                  >
-                    <span className="material-icons-outlined text-base">{tab.icon}</span>
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div
-          className={`flex-1 p-0 scroll-smooth ${
-            activeView === "market" ? "overflow-hidden" : "overflow-y-auto"
-          }`}
-        >
-          
-          {/* View: Account */}
-          {activeView === "account" && (
-            <AccountView account={account} formatDateTime={formatDateTime} />
-          )}
-
-          {/* View: Portfolio */}
-          {activeView === "portfolio" && (
-            <PortfolioView
-              {...{
-                Badge,
-                Button,
-                DataQualityCard,
-                DescriptionItem,
-                EmptyState,
-                ErrorState,
-                FormGroup,
-                HHI_WARN_THRESHOLD,
-                IconButton,
-                Input,
-                LedgerForm,
-                LedgerTable,
-                Panel,
-                PerformanceChart,
-                PlaceholderPanel,
-                RiskMetricCard,
-                Select,
-                SummaryCard,
-                ...portfolioState,
-                activePortfolio,
-                activePortfolioId,
-                assetClassLabels,
-                cashFlowTotals,
-                cashTotal,
-                dataQuality,
-                filteredLedgerEntries,
-                formatAssetClassLabel,
-                formatCurrency,
-                formatDateRange,
-                formatNumber,
-                formatPct,
-                formatPctNullable,
-                formatPerformanceMethod,
-                handleCancelEditPosition,
-                handleCancelLedgerEdit,
-                handleCreatePortfolio,
-                handleDeletePortfolio,
-                handleDeletePosition,
-                handleEditLedgerEntry,
-                handleEditPosition,
-                handleOpenLedgerForm,
-                handleRenamePortfolio,
-                handleRequestDeleteLedgerEntry,
-                handleSubmitLedgerEntry,
-                handleSubmitPosition,
-                hhiValue,
-                isLoading,
-                ledgerEventTypeOptions,
-                loadLedgerEntries,
-                loadPerformance,
-                performanceError,
-                performanceLoading,
-                performance,
-                performanceRange,
-                performanceRanges,
-                performanceResult,
-                performanceSeries,
-                portfolioTab,
-                portfolioTabs,
-                portfolios,
-                riskAnnualized,
-                riskMetrics,
-                selectedPerformance,
-                setActivePortfolioId,
-                setActiveView,
-                setAnalysisTab,
-                setOtherTab,
-                setPerformanceError,
-                setPerformanceRange,
-                setRiskAnnualized,
-                snapshot,
-                toUserErrorMessage,
-                updateLedgerForm,
-              }}
-            />
-          )}
-
-          {/* View: Risk */}
-          {activeView === "risk" && (
-            <RiskView
-              snapshot={snapshot}
-              formatAssetClassLabel={formatAssetClassLabel}
-              formatPct={formatPct}
-              formatCurrency={formatCurrency}
-              formatRiskLimitTypeLabel={formatRiskLimitTypeLabel}
-              handleEditRiskLimit={handleEditRiskLimit}
-              handleDeleteRiskLimit={handleDeleteRiskLimit}
-              riskForm={riskForm}
-              setRiskForm={setRiskForm}
-              riskLimitTypeLabels={riskLimitTypeLabels}
-              handleSubmitRiskLimit={handleSubmitRiskLimit}
-              handleCancelRiskEdit={handleCancelRiskEdit}
-            />
-          )}
-
-          {/* View: Data Analysis */}
-          {activeView === "data-analysis" && (
-            <DataAnalysisView
-              {...{
-                Badge,
-                CONTRIBUTION_TOP_N,
-                ChartErrorBoundary,
-                ContributionTable,
-                EmptyState,
-                ErrorState,
-                Input,
-                MarketAreaChart,
-                Panel,
-                PerformanceChart,
-                PlaceholderPanel,
-                RiskMetricCard,
-                SummaryCard,
-                ...analysisState,
-                activePortfolio,
-                activePortfolioId,
-                analysisInstrumentHasEnoughData,
-                analysisInstrumentHoldingUnitCost,
-                analysisInstrumentLatestBar,
-                analysisInstrumentNameBySymbol,
-                analysisInstrumentPositionValuation,
-                analysisInstrumentQuickSymbols,
-                analysisInstrumentRangeSummary,
-                analysisInstrumentTargetPrice,
-                analysisInstrumentTone,
-                analysisTab,
-                analysisTabs,
-                contributionBreakdown,
-                formatCnWanYiNullable,
-                formatDateRange,
-                formatNumber,
-                formatPctNullable,
-                formatPerformanceMethod,
-                formatSignedPctNullable,
-                loadAnalysisInstrument,
-                loadPerformance,
-                marketChartRanges,
-                performanceError,
-                performanceLoading,
-                performance,
-                performanceRange,
-                performanceRanges,
-                performanceResult,
-                performanceSeries,
-                riskAnnualized,
-                riskMetrics,
-                selectedPerformance,
-                setAnalysisTab,
-                setPerformanceError,
-                setPerformanceRange,
-                setRiskAnnualized,
-                setShowAllAssetContribution,
-                setShowAllSymbolContribution,
-                showAllAssetContribution,
-                showAllSymbolContribution,
-                toUserErrorMessage
-              }}
-            />
-          )}
-
-          {/* View: Market */}
-          {activeView === "market" && (
-            <MarketView
-              {...{
-                ...marketState,
-                Button,
-                ChartErrorBoundary,
-                FormGroup,
-                IconButton,
-                Input,
-                MarketAreaChart,
-                MarketQuoteHeader,
-                MarketVolumeMiniChart,
-                Modal,
-                PopoverSelect,
-                formatCnDate,
-                formatCnWanYiNullable,
-                formatNumber,
-                formatSignedCnWanYiNullable,
-                formatSignedPctNullable,
-                formatThemeLabel,
-                getCnChangeTone,
-                getCnToneTextClass,
-                handleAddManualTheme,
-                handleAddSelectedToWatchlist,
-                handleAddTargetTag,
-                handleAddUserTag,
-                handleMarketExplorerResizeKeyDown,
-                handleMarketExplorerResizePointerDown,
-                handleRemoveUserTag,
-                handleRemoveWatchlistItem,
-                handleSelectInstrument,
-                handleSelectTag,
-                handleSyncInstrumentCatalog,
-                marketActiveMoneyflowRatio,
-                marketActiveMoneyflowVol,
-                marketActiveVolume,
-                marketChartHasEnoughData,
-                marketChartRanges,
-                marketCollectionSelectValue,
-                marketEffectiveScope,
-                marketFilteredListSymbols,
-                marketFiltersActiveCount,
-                marketHoldingUnitCost,
-                marketHoldingsSymbols,
-                marketHoldingsSymbolsFiltered,
-                marketLatestBar,
-                marketNameBySymbol,
-                marketRangeSummary,
-                marketSearchResultsFiltered,
-                marketSelectedIndustry,
-                marketSelectedManualThemes,
-                marketSelectedPlainUserTags,
-                marketSelectedQuote,
-                marketSelectedTagAggregate,
-                marketSelectedTagSeriesReturnPct,
-                marketSelectedTagSeriesTone,
-                marketSelectedThemes,
-                marketTagSeriesLatestCoverageLabel,
-                marketTargetPrice,
-                refreshMarketTags,
-                resetMarketFilters,
-                snapshot,
-                sortTagMembersByChangePct,
-              }}
-            />
-          )}
-
-          {/* View: Other */}
-          {activeView === "other" && (
-            <OtherView
-              {...{
-                ...marketState,
-                ...portfolioState,
-                Button,
-                FormGroup,
-                HelpHint,
-                Input,
-                Modal,
-                Panel,
-                PopoverSelect,
-                UNIVERSE_POOL_BUCKET_ORDER,
-                activePortfolio,
-                dataQuality,
-                formatCnDate,
-                formatDateTime,
-                formatDurationMs,
-                formatIngestControlStateLabel,
-                formatIngestRunModeLabel,
-                formatIngestRunScopeLabel,
-                formatIngestRunStatusLabel,
-                formatIngestRunTone,
-                formatMarketTokenSource,
-                formatPctNullable,
-                formatTagSourceLabel,
-                formatTargetsReasons,
-                getIngestControlStateDotClass,
-                getUniversePoolBucketLabel,
-                handleApplyManualTargetSymbols,
-                handleBatchExtendTempTargets,
-                handleBatchPromoteTempTargets,
-                handleBatchRemoveTempTargets,
-                handleBatchSetRegistryAutoIngest,
-                handleCancelMarketIngest,
-                handleChooseCsv,
-                handleClearMarketToken,
-                handleImportHoldings,
-                handleImportPrices,
-                handleOpenMarketProvider,
-                handlePauseMarketIngest,
-                handlePreviewManualTargetSymbols,
-                handlePromoteTempTarget,
-                handleRemoveManualPreviewSymbol,
-                handleRemoveTempTarget,
-                handleResetTargetsDraft,
-                handleResumeMarketIngest,
-                handleRunMarketIngestNow,
-                handleSaveMarketSchedulerConfig,
-                handleSaveMarketToken,
-                handleSaveTargets,
-                handleSaveUniversePoolConfig,
-                handleSeedMarketDemoData,
-                handleSelectAllTempTargets,
-                handleSetRegistryAutoIngest,
-                handleTargetsEditorResizeKeyDown,
-                handleTargetsEditorResizePointerDown,
-                handleTestMarketToken,
-                handleToggleDiffSection,
-                handleToggleRegistrySymbol,
-                handleToggleSelectAllRegistry,
-                handleToggleTargetsSection,
-                handleToggleTempTargetSelection,
-                handleToggleUniversePoolBucket,
-                handleTriggerMarketIngest,
-                latestMarketIngestRun,
-                marketActiveTargetPoolStats,
-                marketCanCancelIngest,
-                marketCanPauseIngest,
-                marketCanResumeIngest,
-                marketCanTriggerIngestNow,
-                marketFilteredAddedSymbols,
-                marketFilteredReasonChangedSymbols,
-                marketFilteredRemovedSymbols,
-                marketRegistryEntryEnabled,
-                marketSchedulerDirty,
-                marketSchedulerTimezoneOptions,
-                marketTargetPoolMetricCards,
-                marketTargetsDirty,
-                marketUniverseBucketStatusById,
-                marketUniverseEnabledBuckets,
-                marketUniversePoolDirty,
-                otherTab,
-                otherTabs,
-                refreshMarketIngestRunDetail,
-                refreshMarketIngestRuns,
-                refreshMarketRegistry,
-                refreshMarketTags,
-                refreshMarketTargets,
-                refreshMarketTargetsDiff,
-                setActiveView,
-                setOtherTab,
-                snapshot,
-                targetsEditorGridRef,
-                updateMarketSchedulerConfig,
-              }}
-            />
-          )}
-
-          {/* Placeholders */}
-          {["opportunities", "backtest", "insights", "alerts", "index-tracking"].includes(activeView) && (
-            <PlaceholderPanel 
-              title={navItems.find(n => n.key === activeView)?.label ?? ""}
-              description={navItems.find(n => n.key === activeView)?.description ?? ""}
-            />
-          )}
-
-        </div>
-
-        <DashboardOverlays
-          {...{
-            ...marketState,
-            Button,
-            ConfirmDialog,
-            Input,
-            error,
-            formatPct,
-            formatTargetsReasons,
-            handleCancelDeleteLedgerEntry,
-            handleConfirmDeleteLedgerEntry,
-            ledgerDeleteSummary,
-            ledgerDeleteTarget,
-            marketActiveTargetPoolStats,
-            marketCurrentTargetsSource,
-            marketFilteredCurrentTargets,
-            marketTargetPoolActiveCategoryRow,
-            marketTargetPoolDetailCategoryRows,
-            marketTargetPoolDetailDescription,
-            marketTargetPoolDetailMembers,
-            marketTargetPoolDetailTitle,
-            marketTargetPoolDetailValue,
-            notice,
-            setError,
-            setNotice,
-            toastMessage,
-          }}
-        />
-
-      </section>
-    </div>
+    <DashboardContainerLayout
+      account={account}
+      onLock={onLock}
+      activeView={activeView}
+      setActiveView={setActiveView}
+      isNavCollapsed={isNavCollapsed}
+      setIsNavCollapsed={setIsNavCollapsed}
+      otherTab={otherTab}
+      setOtherTab={setOtherTab}
+      analysisTab={analysisTab}
+      setAnalysisTab={setAnalysisTab}
+      portfolioTab={portfolioTab}
+      setPortfolioTab={setPortfolioTab}
+      snapshot={snapshot}
+      activePortfolio={activePortfolio}
+      activePortfolioId={activePortfolioId}
+      setActivePortfolioId={setActivePortfolioId}
+      portfolios={portfolios}
+      isLoading={isLoading}
+      error={error}
+      notice={notice}
+      setError={setError}
+      setNotice={setNotice}
+      performanceRange={performanceRange}
+      setPerformanceRange={setPerformanceRange}
+      performanceLoading={performanceLoading}
+      performanceError={performanceError}
+      setPerformanceError={setPerformanceError}
+      performanceResult={performanceResult}
+      riskAnnualized={riskAnnualized}
+      setRiskAnnualized={setRiskAnnualized}
+      showAllSymbolContribution={showAllSymbolContribution}
+      setShowAllSymbolContribution={setShowAllSymbolContribution}
+      showAllAssetContribution={showAllAssetContribution}
+      setShowAllAssetContribution={setShowAllAssetContribution}
+      portfolioState={portfolioState}
+      analysisState={analysisState}
+      marketState={marketState}
+      marketAdminDerived={marketAdminDerived}
+      marketTargetPoolDetail={marketTargetPoolDetail}
+      marketDerived={marketDerived}
+      analysisDerived={analysisDerived}
+      portfolioDerived={portfolioDerived}
+      portfolioActions={portfolioActions}
+      ledgerActions={ledgerActions}
+      marketOrchestration={marketOrchestration}
+      loadLedgerEntries={loadLedgerEntries}
+      loadPerformance={loadPerformance}
+      loadAnalysisInstrument={loadAnalysisInstrument}
+      targetsEditorGridRef={targetsEditorGridRef}
+      handleMarketExplorerResizePointerDown={handleMarketExplorerResizePointerDown}
+      handleMarketExplorerResizeKeyDown={handleMarketExplorerResizeKeyDown}
+      handleTargetsEditorResizePointerDown={handleTargetsEditorResizePointerDown}
+      handleTargetsEditorResizeKeyDown={handleTargetsEditorResizeKeyDown}
+    />
   );
 }
