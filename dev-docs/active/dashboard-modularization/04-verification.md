@@ -534,3 +534,11 @@
     - `OtherDataManagementTargetPoolSection.tsx`: `572` lines
     - `OtherDataManagementRegistrySection.tsx`: `169` lines
     - `OtherDataManagementIngestSection.tsx`: `55` lines
+- 2026-02-10 (after splitting `OtherDataManagementTargetPoolSection` into editor/diff panes):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetPoolSection.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetPoolEditorPane.tsx apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetPoolDiffPane.tsx`
+    - `OtherDataManagementTargetPoolSection.tsx`: `106` lines
+    - `OtherDataManagementTargetPoolEditorPane.tsx`: `243` lines
+    - `OtherDataManagementTargetPoolDiffPane.tsx`: `241` lines

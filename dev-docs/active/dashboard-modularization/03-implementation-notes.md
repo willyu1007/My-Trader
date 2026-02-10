@@ -192,3 +192,8 @@
   - 本轮后行数变化：
     - `OtherDataManagementTab.tsx`: `1373` -> `18`
     - 新增子文件总计 `1409` 行（结构化拆分，无功能变更）。
+- 2026-02-10（继续拆分 `TargetPoolSection`）
+  - 新增 `OtherDataManagementTargetPoolEditorPane.tsx`，承接目标池编辑左栏（同步范围、手动 symbol 解析与预览）。
+  - 新增 `OtherDataManagementTargetPoolDiffPane.tsx`，承接目标池差异右栏（结构看板、added/removed/reasonChanged 差异列表）。
+  - `OtherDataManagementTargetPoolSection.tsx` 收敛为壳层（标题+顶部操作+两栏布局+resizer），通过子组件组合渲染。
+  - 行数变化：`TargetPoolSection.tsx` `572` -> `106`。
