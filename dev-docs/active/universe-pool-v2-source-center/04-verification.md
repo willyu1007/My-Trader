@@ -28,3 +28,23 @@
 - 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（回退到取消一级配置前结构后复验）
 - 2026-02-11 `pnpm -C apps/frontend build` ✅（回退到取消一级配置前结构后复验）
 - 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左侧目录标题恢复为“全量池目录”后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（目录折叠入口并入“全量池目录”标题并移除收起文案后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（目录标题/状态搬迁/筛选增强后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左侧二级状态宽度压缩与简写后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（左侧二级状态宽度压缩与简写后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（二级胶囊再压缩 + 一级未测去外框后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（二级胶囊再压缩 + 一级未测去外框后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（右侧去标题/子令牌配置命名/二级表格化后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（右侧去标题/子令牌配置命名/二级表格化后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（二级模块无内框/表头强化/连通性帮助提示后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（二级模块无内框/表头强化/连通性帮助提示后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（连通性提示换行+操作列收窄后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（连通性提示换行+操作列收窄后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（规划中模块禁止纳入同步后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（规划中模块禁止纳入同步后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（右侧紧凑化 + 左右筛选联动后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（右侧紧凑化 + 左右筛选联动后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（子令牌配置去外框+右侧上移后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（子令牌配置去外框+右侧上移后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左侧展开交互分离+右侧下调后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（左侧展开交互分离+右侧下调后复验）
