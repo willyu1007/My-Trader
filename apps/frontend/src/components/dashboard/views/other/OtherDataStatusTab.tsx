@@ -1,4 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import type {
+  ConnectivityTestRecord,
+  MarketTokenMatrixStatus
+} from "@mytrader/shared";
 
 import type { OtherViewProps } from "../OtherView";
 
@@ -50,6 +55,49 @@ export function OtherDataStatusTab({
   refreshMarketIngestRuns,
   snapshot
 }: OtherDataStatusTabProps) {
+  const [tokenMatrix, setTokenMatrix] = useState<MarketTokenMatrixStatus | null>(null);
+  const [connectivityTests, setConnectivityTests] = useState<ConnectivityTestRecord[]>([]);
+
+  useEffect(() => {
+    const mytrader = window.mytrader;
+    if (!mytrader) return;
+    void (async () => {
+      try {
+        const [matrix, tests] = await Promise.all([
+          mytrader.market.getTokenMatrixStatus(),
+          mytrader.market.listConnectivityTests()
+        ]);
+        setTokenMatrix(matrix);
+        setConnectivityTests(tests);
+      } catch {
+        setTokenMatrix(null);
+        setConnectivityTests([]);
+      }
+    })();
+  }, [marketIngestRuns.length, marketTokenStatus?.configured]);
+
+  const pendingConnectivityCount = useMemo(
+    () =>
+      connectivityTests.filter(
+        (item) =>
+          item.scope === "module" &&
+          (item.status === "untested" ||
+            item.status === "fail" ||
+            (item.status === "pass" && item.stale))
+      ).length,
+    [connectivityTests]
+  );
+
+  const domainOverrideCount = useMemo(
+    () =>
+      tokenMatrix
+        ? Object.values(tokenMatrix.domains).filter(
+            (item) => item.source === "domain_override"
+          ).length
+        : 0,
+    [tokenMatrix]
+  );
+
   const dedupedIngestRuns = useMemo(() => {
     const seen = new Set<string>();
     return marketIngestRuns.filter((run) => {
@@ -109,13 +157,17 @@ export function OtherDataStatusTab({
             Token
           </div>
           <div className="text-sm text-slate-700 dark:text-slate-300 font-mono">
-            {marketTokenStatus?.configured ? "已配置" : "未配置"}
+            {tokenMatrix?.mainConfigured ? "主令牌已配置" : "主令牌未配置"}
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            来源{" "}
-            {marketTokenStatus
-              ? formatMarketTokenSource(marketTokenStatus.source)
-              : "--"}
+          <div className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
+            <div>域覆盖 {domainOverrideCount}</div>
+            <div>待测试模块 {pendingConnectivityCount}</div>
+            <div>
+              兼容来源{" "}
+              {marketTokenStatus
+                ? formatMarketTokenSource(marketTokenStatus.source)
+                : "--"}
+            </div>
           </div>
         </div>
       </div>

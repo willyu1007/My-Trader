@@ -1,4 +1,5 @@
 import type {
+  DataDomainId,
   IngestRunMode,
   MarketDataSource,
   TushareIngestItem,
@@ -10,9 +11,9 @@ import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analy
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import type { SqliteDatabase } from "../storage/sqlite";
 import {
-  getMarketUniversePoolConfig,
   updateMarketUniversePoolBucketStates
 } from "../storage/marketSettingsRepository";
+import { getMarketDataSourceConfig } from "../storage/marketDataSourceRepository";
 import { upsertDailyBasics } from "./dailyBasicRepository";
 import { upsertDailyMoneyflows } from "./dailyMoneyflowRepository";
 import { createIngestRun, finishIngestRun } from "./ingestRunsRepository";
@@ -27,6 +28,10 @@ import {
   normalizeNumber,
   toTushareDate
 } from "./providers/tushareBulkFetch";
+import {
+  getDataDomainCatalogItem,
+  toLegacyUniversePoolBuckets
+} from "./dataSourceCatalog";
 import { resolveAutoIngestItems } from "./targetsService";
 import {
   getLatestOpenTradeDate,
@@ -207,13 +212,39 @@ export async function runUniverseIngest(input: {
 
       await syncDuckdbTradeCalendar(handle, input.marketDb, "CN", today);
 
-      const universePoolConfig = await getMarketUniversePoolConfig(input.businessDb);
+      const dataSourceConfig = await getMarketDataSourceConfig(input.businessDb);
+      const selectedBuckets = toLegacyUniversePoolBuckets(dataSourceConfig);
+      const selectedDomains = Object.entries(dataSourceConfig.domains)
+        .filter(([, domain]) => domain.enabled)
+        .map(([domainId]) => domainId);
+      const selectedModules = Object.entries(dataSourceConfig.domains).flatMap(
+        ([domainId, domainConfig]) => {
+          const domainCatalog = getDataDomainCatalogItem(
+            domainId as DataDomainId
+          );
+          if (!domainConfig.enabled || !domainCatalog) return [];
+          return domainCatalog.modules
+            .filter(
+              (module) =>
+                module.implemented &&
+                module.syncCapable &&
+                Boolean(domainConfig.modules[module.id]?.enabled)
+            )
+            .map((module) => ({
+              domainId,
+              moduleId: module.id
+            }));
+        }
+      );
+      if (selectedBuckets.length === 0) {
+        throw new Error("当前未启用可同步的全量池模块。");
+      }
       const { stockSymbols, etfSymbols, catalogInserted, catalogUpdated, bucketCounts } =
         await syncUniverseInstrumentMeta(
         input.marketDb,
         handle,
         token,
-        universePoolConfig.enabledBuckets,
+        selectedBuckets,
         input.control
       );
 
@@ -255,14 +286,19 @@ export async function runUniverseIngest(input: {
         meta: {
           ...(input.meta ?? {}),
           windowYears: 3,
-          selectedBuckets: universePoolConfig.enabledBuckets,
+          selectedBuckets,
+          selectedDomains: getMetaArray(input.meta?.selectedDomains, selectedDomains),
+          selectedModules: getMetaArray(input.meta?.selectedModules, selectedModules),
+          blockedModules: getMetaArray(input.meta?.blockedModules, []),
+          tokenSourcesByDomain:
+            (input.meta?.tokenSourcesByDomain as Record<string, string> | undefined) ?? {},
           instrumentCatalog: { inserted: catalogInserted, updated: catalogUpdated },
           lastTradeDate: lastDone,
           universeCounts: { stocks: stockSymbols.size, etfs: etfSymbols.size },
           bucketCounts
         }
       });
-      const updatedBuckets = universePoolConfig.enabledBuckets.filter(
+      const updatedBuckets = selectedBuckets.filter(
         (bucket) => (bucketCounts[bucket] ?? 0) > 0
       );
       await updateMarketUniversePoolBucketStates(input.businessDb, {
@@ -293,6 +329,10 @@ export async function runUniverseIngest(input: {
       if (handle) await handle.close();
     }
   });
+}
+
+function getMetaArray<T>(value: unknown, fallback: T[]): T[] {
+  return Array.isArray(value) ? (value as T[]) : fallback;
 }
 
 async function ingestTargetsRange(

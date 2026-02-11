@@ -1,10 +1,6 @@
 import { createElement } from "react";
 
 import {
-  OtherDataManagementIngestSection,
-  type OtherDataManagementIngestSectionProps
-} from "./data-management/OtherDataManagementIngestSection";
-import {
   OtherDataManagementRegistrySection,
   type OtherDataManagementRegistrySectionProps
 } from "./data-management/OtherDataManagementRegistrySection";
@@ -24,44 +20,19 @@ import {
 export type OtherDataManagementTabProps = OtherDataManagementSourceSectionProps &
   OtherDataManagementSchedulerSectionProps &
   OtherDataManagementTargetPoolSectionProps &
-  OtherDataManagementRegistrySectionProps &
-  OtherDataManagementIngestSectionProps;
+  OtherDataManagementRegistrySectionProps;
 
 export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
   const sourceSectionProps = {
     formatDateTime: props.formatDateTime,
     formatIngestRunStatusLabel: props.formatIngestRunStatusLabel,
     formatIngestRunTone: props.formatIngestRunTone,
-    formatMarketTokenSource: props.formatMarketTokenSource,
     latestMarketIngestRun: props.latestMarketIngestRun,
     marketTempTargets: props.marketTempTargets,
-    marketTokenStatus: props.marketTokenStatus,
     snapshot: props.snapshot,
     Button: props.Button,
-    HelpHint: props.HelpHint,
     Input: props.Input,
-    PopoverSelect: props.PopoverSelect,
-    handleClearMarketToken: props.handleClearMarketToken,
-    handleOpenMarketProvider: props.handleOpenMarketProvider,
-    handleSaveMarketToken: props.handleSaveMarketToken,
-    handleTestMarketToken: props.handleTestMarketToken,
-    marketTokenDraft: props.marketTokenDraft,
-    marketTokenProvider: props.marketTokenProvider,
-    marketTokenSaving: props.marketTokenSaving,
-    marketTokenTesting: props.marketTokenTesting,
-    setMarketTokenDraft: props.setMarketTokenDraft,
-    setMarketTokenProvider: props.setMarketTokenProvider,
-    UNIVERSE_POOL_BUCKET_ORDER: props.UNIVERSE_POOL_BUCKET_ORDER,
-    formatCnDate: props.formatCnDate,
-    getUniversePoolBucketLabel: props.getUniversePoolBucketLabel,
-    handleSaveUniversePoolConfig: props.handleSaveUniversePoolConfig,
-    handleToggleUniversePoolBucket: props.handleToggleUniversePoolBucket,
-    marketUniverseBucketStatusById: props.marketUniverseBucketStatusById,
-    marketUniverseEnabledBuckets: props.marketUniverseEnabledBuckets,
-    marketUniversePoolConfig: props.marketUniversePoolConfig,
-    marketUniversePoolDirty: props.marketUniversePoolDirty,
-    marketUniversePoolLoading: props.marketUniversePoolLoading,
-    marketUniversePoolSaving: props.marketUniversePoolSaving
+    PopoverSelect: props.PopoverSelect
   } satisfies OtherDataManagementSourceSectionProps;
   const schedulerSectionProps = {
     Button: props.Button,
@@ -88,7 +59,6 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
     marketSchedulerLoading: props.marketSchedulerLoading,
     marketSchedulerSaving: props.marketSchedulerSaving,
     marketSchedulerTimezoneOptions: props.marketSchedulerTimezoneOptions,
-    marketTokenStatus: props.marketTokenStatus,
     marketTriggerIngestBlockedMessage: props.marketTriggerIngestBlockedMessage,
     marketTriggerIngestBlockedOpen: props.marketTriggerIngestBlockedOpen,
     setMarketSchedulerAdvancedOpen: props.setMarketSchedulerAdvancedOpen,
@@ -154,20 +124,12 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
     setMarketRegistryAutoFilter: props.setMarketRegistryAutoFilter,
     setMarketRegistryQuery: props.setMarketRegistryQuery
   } satisfies OtherDataManagementRegistrySectionProps;
-  const ingestSectionProps = {
-    Button: props.Button,
-    handleTriggerMarketIngest: props.handleTriggerMarketIngest,
-    marketIngestTriggering: props.marketIngestTriggering,
-    setOtherTab: props.setOtherTab
-  } satisfies OtherDataManagementIngestSectionProps;
-
   return (
     <>
       {createElement(OtherDataManagementSourceSection, sourceSectionProps)}
       {createElement(OtherDataManagementSchedulerSection, schedulerSectionProps)}
       {createElement(OtherDataManagementTargetPoolSection, targetPoolSectionProps)}
       {createElement(OtherDataManagementRegistrySection, registrySectionProps)}
-      {createElement(OtherDataManagementIngestSection, ingestSectionProps)}
     </>
   );
 }

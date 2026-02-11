@@ -146,9 +146,7 @@ export function useDashboardMarketAdminDerived<
 
   const marketIngestControlState: IngestControlState =
     options.marketIngestControlStatus?.state ?? "idle";
-  const marketCanTriggerIngestNow =
-    !options.marketIngestControlUpdating &&
-    Boolean(options.marketTokenStatus?.configured);
+  const marketCanTriggerIngestNow = !options.marketIngestControlUpdating;
   const marketCanPauseIngest =
     !options.marketIngestControlUpdating && marketIngestControlState === "running";
   const marketCanResumeIngest =

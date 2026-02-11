@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type {
+  DataSourceReadinessResult,
   MarketTokenStatus,
   MarketUniversePoolConfig,
   MarketUniversePoolOverview
@@ -36,6 +37,8 @@ export interface UseDashboardMarketAdminActionsOptions {
   >;
   setMarketUniversePoolSaving: Dispatch<SetStateAction<boolean>>;
   setMarketIngestTriggering: Dispatch<SetStateAction<boolean>>;
+  setMarketTriggerIngestBlockedOpen?: Dispatch<SetStateAction<boolean>>;
+  setMarketTriggerIngestBlockedMessage?: Dispatch<SetStateAction<string>>;
 }
 
 export function useDashboardMarketAdminActions(
@@ -192,6 +195,17 @@ export function useDashboardMarketAdminActions(
       options.setNotice(null);
       options.setMarketIngestTriggering(true);
       try {
+        const readiness = await window.mytrader.market.validateDataSourceReadiness({
+          scope
+        });
+        if (!readiness.ready) {
+          const message = formatReadinessBlockMessage(readiness);
+          options.setError(message);
+          options.setMarketTriggerIngestBlockedMessage?.(message);
+          options.setMarketTriggerIngestBlockedOpen?.(true);
+          return;
+        }
+
         await window.mytrader.market.triggerIngest({ scope });
         options.setNotice("拉取任务已加入队列。");
         await Promise.all([
@@ -227,4 +241,15 @@ export function useDashboardMarketAdminActions(
     handleSaveUniversePoolConfig,
     handleTriggerMarketIngest
   };
+}
+
+function formatReadinessBlockMessage(readiness: DataSourceReadinessResult): string {
+  const issues = readiness.issues.filter((item) => item.level === "error");
+  if (issues.length === 0) {
+    return "数据来源尚未就绪，请先完成配置与测试。";
+  }
+  return issues
+    .slice(0, 8)
+    .map((item, index) => `${index + 1}. ${item.message}`)
+    .join("\n");
 }

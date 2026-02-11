@@ -97,6 +97,8 @@ type MarketStateForAdminActions = Pick<
   | "setMarketUniversePoolOverview"
   | "setMarketUniversePoolSaving"
   | "setMarketIngestTriggering"
+  | "setMarketTriggerIngestBlockedOpen"
+  | "setMarketTriggerIngestBlockedMessage"
 > & {
   marketUniversePoolConfig: UseDashboardMarketAdminActionsOptions["marketUniversePoolConfig"];
 };
@@ -331,7 +333,11 @@ export function useDashboardMarketOrchestration(
       options.marketState.setMarketUniversePoolSavedConfig,
     setMarketUniversePoolOverview: options.marketState.setMarketUniversePoolOverview,
     setMarketUniversePoolSaving: options.marketState.setMarketUniversePoolSaving,
-    setMarketIngestTriggering: options.marketState.setMarketIngestTriggering
+    setMarketIngestTriggering: options.marketState.setMarketIngestTriggering,
+    setMarketTriggerIngestBlockedOpen:
+      options.marketState.setMarketTriggerIngestBlockedOpen,
+    setMarketTriggerIngestBlockedMessage:
+      options.marketState.setMarketTriggerIngestBlockedMessage
   });
 
   const setMarketScopeToTags = useCallback(() => {

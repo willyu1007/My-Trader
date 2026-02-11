@@ -13,8 +13,8 @@ export function createMainWindow() {
 
   const isDev = Boolean(config.devServerUrl);
   const mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width: 1375,
+    height: 874,
     show: !isDev,
     webPreferences: {
       contextIsolation: true,

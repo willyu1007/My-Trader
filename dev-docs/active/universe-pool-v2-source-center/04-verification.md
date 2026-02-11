@@ -1,0 +1,30 @@
+# 04 Verification
+
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅
+- 2026-02-11 `pnpm -C apps/frontend build` ✅
+- 2026-02-11 `pnpm -C apps/backend typecheck` ✅
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（整块区域折叠改动后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（整块区域折叠改动后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（一级配置排版与下拉裁切修复后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（一级配置排版与下拉裁切修复后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左侧筛选栏与二级目录排版调整后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（左侧筛选栏与二级目录排版调整后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左/右去表框与二级列表卡片化后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（左/右去表框与二级列表卡片化后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（顶部主操作区重排后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（顶部主操作区重排后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（保存提示/文案/尺寸细化后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（保存提示/文案/尺寸细化后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（四按钮对齐改造后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（四按钮对齐改造后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（右侧去一级配置与去折叠后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（右侧去一级配置与去折叠后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左侧图标按钮细化与右侧字段移除后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（左侧图标按钮细化与右侧字段移除后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（恢复一级域 token 配置入口后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（恢复一级域 token 配置入口后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（恢复整块目录区域折叠能力后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（恢复整块目录区域折叠能力后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（回退到取消一级配置前结构后复验）
+- 2026-02-11 `pnpm -C apps/frontend build` ✅（回退到取消一级配置前结构后复验）
+- 2026-02-11 `pnpm -C apps/frontend typecheck` ✅（左侧目录标题恢复为“全量池目录”后复验）

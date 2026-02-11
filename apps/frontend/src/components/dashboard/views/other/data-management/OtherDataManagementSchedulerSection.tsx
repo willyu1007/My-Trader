@@ -28,7 +28,6 @@ export type OtherDataManagementSchedulerSectionProps = Pick<
   | "marketSchedulerLoading"
   | "marketSchedulerSaving"
   | "marketSchedulerTimezoneOptions"
-  | "marketTokenStatus"
   | "marketTriggerIngestBlockedMessage"
   | "marketTriggerIngestBlockedOpen"
   | "setMarketSchedulerAdvancedOpen"
@@ -60,8 +59,8 @@ export function OtherDataManagementSchedulerSection(
             </div>
           )}
           {props.marketSchedulerConfig && (
-            <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_1.35fr] gap-3">
-              <div className="space-y-3 xl:pr-5 xl:border-r border-slate-200/70 dark:border-border-dark/70">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_1.35fr] gap-3">
+              <div className="space-y-3 lg:pr-5 lg:border-r border-slate-200/70 dark:border-border-dark/70">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <props.FormGroup
                     label={
@@ -138,7 +137,7 @@ export function OtherDataManagementSchedulerSection(
                 )}
               </div>
 
-              <div className="space-y-3 xl:pl-0">
+              <div className="space-y-3 lg:pl-0">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="space-y-1.5">
                     <div className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -181,14 +180,14 @@ export function OtherDataManagementSchedulerSection(
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   <props.Button
                     variant="secondary"
                     size="sm"
                     icon="pause"
                     onClick={props.handlePauseMarketIngest}
                     disabled={!props.marketCanPauseIngest}
-                    className="min-w-[108px] justify-center"
+                    className="w-full justify-center"
                   >
                     暂停
                   </props.Button>
@@ -198,20 +197,19 @@ export function OtherDataManagementSchedulerSection(
                     icon="play_arrow"
                     onClick={props.handleResumeMarketIngest}
                     disabled={!props.marketCanResumeIngest}
-                    className="min-w-[108px] justify-center"
+                    className="w-full justify-center"
                   >
                     继续
                   </props.Button>
-                  <span className="hidden md:block h-6 w-px mx-1 bg-slate-200 dark:bg-border-dark" />
                   <props.Button
                     variant="primary"
                     size="sm"
                     icon="play_circle"
                     onClick={props.handleRunMarketIngestNow}
                     disabled={!props.marketCanTriggerIngestNow}
-                    className="min-w-[124px] justify-center"
+                    className="w-full justify-center"
                   >
-                    执行拉取
+                    拉取
                   </props.Button>
                   <props.Button
                     variant="danger"
@@ -219,16 +217,11 @@ export function OtherDataManagementSchedulerSection(
                     icon="cancel"
                     onClick={props.handleCancelMarketIngest}
                     disabled={!props.marketCanCancelIngest}
-                    className="min-w-[124px] justify-center"
+                    className="w-full justify-center"
                   >
                     取消
                   </props.Button>
                 </div>
-                {!props.marketTokenStatus?.configured && (
-                  <div className="ui-tone-warning text-[11px]">
-                    执行拉取需要先配置可用的数据源令牌。
-                  </div>
-                )}
               </div>
             </div>
           )}

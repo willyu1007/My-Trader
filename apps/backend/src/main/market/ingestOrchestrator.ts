@@ -7,10 +7,14 @@ import {
   getPersistedIngestControlState,
   setPersistedIngestControlState
 } from "../storage/marketSettingsRepository";
-import { getResolvedTushareToken } from "../storage/marketTokenRepository";
+import {
+  getResolvedTokenForDomain,
+  getResolvedTushareToken
+} from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 import type { IngestExecutionControl } from "./marketIngestRunner";
 import { runTargetsIngest, runUniverseIngest } from "./marketIngestRunner";
+import { validateDataSourceReadiness } from "./dataSourceReadinessService";
 
 type OrchestratorScope = "targets" | "universe" | "both";
 type JobScope = Exclude<OrchestratorScope, "both">;
@@ -217,16 +221,40 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
   if (sessionId !== state.sessionId) return;
   const businessDb = requireBusinessDb();
   const marketDb = requireMarketDb();
-  const resolved = await getResolvedTushareToken(businessDb);
-  const token = resolved.token?.trim() ?? "";
+  const readiness = await validateDataSourceReadiness({
+    businessDb,
+    scope: job.scope
+  });
+  if (!readiness.ready) {
+    const message = buildReadinessBlockMessage(readiness.issues.map((item) => item.message));
+    if (job.source === "manual") {
+      throw new Error(message);
+    }
+    console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
+    return;
+  }
+
+  const tokenSourcesByDomain: Record<string, string> = {};
+  let token: string | null = null;
+  for (const domainId of readiness.selectedDomains) {
+    const resolved = await getResolvedTokenForDomain(businessDb, domainId);
+    tokenSourcesByDomain[domainId] = resolved.source;
+    if (!token && resolved.token) {
+      token = resolved.token;
+    }
+  }
 
   if (!token) {
+    const fallback = await getResolvedTushareToken(businessDb);
+    token = fallback.token?.trim() ?? null;
+  }
+
+  if (!token) {
+    const message = "未配置可用数据源令牌。";
     if (job.source === "manual") {
-      throw new Error("未配置 Tushare token。");
+      throw new Error(message);
     }
-    console.warn(
-      `[mytrader] ${job.source} ingest skipped: missing Tushare token.`
-    );
+    console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
     return;
   }
 
@@ -237,7 +265,14 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
       marketDb,
       token,
       mode: job.mode,
-      meta: { ...(job.meta ?? {}), source: job.source },
+      meta: {
+        ...(job.meta ?? {}),
+        source: job.source,
+        selectedDomains: readiness.selectedDomains,
+        selectedModules: readiness.selectedModules,
+        blockedModules: [],
+        tokenSourcesByDomain
+      },
       control
     });
     return;
@@ -252,9 +287,25 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
     analysisDbPath: state.analysisDbPath,
     token,
     mode: job.mode,
-    meta: { ...(job.meta ?? {}), source: job.source, windowYears: 3 },
+    meta: {
+      ...(job.meta ?? {}),
+      source: job.source,
+      windowYears: 3,
+      selectedDomains: readiness.selectedDomains,
+      selectedModules: readiness.selectedModules,
+      blockedModules: [],
+      tokenSourcesByDomain
+    },
     control
   });
+}
+
+function buildReadinessBlockMessage(messages: string[]): string {
+  if (messages.length === 0) {
+    return "数据来源未就绪。";
+  }
+  const lines = messages.slice(0, 8).map((item, index) => `${index + 1}. ${item}`);
+  return `数据来源未就绪：${lines.join(" | ")}`;
 }
 
 function buildControl(sessionId: number): IngestExecutionControl {

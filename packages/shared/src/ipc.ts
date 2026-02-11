@@ -560,6 +560,143 @@ export interface MarketTokenStatus {
   configured: boolean;
 }
 
+export type DataDomainId =
+  | "stock"
+  | "etf"
+  | "index"
+  | "public_fund"
+  | "futures"
+  | "spot"
+  | "options"
+  | "bond"
+  | "fx"
+  | "hk_stock"
+  | "us_stock"
+  | "industry_economy"
+  | "macro";
+
+export type DataSourceProviderStatus = "active" | "planned";
+
+export interface DataSourceProviderInfo {
+  id: string;
+  label: string;
+  status: DataSourceProviderStatus;
+  homepage: string | null;
+}
+
+export interface DataSourceModuleCatalogItem {
+  id: string;
+  label: string;
+  implemented: boolean;
+  syncCapable: boolean;
+  defaultEnabled: boolean;
+  providerIds: string[];
+}
+
+export interface DataSourceDomainCatalogItem {
+  id: DataDomainId;
+  label: string;
+  modules: DataSourceModuleCatalogItem[];
+}
+
+export interface MarketDataSourceCatalog {
+  providers: DataSourceProviderInfo[];
+  domains: DataSourceDomainCatalogItem[];
+  updatedAt: number;
+}
+
+export type DataSourceTokenMode = "inherit_main" | "override";
+
+export interface DataSourceModuleConfig {
+  enabled: boolean;
+}
+
+export interface DataSourceDomainConfig {
+  enabled: boolean;
+  provider: string;
+  tokenMode: DataSourceTokenMode;
+  modules: Record<string, DataSourceModuleConfig>;
+}
+
+export interface MarketDataSourceConfigV2 {
+  version: 2;
+  mainProvider: string;
+  domains: Record<DataDomainId, DataSourceDomainConfig>;
+}
+
+export type DomainTokenSource =
+  | "domain_override"
+  | "main"
+  | "env_fallback"
+  | "none";
+
+export interface DomainTokenStatus {
+  source: DomainTokenSource;
+  configured: boolean;
+}
+
+export interface MarketTokenMatrixStatus {
+  mainConfigured: boolean;
+  domains: Record<DataDomainId, DomainTokenStatus>;
+}
+
+export type ConnectivityTestScope = "domain" | "module";
+export type ConnectivityTestStatus = "untested" | "pass" | "fail" | "unsupported";
+
+export interface ConnectivityTestRecord {
+  scope: ConnectivityTestScope;
+  domainId: DataDomainId;
+  moduleId: string | null;
+  status: ConnectivityTestStatus;
+  testedAt: number | null;
+  message: string | null;
+  stale: boolean;
+}
+
+export interface SetMarketMainTokenInput {
+  token: string | null;
+}
+
+export interface SetMarketDomainTokenInput {
+  domainId: DataDomainId;
+  token: string | null;
+}
+
+export interface ClearMarketDomainTokenInput {
+  domainId: DataDomainId;
+}
+
+export interface TestMarketDomainConnectivityInput {
+  domainId: DataDomainId;
+}
+
+export interface TestMarketModuleConnectivityInput {
+  domainId: DataDomainId;
+  moduleId: string;
+}
+
+export interface ValidateDataSourceReadinessInput {
+  scope?: "targets" | "universe" | "both" | null;
+}
+
+export type DataSourceReadinessIssueLevel = "error" | "warning";
+
+export interface DataSourceReadinessIssue {
+  level: DataSourceReadinessIssueLevel;
+  code: string;
+  message: string;
+  domainId?: DataDomainId | null;
+  moduleId?: string | null;
+}
+
+export interface DataSourceReadinessResult {
+  ready: boolean;
+  selectedDomains: DataDomainId[];
+  selectedModules: { domainId: DataDomainId; moduleId: string }[];
+  issues: DataSourceReadinessIssue[];
+  updatedAt: number;
+}
+
 export interface SetMarketTokenInput {
   token: string | null;
 }
@@ -771,6 +908,25 @@ export interface MyTraderApi {
     getTokenStatus(): Promise<MarketTokenStatus>;
     setToken(input: SetMarketTokenInput): Promise<MarketTokenStatus>;
     testToken(input?: TestMarketTokenInput): Promise<void>;
+    getDataSourceCatalog(): Promise<MarketDataSourceCatalog>;
+    getDataSourceConfig(): Promise<MarketDataSourceConfigV2>;
+    setDataSourceConfig(
+      input: MarketDataSourceConfigV2
+    ): Promise<MarketDataSourceConfigV2>;
+    getTokenMatrixStatus(): Promise<MarketTokenMatrixStatus>;
+    setMainToken(input: SetMarketMainTokenInput): Promise<MarketTokenMatrixStatus>;
+    setDomainToken(
+      input: SetMarketDomainTokenInput
+    ): Promise<MarketTokenMatrixStatus>;
+    clearDomainToken(
+      input: ClearMarketDomainTokenInput
+    ): Promise<MarketTokenMatrixStatus>;
+    testDomainConnectivity(input: TestMarketDomainConnectivityInput): Promise<ConnectivityTestRecord>;
+    testModuleConnectivity(input: TestMarketModuleConnectivityInput): Promise<ConnectivityTestRecord>;
+    listConnectivityTests(): Promise<ConnectivityTestRecord[]>;
+    validateDataSourceReadiness(
+      input?: ValidateDataSourceReadinessInput
+    ): Promise<DataSourceReadinessResult>;
     openProviderHomepage(input: OpenMarketProviderInput): Promise<void>;
     listIngestRuns(input?: ListIngestRunsInput): Promise<MarketIngestRun[]>;
     getIngestRunDetail(input: GetIngestRunDetailInput): Promise<MarketIngestRun | null>;
@@ -849,6 +1005,17 @@ export const IPC_CHANNELS = {
   MARKET_TOKEN_GET_STATUS: "market:token:getStatus",
   MARKET_TOKEN_SET: "market:token:set",
   MARKET_TOKEN_TEST: "market:token:test",
+  MARKET_DATA_SOURCE_GET_CATALOG: "market:dataSource:getCatalog",
+  MARKET_DATA_SOURCE_GET_CONFIG: "market:dataSource:getConfig",
+  MARKET_DATA_SOURCE_SET_CONFIG: "market:dataSource:setConfig",
+  MARKET_TOKEN_GET_MATRIX_STATUS: "market:token:getMatrixStatus",
+  MARKET_TOKEN_SET_MAIN: "market:token:setMain",
+  MARKET_TOKEN_SET_DOMAIN: "market:token:setDomain",
+  MARKET_TOKEN_CLEAR_DOMAIN: "market:token:clearDomain",
+  MARKET_TEST_DOMAIN_CONNECTIVITY: "market:dataSource:testDomainConnectivity",
+  MARKET_TEST_MODULE_CONNECTIVITY: "market:dataSource:testModuleConnectivity",
+  MARKET_LIST_CONNECTIVITY_TESTS: "market:dataSource:listConnectivityTests",
+  MARKET_VALIDATE_SOURCE_READINESS: "market:dataSource:validateReadiness",
   MARKET_PROVIDER_OPEN: "market:provider:open",
   MARKET_INGEST_RUNS_LIST: "market:ingestRuns:list",
   MARKET_INGEST_RUN_GET: "market:ingestRuns:get",
