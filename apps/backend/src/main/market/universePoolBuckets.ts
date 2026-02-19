@@ -5,7 +5,8 @@ import type { ProviderInstrumentProfile } from "./providers/types";
 export const UNIVERSE_POOL_BUCKETS: UniversePoolBucketId[] = [
   "cn_a",
   "etf",
-  "precious_metal"
+  "metal_futures",
+  "metal_spot"
 ];
 
 const PRECIOUS_METAL_PATTERNS: RegExp[] = [
@@ -32,9 +33,14 @@ export function matchUniversePoolBuckets(
 
   if (profile.assetClass === "etf") {
     result.add("etf");
-    if (isPreciousMetalProfile(profile)) {
-      result.add("precious_metal");
-    }
+  }
+
+  if (profile.assetClass === "futures" && isPreciousMetalProfile(profile)) {
+    result.add("metal_futures");
+  }
+
+  if (profile.assetClass === "spot" && isPreciousMetalProfile(profile)) {
+    result.add("metal_spot");
   }
 
   return Array.from(result.values());

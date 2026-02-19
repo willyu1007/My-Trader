@@ -60,11 +60,13 @@ export const tushareProvider: MarketProvider = {
   },
 
   async fetchInstrumentCatalog(input): Promise<ProviderInstrumentProfile[]> {
-    const [stocks, funds] = await Promise.all([
+    const [stocks, funds, futures, spot] = await Promise.all([
       fetchStockBasic(input.token),
-      fetchFundBasic(input.token)
+      fetchFundBasic(input.token),
+      fetchFuturesBasic(input.token),
+      fetchSgeBasic(input.token)
     ]);
-    return [...stocks, ...funds];
+    return [...stocks, ...funds, ...futures, ...spot];
   },
 
   async fetchTradingCalendar(
@@ -370,6 +372,146 @@ async function fetchFundBasic(token: string): Promise<ProviderInstrumentProfile[
     .filter((row): row is FundProfile => row !== null);
 }
 
+const METAL_FUTURES_PATTERNS: RegExp[] = [
+  /\bAU\b/i,
+  /\bAG\b/i,
+  /\bCU\b/i,
+  /\bAL\b/i,
+  /\bZN\b/i,
+  /\bPB\b/i,
+  /\bNI\b/i,
+  /\bSN\b/i,
+  /黄金/u,
+  /白银/u,
+  /铜/u,
+  /铝/u,
+  /锌/u,
+  /铅/u,
+  /镍/u,
+  /锡/u
+];
+
+async function fetchFuturesBasic(token: string): Promise<ProviderInstrumentProfile[]> {
+  const res = await callTushare(
+    "fut_basic",
+    token,
+    { exchange: "", fut_type: "1" },
+    "ts_code,symbol,exchange,fut_code,name,trade_unit,per_unit,quote_unit,list_date,delist_date"
+  );
+
+  const fields = res.fields ?? [];
+  const rows = res.items ?? [];
+  const idxTsCode = fields.indexOf("ts_code");
+  const idxSymbol = fields.indexOf("symbol");
+  const idxName = fields.indexOf("name");
+  const idxExchange = fields.indexOf("exchange");
+  const idxFutCode = fields.indexOf("fut_code");
+  if (idxTsCode === -1) return [];
+
+  return rows
+    .map((row) => {
+      const tsCode = normalizeString(row[idxTsCode]);
+      if (!tsCode) return null;
+      const symbol = tsCode;
+      const symbolCode = idxSymbol === -1 ? null : normalizeString(row[idxSymbol]);
+      const name = idxName === -1 ? null : normalizeString(row[idxName]);
+      const exchange = idxExchange === -1 ? null : normalizeString(row[idxExchange]);
+      const futCode = idxFutCode === -1 ? null : normalizeString(row[idxFutCode]);
+      const haystack = [symbolCode ?? "", futCode ?? "", name ?? "", symbol].join(" ");
+      if (!METAL_FUTURES_PATTERNS.some((pattern) => pattern.test(haystack))) return null;
+
+      const providerData = {
+        kind: "fut_basic",
+        raw: buildRowObject(fields, row),
+        futCode,
+        exchange
+      } satisfies Record<string, unknown>;
+
+      const tags = appendUniversePoolTags(
+        buildProviderTags({
+          kind: "futures",
+          exchange,
+          fut_code: futCode,
+          market: "CN"
+        }),
+        {
+          assetClass: "futures",
+          market: "CN",
+          name,
+          symbol,
+          tags: []
+        }
+      );
+
+      return {
+        provider: "tushare",
+        kind: "futures",
+        symbol,
+        name,
+        assetClass: "futures" satisfies AssetClass,
+        market: "CN",
+        currency: "CNY",
+        tags,
+        providerData
+      } satisfies ProviderInstrumentProfile;
+    })
+    .filter(
+      (row): row is Exclude<typeof row, null> => row !== null
+    );
+}
+
+async function fetchSgeBasic(token: string): Promise<ProviderInstrumentProfile[]> {
+  const res = await callTushare(
+    "sge_basic",
+    token,
+    {},
+    "ts_code,ts_name,trade_type,t_unit,p_unit,min_change,price_limit,min_vol,max_vol,trade_mode"
+  );
+  const fields = res.fields ?? [];
+  const rows = res.items ?? [];
+  const idxTsCode = fields.indexOf("ts_code");
+  const idxName = fields.indexOf("ts_name");
+  if (idxTsCode === -1) return [];
+
+  return rows
+    .map((row) => {
+      const tsCode = normalizeString(row[idxTsCode]);
+      if (!tsCode) return null;
+      const name = idxName === -1 ? null : normalizeString(row[idxName]);
+      const providerData = {
+        kind: "sge_basic",
+        raw: buildRowObject(fields, row)
+      } satisfies Record<string, unknown>;
+      const tags = appendUniversePoolTags(
+        buildProviderTags({
+          kind: "spot",
+          market: "SGE"
+        }),
+        {
+          assetClass: "spot",
+          market: "SGE",
+          name,
+          symbol: tsCode,
+          tags: []
+        }
+      );
+      return {
+        provider: "tushare",
+        kind: "spot",
+        symbol: tsCode,
+        name,
+        assetClass: "spot" satisfies AssetClass,
+        market: "SGE",
+        currency: "CNY",
+        tags,
+        providerData
+      } satisfies ProviderInstrumentProfile;
+    })
+    .filter(
+      (row): row is Exclude<typeof row, null> => row !== null
+    );
+}
+
 async function callTushare(
   apiName: string,
   token: string,
@@ -423,7 +565,14 @@ function toTushareDate(value: string): string {
 }
 
 function mapMarketToTushareExchange(market: string): string {
-  if (market === "CN") return "SSE";
+  if (market === "CN" || market === "CN_EQ") return "SSE";
+  if (market === "SGE") return "SGE";
+  if (market === "SHFE") return "SHFE";
+  if (market === "DCE") return "DCE";
+  if (market === "CZCE") return "CZCE";
+  if (market === "CFFEX") return "CFFEX";
+  if (market === "INE") return "INE";
+  if (market === "GFEX") return "GFEX";
   return "SSE";
 }
 

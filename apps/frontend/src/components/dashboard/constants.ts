@@ -168,7 +168,8 @@ export const schedulerTimezoneDefaults = [
 export const UNIVERSE_POOL_BUCKET_ORDER: UniversePoolBucketId[] = [
   "cn_a",
   "etf",
-  "precious_metal"
+  "metal_futures",
+  "metal_spot"
 ];
 
 export const emptyPositionForm: PositionFormState = {
@@ -191,6 +192,8 @@ export const emptyRiskForm: RiskFormState = {
 export const assetClassLabels: Record<AssetClass, string> = {
   stock: "股票",
   etf: "ETF",
+  futures: "期货",
+  spot: "现货",
   cash: "现金"
 };
 

@@ -106,6 +106,8 @@ interface TargetPoolStructureStats {
 const assetClassLabels: Record<AssetClass, string> = {
   stock: "股票",
   etf: "ETF",
+  futures: "期货",
+  spot: "现货",
   cash: "现金"
 };
 
@@ -2189,8 +2191,10 @@ export function getUniversePoolBucketLabel(bucket: UniversePoolBucketId): string
       return "A股";
     case "etf":
       return "ETF";
-    case "precious_metal":
-      return "贵金属";
+    case "metal_futures":
+      return "金属期货";
+    case "metal_spot":
+      return "金属现货（SGE）";
     default:
       return bucket;
   }

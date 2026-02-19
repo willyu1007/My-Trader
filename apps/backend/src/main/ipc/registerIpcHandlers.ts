@@ -18,6 +18,7 @@ import type {
   GetTagMembersInput,
   GetTagSeriesInput,
   ListInstrumentRegistryInput,
+  ListTargetTaskStatusInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
   CreatePositionInput,
@@ -44,6 +45,8 @@ import type {
   UpdateRiskLimitInput,
   UnlockAccountInput,
   RunIngestPreflightInput,
+  RunTargetMaterializationInput,
+  MarketTargetTaskMatrixConfig,
   ValidateDataSourceReadinessInput
 } from "@mytrader/shared";
 import { ensureBusinessSchema } from "../storage/businessSchema";
@@ -123,12 +126,14 @@ import {
 } from "../services/marketService";
 import { config } from "../config";
 import {
+  getMarketTargetTaskMatrixConfig,
   getMarketTargetsConfig,
   getMarketIngestSchedulerConfig,
   getMarketUniversePoolOverview,
   listTempTargetSymbols,
   removeTempTargetSymbol,
   setMarketIngestSchedulerConfig,
+  setMarketTargetTaskMatrixConfig,
   setMarketTargetsConfig,
   touchTempTargetSymbol
 } from "../storage/marketSettingsRepository";
@@ -143,7 +148,11 @@ import {
   upsertWatchlistItem
 } from "../storage/watchlistRepository";
 import { previewTargets, previewTargetsDraft } from "../market/targetsService";
-import { getIngestRunById, listIngestRuns } from "../market/ingestRunsRepository";
+import {
+  getIngestRunById,
+  getLatestIngestRun,
+  listIngestRuns
+} from "../market/ingestRunsRepository";
 import { getMarketProvider } from "../market/providers";
 import { validateDataSourceReadiness } from "../market/dataSourceReadinessService";
 import { runIngestPreflight } from "../market/ingestPreflightService";
@@ -169,6 +178,11 @@ import {
   startIngestOrchestrator,
   stopIngestOrchestrator
 } from "../market/ingestOrchestrator";
+import {
+  listTargetTaskStatusRows,
+  previewTargetTaskCoverage
+} from "../market/targetTaskRepository";
+import { materializeTargetsFromSsot } from "../market/targetMaterializationService";
 
 let accountIndexDb: AccountIndexDb | null = null;
 let activeAccount: AccountSummary | null = null;
@@ -183,6 +197,11 @@ function requireActiveBusinessDb(): SqliteDatabase {
 function requireMarketCacheDb(): SqliteDatabase {
   if (!marketCacheDb) throw new Error("行情缓存未初始化。");
   return marketCacheDb;
+}
+
+function requireAnalysisDbPath(): string {
+  if (!activeAccount) throw new Error("当前账号未解锁。");
+  return path.join(activeAccount.dataDir, "analysis.duckdb");
 }
 
 export async function registerIpcHandlers() {
@@ -1135,6 +1154,52 @@ export async function registerIpcHandlers() {
       }))
     };
   });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_GET_CONFIG, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketTargetTaskMatrixConfig(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_SET_CONFIG,
+    async (_event, input: MarketTargetTaskMatrixConfig) => {
+      const businessDb = requireActiveBusinessDb();
+      return await setMarketTargetTaskMatrixConfig(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TARGET_TASK_PREVIEW_COVERAGE, async () => {
+    const marketDb = requireMarketCacheDb();
+    return await previewTargetTaskCoverage(marketDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGET_TASK_LIST_STATUS,
+    async (_event, input: ListTargetTaskStatusInput | null | undefined) => {
+      const marketDb = requireMarketCacheDb();
+      return await listTargetTaskStatusRows(marketDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGET_TASK_RUN_MATERIALIZATION,
+    async (_event, input: RunTargetMaterializationInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const analysisDbPath = requireAnalysisDbPath();
+      const latestUniverseRun = await getLatestIngestRun(marketDb, "universe");
+      const asOfTradeDate =
+        latestUniverseRun?.as_of_trade_date ?? new Date().toISOString().slice(0, 10);
+      await materializeTargetsFromSsot({
+        businessDb,
+        marketDb,
+        analysisDbPath,
+        asOfTradeDate,
+        sourceRunId: latestUniverseRun?.id ?? null,
+        symbols: input?.symbols ?? null
+      });
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST, async () => {
     const businessDb = requireActiveBusinessDb();

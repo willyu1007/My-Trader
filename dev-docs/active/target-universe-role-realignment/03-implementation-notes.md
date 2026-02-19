@@ -1,0 +1,21 @@
+# 03 Implementation Notes
+
+- 2026-02-19: 创建任务包并冻结目标、范围、DoD。
+- 2026-02-19: Shared 契约升级：
+  - `AssetClass` 扩展为 `stock/etf/futures/spot/cash`。
+  - `UniversePoolBucketId` 变更为 `cn_a/etf/metal_futures/metal_spot`。
+  - 新增 Target Task 类型与 IPC：matrix config / preview coverage / list status / run materialization。
+- 2026-02-19: Backend 存储升级：
+  - `market-cache.sqlite` 新增 `target_task_status` 与 `target_materialization_runs`。
+  - `analysis.duckdb` 新增 `futures_daily_ext` / `spot_sge_daily_ext` / `futures_contract_meta` / `spot_sge_contract_meta`，并扩展 `instrument_meta` 列。
+- 2026-02-19: Universe ingest 升级：
+  - 目录同步新增 futures/spot 标的（Tushare `fut_basic` / `sge_basic`）。
+  - 每日批量新增 `fut_daily` / `fut_settle` / `sge_daily` 写入逻辑。
+  - 运行元信息增加 futures/spot 计数。
+  - 金属接口权限不足时降级为空批次（仅告警，不阻断 stock/etf 主流程）。
+- 2026-02-19: Target ingest 主路径切换：
+  - 以 `materializeTargetsFromSsot` 作为主逻辑，写入任务状态并同步 market-cache。
+  - Orchestrator 在 targets job 前触发一次 universe prewarm（`targets_ssot_prewarm`）。
+- 2026-02-19: 破坏性配置切换：
+  - 配置输入出现 `precious_metal` 时直接报错，不做兼容映射。
+  - frontend bucket 标签同步更新为“金属期货/金属现货（SGE）”。

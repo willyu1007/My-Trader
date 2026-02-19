@@ -138,6 +138,19 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_SET_CONFIG, input),
     getUniversePoolOverview: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_OVERVIEW),
+    getTargetTaskMatrixConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_GET_CONFIG),
+    setTargetTaskMatrixConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_SET_CONFIG, input),
+    previewTargetTaskCoverage: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_PREVIEW_COVERAGE),
+    listTargetTaskStatus: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_LIST_STATUS, input ?? null),
+    runTargetMaterialization: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_TARGET_TASK_RUN_MATERIALIZATION,
+        input ?? null
+      ),
     listTempTargets: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST),
     touchTempTarget: (input) =>

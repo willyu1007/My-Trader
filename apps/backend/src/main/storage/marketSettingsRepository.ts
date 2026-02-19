@@ -1,9 +1,11 @@
 import type {
   MarketIngestSchedulerConfig,
+  MarketTargetTaskMatrixConfig,
   MarketTargetsConfig,
   MarketUniversePoolBucketStatus,
   MarketUniversePoolConfig,
   MarketUniversePoolOverview,
+  TargetTaskModuleId,
   UniversePoolBucketId
 } from "@mytrader/shared";
 
@@ -12,6 +14,7 @@ import type { SqliteDatabase } from "./sqlite";
 
 const TARGETS_KEY = "targets_config_v1";
 const TEMP_TARGETS_KEY = "targets_temp_symbols_v1";
+const TARGET_TASK_MATRIX_KEY = "target_task_matrix_config_v1";
 const INGEST_SCHEDULER_KEY = "ingest_scheduler_config_v1";
 const INGEST_CONTROL_STATE_KEY = "ingest_control_state_v1";
 const UNIVERSE_POOL_CONFIG_KEY = "universe_pool_config_v1";
@@ -50,11 +53,32 @@ const DEFAULT_INGEST_SCHEDULER_CONFIG: MarketIngestSchedulerConfig = {
 const UNIVERSE_POOL_BUCKETS: UniversePoolBucketId[] = [
   "cn_a",
   "etf",
-  "precious_metal"
+  "metal_futures",
+  "metal_spot"
 ];
 
 const DEFAULT_UNIVERSE_POOL_CONFIG: MarketUniversePoolConfig = {
   enabledBuckets: [...UNIVERSE_POOL_BUCKETS]
+};
+
+const TARGET_TASK_MODULES: TargetTaskModuleId[] = [
+  "core.daily_prices",
+  "core.instrument_meta",
+  "core.daily_basics",
+  "core.daily_moneyflows",
+  "core.futures_settle",
+  "core.futures_oi",
+  "core.spot_price_avg",
+  "core.spot_settle",
+  "task.exposure",
+  "task.momentum",
+  "task.liquidity"
+];
+
+const DEFAULT_TARGET_TASK_MATRIX_CONFIG: MarketTargetTaskMatrixConfig = {
+  version: 1,
+  defaultLookbackDays: 180,
+  enabledModules: [...TARGET_TASK_MODULES]
 };
 
 const DEFAULT_UNIVERSE_POOL_STATE: PersistedUniversePoolState = buildDefaultUniversePoolState();
@@ -218,6 +242,44 @@ async function writeTempTargets(
     `,
     [TEMP_TARGETS_KEY, payload]
   );
+}
+
+export async function getMarketTargetTaskMatrixConfig(
+  db: SqliteDatabase
+): Promise<MarketTargetTaskMatrixConfig> {
+  const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [TARGET_TASK_MATRIX_KEY]
+  );
+  if (!row?.value_json) {
+    await setMarketTargetTaskMatrixConfig(db, DEFAULT_TARGET_TASK_MATRIX_CONFIG);
+    return { ...DEFAULT_TARGET_TASK_MATRIX_CONFIG };
+  }
+  const parsed = safeParseTargetTaskMatrixConfig(row.value_json);
+  if (!parsed) {
+    await setMarketTargetTaskMatrixConfig(db, DEFAULT_TARGET_TASK_MATRIX_CONFIG);
+    return { ...DEFAULT_TARGET_TASK_MATRIX_CONFIG };
+  }
+  return parsed;
+}
+
+export async function setMarketTargetTaskMatrixConfig(
+  db: SqliteDatabase,
+  input: MarketTargetTaskMatrixConfig
+): Promise<MarketTargetTaskMatrixConfig> {
+  const normalized = normalizeTargetTaskMatrixConfig(input);
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [TARGET_TASK_MATRIX_KEY, JSON.stringify(normalized)]
+  );
+  return normalized;
 }
 
 function safeParseTempTargets(value: string): TempTargetSymbolRow[] | null {
@@ -458,6 +520,18 @@ function safeParseMarketIngestSchedulerConfig(
   }
 }
 
+function safeParseTargetTaskMatrixConfig(
+  value: string
+): MarketTargetTaskMatrixConfig | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return normalizeTargetTaskMatrixConfig(parsed as Partial<MarketTargetTaskMatrixConfig>);
+  } catch {
+    return null;
+  }
+}
+
 function safeParseMarketUniversePoolConfig(
   value: string
 ): MarketUniversePoolConfig | null {
@@ -476,6 +550,11 @@ function normalizeMarketUniversePoolConfig(
   const enabledSet = new Set<UniversePoolBucketId>();
   if (Array.isArray(input.enabledBuckets)) {
     input.enabledBuckets.forEach((value) => {
+      if (String(value).trim() === "precious_metal") {
+        throw new Error(
+          "不再支持 precious_metal，请改用 metal_futures 或 metal_spot。"
+        );
+      }
       const key = String(value).trim() as UniversePoolBucketId;
       if (UNIVERSE_POOL_BUCKETS.includes(key)) {
         enabledSet.add(key);
@@ -485,6 +564,34 @@ function normalizeMarketUniversePoolConfig(
   const enabledBuckets =
     enabledSet.size > 0 ? Array.from(enabledSet.values()) : [...DEFAULT_UNIVERSE_POOL_CONFIG.enabledBuckets];
   return { enabledBuckets };
+}
+
+function normalizeTargetTaskMatrixConfig(
+  input: Partial<MarketTargetTaskMatrixConfig>
+): MarketTargetTaskMatrixConfig {
+  const enabledModulesSet = new Set<TargetTaskModuleId>();
+  if (Array.isArray(input.enabledModules)) {
+    input.enabledModules.forEach((module) => {
+      const key = String(module).trim() as TargetTaskModuleId;
+      if (TARGET_TASK_MODULES.includes(key)) {
+        enabledModulesSet.add(key);
+      }
+    });
+  }
+  const defaultLookbackDaysRaw = Number(input.defaultLookbackDays);
+  const defaultLookbackDays =
+    Number.isFinite(defaultLookbackDaysRaw) && defaultLookbackDaysRaw >= 1 && defaultLookbackDaysRaw <= 3650
+      ? Math.floor(defaultLookbackDaysRaw)
+      : DEFAULT_TARGET_TASK_MATRIX_CONFIG.defaultLookbackDays;
+
+  return {
+    version: 1,
+    defaultLookbackDays,
+    enabledModules:
+      enabledModulesSet.size > 0
+        ? TARGET_TASK_MODULES.filter((module) => enabledModulesSet.has(module))
+        : [...DEFAULT_TARGET_TASK_MATRIX_CONFIG.enabledModules]
+  };
 }
 
 function safeParsePersistedUniversePoolState(
@@ -588,7 +695,8 @@ function buildDefaultUniversePoolState(): PersistedUniversePoolState {
     buckets: {
       cn_a: { lastAsOfTradeDate: null, lastRunAt: null },
       etf: { lastAsOfTradeDate: null, lastRunAt: null },
-      precious_metal: { lastAsOfTradeDate: null, lastRunAt: null }
+      metal_futures: { lastAsOfTradeDate: null, lastRunAt: null },
+      metal_spot: { lastAsOfTradeDate: null, lastRunAt: null }
     },
     updatedAt: Date.now()
   };

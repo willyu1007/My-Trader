@@ -25,7 +25,7 @@ export interface UnlockAccountInput {
   devBypass?: boolean;
 }
 
-export type AssetClass = "stock" | "etf" | "cash";
+export type AssetClass = "stock" | "etf" | "futures" | "spot" | "cash";
 
 export interface Portfolio {
   id: PortfolioId;
@@ -759,7 +759,7 @@ export interface MarketIngestSchedulerConfig {
   catchUpMissed: boolean;
 }
 
-export type UniversePoolBucketId = "cn_a" | "etf" | "precious_metal";
+export type UniversePoolBucketId = "cn_a" | "etf" | "metal_futures" | "metal_spot";
 
 export interface MarketUniversePoolConfig {
   enabledBuckets: UniversePoolBucketId[];
@@ -776,6 +776,81 @@ export interface MarketUniversePoolOverview {
   config: MarketUniversePoolConfig;
   buckets: MarketUniversePoolBucketStatus[];
   updatedAt: number;
+}
+
+export type TargetTaskModuleId =
+  | "core.daily_prices"
+  | "core.instrument_meta"
+  | "core.daily_basics"
+  | "core.daily_moneyflows"
+  | "core.futures_settle"
+  | "core.futures_oi"
+  | "core.spot_price_avg"
+  | "core.spot_settle"
+  | "task.exposure"
+  | "task.momentum"
+  | "task.liquidity";
+
+export type TargetTaskStatus =
+  | "complete"
+  | "partial"
+  | "missing"
+  | "not_applicable";
+
+export interface MarketTargetTaskMatrixConfig {
+  version: 1;
+  defaultLookbackDays: number;
+  enabledModules: TargetTaskModuleId[];
+}
+
+export interface MarketTargetTaskStatusRow {
+  symbol: string;
+  moduleId: TargetTaskModuleId;
+  assetClass: AssetClass | null;
+  asOfTradeDate: string | null;
+  status: TargetTaskStatus;
+  coverageRatio: number | null;
+  sourceRunId: string | null;
+  lastError: string | null;
+  updatedAt: number;
+}
+
+export interface ListTargetTaskStatusInput {
+  symbol?: string | null;
+  moduleId?: TargetTaskModuleId | null;
+  status?: TargetTaskStatus | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListTargetTaskStatusResult {
+  items: MarketTargetTaskStatusRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PreviewTargetTaskCoverageResult {
+  asOfTradeDate: string | null;
+  totals: {
+    symbols: number;
+    modules: number;
+    complete: number;
+    partial: number;
+    missing: number;
+    notApplicable: number;
+  };
+  byAssetClass: Array<{
+    assetClass: AssetClass | "unknown";
+    complete: number;
+    partial: number;
+    missing: number;
+    notApplicable: number;
+  }>;
+}
+
+export interface RunTargetMaterializationInput {
+  symbols?: string[] | null;
 }
 
 export interface InstrumentRegistryEntry {
@@ -959,6 +1034,15 @@ export interface MyTraderApi {
     getUniversePoolConfig(): Promise<MarketUniversePoolConfig>;
     setUniversePoolConfig(input: MarketUniversePoolConfig): Promise<MarketUniversePoolConfig>;
     getUniversePoolOverview(): Promise<MarketUniversePoolOverview>;
+    getTargetTaskMatrixConfig(): Promise<MarketTargetTaskMatrixConfig>;
+    setTargetTaskMatrixConfig(
+      input: MarketTargetTaskMatrixConfig
+    ): Promise<MarketTargetTaskMatrixConfig>;
+    previewTargetTaskCoverage(): Promise<PreviewTargetTaskCoverageResult>;
+    listTargetTaskStatus(
+      input?: ListTargetTaskStatusInput
+    ): Promise<ListTargetTaskStatusResult>;
+    runTargetMaterialization(input?: RunTargetMaterializationInput): Promise<void>;
     listTempTargets(): Promise<TempTargetSymbol[]>;
     touchTempTarget(input: TouchTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
     removeTempTarget(input: RemoveTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
@@ -1047,6 +1131,11 @@ export const IPC_CHANNELS = {
   MARKET_UNIVERSE_POOL_GET_CONFIG: "market:universePool:getConfig",
   MARKET_UNIVERSE_POOL_SET_CONFIG: "market:universePool:setConfig",
   MARKET_UNIVERSE_POOL_GET_OVERVIEW: "market:universePool:getOverview",
+  MARKET_TARGET_TASK_MATRIX_GET_CONFIG: "market:targetTaskMatrix:getConfig",
+  MARKET_TARGET_TASK_MATRIX_SET_CONFIG: "market:targetTaskMatrix:setConfig",
+  MARKET_TARGET_TASK_PREVIEW_COVERAGE: "market:targetTask:previewCoverage",
+  MARKET_TARGET_TASK_LIST_STATUS: "market:targetTask:listStatus",
+  MARKET_TARGET_TASK_RUN_MATERIALIZATION: "market:targetTask:runMaterialization",
   MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",
   MARKET_TEMP_TARGETS_TOUCH: "market:targetsTemp:touch",
   MARKET_TEMP_TARGETS_REMOVE: "market:targetsTemp:remove",

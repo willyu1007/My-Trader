@@ -306,9 +306,45 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
   const control = buildControl(sessionId);
   const preflightUpdatedAt = preflight?.updatedAt ?? null;
   if (job.scope === "targets") {
+    if (!state.analysisDbPath) {
+      const message = "analysis.duckdb 尚未初始化。";
+      await persistBlockedRun({
+        marketDb,
+        job,
+        stage: "analysis_init",
+        errorCode: "ANALYSIS_DB_NOT_INITIALIZED",
+        message,
+        preflight
+      });
+      if (job.source === "manual") {
+        throw new Error(message);
+      }
+      console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
+      return;
+    }
+    await runUniverseIngest({
+      businessDb,
+      marketDb,
+      analysisDbPath: state.analysisDbPath,
+      token,
+      mode: "on_demand",
+      meta: {
+        ...(job.meta ?? {}),
+        source: job.source,
+        reason: "targets_ssot_prewarm",
+        windowYears: 3,
+        selectedDomains: readiness.selectedDomains,
+        selectedModules: readiness.selectedModules,
+        blockedModules: [],
+        tokenSourcesByDomain,
+        preflightUpdatedAt
+      },
+      control
+    });
     await runTargetsIngest({
       businessDb,
       marketDb,
+      analysisDbPath: state.analysisDbPath,
       token,
       mode: job.mode,
       meta: {

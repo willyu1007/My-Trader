@@ -106,8 +106,8 @@ const DOMAIN_SEEDS: DomainSeed[] = [
     id: "futures",
     label: "期货数据",
     modules: [
-      { id: "futures.basic", label: "基础信息", implemented: false, syncCapable: false, defaultEnabled: false },
-      { id: "futures.daily", label: "日线行情", implemented: false, syncCapable: false, defaultEnabled: false },
+      { id: "futures.basic", label: "基础信息", implemented: true, syncCapable: true, defaultEnabled: true },
+      { id: "futures.daily", label: "日线行情", implemented: true, syncCapable: true, defaultEnabled: true },
       { id: "futures.min", label: "分钟行情", implemented: false, syncCapable: false, defaultEnabled: false },
       { id: "futures.main_contract", label: "主力连续", implemented: false, syncCapable: false, defaultEnabled: false },
       { id: "futures.position_warehouse", label: "持仓/仓单", implemented: false, syncCapable: false, defaultEnabled: false }
@@ -117,8 +117,8 @@ const DOMAIN_SEEDS: DomainSeed[] = [
     id: "spot",
     label: "现货数据",
     modules: [
-      { id: "spot.sge_basic", label: "上海黄金基础信息", implemented: false, syncCapable: false, defaultEnabled: false },
-      { id: "spot.sge_daily", label: "上海黄金现货日行情", implemented: false, syncCapable: false, defaultEnabled: false }
+      { id: "spot.sge_basic", label: "上海黄金基础信息", implemented: true, syncCapable: true, defaultEnabled: true },
+      { id: "spot.sge_daily", label: "上海黄金现货日行情", implemented: true, syncCapable: true, defaultEnabled: true }
     ]
   },
   {
@@ -281,7 +281,10 @@ export function buildDefaultDataSourceConfig(): MarketDataSourceConfigV2 {
     }, {} as Record<string, { enabled: boolean }>);
 
     const enabledByDefault =
-      domain.id === "stock" || domain.id === "etf";
+      domain.id === "stock" ||
+      domain.id === "etf" ||
+      domain.id === "futures" ||
+      domain.id === "spot";
 
     acc[domain.id] = {
       enabled: enabledByDefault,
@@ -299,22 +302,32 @@ export function buildDefaultDataSourceConfig(): MarketDataSourceConfigV2 {
   };
 }
 
-export function toLegacyUniversePoolBuckets(config: MarketDataSourceConfigV2): Array<"cn_a" | "etf" | "precious_metal"> {
-  const result = new Set<"cn_a" | "etf" | "precious_metal">();
+export function toLegacyUniversePoolBuckets(
+  config: MarketDataSourceConfigV2
+): Array<"cn_a" | "etf" | "metal_futures" | "metal_spot"> {
+  const result = new Set<"cn_a" | "etf" | "metal_futures" | "metal_spot">();
   const stock = config.domains.stock;
   const etf = config.domains.etf;
+  const futures = config.domains.futures;
+  const spot = config.domains.spot;
   if (stock?.enabled && hasAnyEnabledSyncModule(stock.modules, "stock")) {
     result.add("cn_a");
   }
   if (etf?.enabled && hasAnyEnabledSyncModule(etf.modules, "etf")) {
     result.add("etf");
   }
+  if (futures?.enabled && hasAnyEnabledSyncModule(futures.modules, "futures")) {
+    result.add("metal_futures");
+  }
+  if (spot?.enabled && hasAnyEnabledSyncModule(spot.modules, "spot")) {
+    result.add("metal_spot");
+  }
   return Array.from(result.values());
 }
 
 export function mergeLegacyBucketsIntoDataSourceConfig(
   config: MarketDataSourceConfigV2,
-  buckets: Array<"cn_a" | "etf" | "precious_metal">
+  buckets: Array<"cn_a" | "etf" | "metal_futures" | "metal_spot">
 ): MarketDataSourceConfigV2 {
   const next: MarketDataSourceConfigV2 = {
     version: 2,
@@ -345,6 +358,30 @@ export function mergeLegacyBucketsIntoDataSourceConfig(
         ...next.domains.etf.modules,
         "etf.basic_info": { enabled: etfEnabled },
         "etf.daily_quote": { enabled: etfEnabled }
+      }
+    };
+  }
+  if (next.domains.futures) {
+    const futuresEnabled = enabled.has("metal_futures");
+    next.domains.futures = {
+      ...next.domains.futures,
+      enabled: futuresEnabled,
+      modules: {
+        ...next.domains.futures.modules,
+        "futures.basic": { enabled: futuresEnabled },
+        "futures.daily": { enabled: futuresEnabled }
+      }
+    };
+  }
+  if (next.domains.spot) {
+    const spotEnabled = enabled.has("metal_spot");
+    next.domains.spot = {
+      ...next.domains.spot,
+      enabled: spotEnabled,
+      modules: {
+        ...next.domains.spot.modules,
+        "spot.sge_basic": { enabled: spotEnabled },
+        "spot.sge_daily": { enabled: spotEnabled }
       }
     };
   }

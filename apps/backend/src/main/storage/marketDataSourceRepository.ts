@@ -26,7 +26,8 @@ const LEGACY_UNIVERSE_POOL_CONFIG_KEY = "universe_pool_config_v1";
 const LEGACY_BUCKETS: UniversePoolBucketId[] = [
   "cn_a",
   "etf",
-  "precious_metal"
+  "metal_futures",
+  "metal_spot"
 ];
 
 type PersistedConnectivityTestState = {
@@ -73,7 +74,9 @@ export async function getLegacyUniversePoolConfigFromDataSource(
   const enabledBuckets = toLegacyUniversePoolBuckets(dataSourceConfig);
   return {
     enabledBuckets:
-      enabledBuckets.length > 0 ? enabledBuckets : ["cn_a", "etf"]
+      enabledBuckets.length > 0
+        ? enabledBuckets
+        : ["cn_a", "etf", "metal_futures", "metal_spot"]
   };
 }
 
@@ -219,6 +222,11 @@ function normalizeLegacyUniversePoolConfig(
   const set = new Set<UniversePoolBucketId>();
   if (Array.isArray(input.enabledBuckets)) {
     input.enabledBuckets.forEach((item) => {
+      if (String(item).trim() === "precious_metal") {
+        throw new Error(
+          "不再支持 precious_metal，请在全量池配置中改用 metal_futures 或 metal_spot。"
+        );
+      }
       const bucket = String(item).trim() as UniversePoolBucketId;
       if (LEGACY_BUCKETS.includes(bucket)) {
         set.add(bucket);
@@ -229,6 +237,8 @@ function normalizeLegacyUniversePoolConfig(
   if (set.size === 0) {
     set.add("cn_a");
     set.add("etf");
+    set.add("metal_futures");
+    set.add("metal_spot");
   }
 
   return {
@@ -248,6 +258,12 @@ async function migrateDataSourceConfigFromLegacy(
 
   if (!legacyRow?.value_json) {
     return normalizeDataSourceConfig(defaults);
+  }
+
+  if (legacyRow.value_json.includes("precious_metal")) {
+    throw new Error(
+      "检测到已废弃配置 precious_metal，请在“全量数据池配置”中改用 metal_futures 或 metal_spot 后重试。"
+    );
   }
 
   const legacy = safeParseLegacyUniversePoolConfig(legacyRow.value_json);

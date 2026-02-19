@@ -2,11 +2,9 @@ import type {
   DataDomainId,
   IngestRunMode,
   MarketDataSource,
-  TushareIngestItem,
   UniversePoolBucketId
 } from "@mytrader/shared";
 
-import { config } from "../config";
 import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analysisDuckdb";
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import type { SqliteDatabase } from "../storage/sqlite";
@@ -14,12 +12,10 @@ import {
   updateMarketUniversePoolBucketStates
 } from "../storage/marketSettingsRepository";
 import { getMarketDataSourceConfig } from "../storage/marketDataSourceRepository";
-import { upsertDailyBasics } from "./dailyBasicRepository";
-import { upsertDailyMoneyflows } from "./dailyMoneyflowRepository";
 import { createIngestRun, finishIngestRun } from "./ingestRunsRepository";
 import { ingestLock } from "./ingestLock";
 import { upsertInstrumentProfiles } from "./instrumentCatalogRepository";
-import { upsertInstruments, upsertPrices } from "./marketRepository";
+import { upsertInstruments } from "./marketRepository";
 import { getMarketProvider } from "./providers";
 import { hasUniversePoolTag } from "./universePoolBuckets";
 import {
@@ -32,7 +28,7 @@ import {
   getDataDomainCatalogItem,
   toLegacyUniversePoolBuckets
 } from "./dataSourceCatalog";
-import { resolveAutoIngestItems } from "./targetsService";
+import { materializeTargetsFromSsot } from "./targetMaterializationService";
 import {
   getLatestOpenTradeDate,
   listOpenTradeDatesBetween,
@@ -63,6 +59,7 @@ export class IngestCanceledError extends Error {
 export async function runTargetsDailyIngest(input: {
   businessDb: SqliteDatabase;
   marketDb: SqliteDatabase;
+  analysisDbPath: string;
   token: string | null;
   now?: Date;
 }): Promise<void> {
@@ -76,6 +73,7 @@ export async function runTargetsDailyIngest(input: {
 export async function runTargetsIngest(input: {
   businessDb: SqliteDatabase;
   marketDb: SqliteDatabase;
+  analysisDbPath: string;
   token: string | null;
   mode: IngestRunMode;
   meta?: Record<string, unknown> | null;
@@ -108,26 +106,23 @@ export async function runTargetsIngest(input: {
         throw new Error("无法确定最新交易日（trade_calendar 缺失）。");
       }
 
-      const items = await resolveAutoIngestItems({
-        businessDb: input.businessDb,
-        marketDb: input.marketDb
-      });
-
       const totals: IngestTotals = { inserted: 0, updated: 0, errors: 0 };
-      await ingestTargetsRange(
-        input.marketDb,
-        token,
-        items,
+      const result = await materializeTargetsFromSsot({
+        businessDb: input.businessDb,
+        marketDb: input.marketDb,
+        analysisDbPath: input.analysisDbPath,
         asOfTradeDate,
-        totals,
-        input.control
-      );
+        sourceRunId: runId
+      });
+      totals.inserted = result.completeCount;
+      totals.updated = result.partialCount;
+      totals.errors = result.missingCount;
 
       await finishIngestRun(input.marketDb, {
         id: runId,
         status: totals.errors > 0 ? "partial" : "success",
         asOfTradeDate,
-        symbolCount: items.length,
+        symbolCount: result.symbolCount,
         inserted: totals.inserted,
         updated: totals.updated,
         errors: totals.errors,
@@ -239,7 +234,15 @@ export async function runUniverseIngest(input: {
       if (selectedBuckets.length === 0) {
         throw new Error("当前未启用可同步的全量池模块。");
       }
-      const { stockSymbols, etfSymbols, catalogInserted, catalogUpdated, bucketCounts } =
+      const {
+        stockSymbols,
+        etfSymbols,
+        futuresSymbols,
+        spotSymbols,
+        catalogInserted,
+        catalogUpdated,
+        bucketCounts
+      } =
         await syncUniverseInstrumentMeta(
         input.marketDb,
         handle,
@@ -268,6 +271,8 @@ export async function runUniverseIngest(input: {
           tradeDate,
           stockSymbols,
           etfSymbols,
+          futuresSymbols,
+          spotSymbols,
           totals
         );
         lastDone = tradeDate;
@@ -279,7 +284,8 @@ export async function runUniverseIngest(input: {
         id: runId,
         status: totals.errors > 0 ? "partial" : "success",
         asOfTradeDate,
-        symbolCount: stockSymbols.size + etfSymbols.size,
+        symbolCount:
+          stockSymbols.size + etfSymbols.size + futuresSymbols.size + spotSymbols.size,
         inserted: totals.inserted,
         updated: totals.updated,
         errors: totals.errors,
@@ -294,7 +300,12 @@ export async function runUniverseIngest(input: {
             (input.meta?.tokenSourcesByDomain as Record<string, string> | undefined) ?? {},
           instrumentCatalog: { inserted: catalogInserted, updated: catalogUpdated },
           lastTradeDate: lastDone,
-          universeCounts: { stocks: stockSymbols.size, etfs: etfSymbols.size },
+          universeCounts: {
+            stocks: stockSymbols.size,
+            etfs: etfSymbols.size,
+            futures: futuresSymbols.size,
+            spot: spotSymbols.size
+          },
           bucketCounts
         }
       });
@@ -333,91 +344,6 @@ export async function runUniverseIngest(input: {
 
 function getMetaArray<T>(value: unknown, fallback: T[]): T[] {
   return Array.isArray(value) ? (value as T[]) : fallback;
-}
-
-async function ingestTargetsRange(
-  marketDb: SqliteDatabase,
-  token: string,
-  items: TushareIngestItem[],
-  endDate: string,
-  totals: IngestTotals,
-  control?: IngestExecutionControl
-): Promise<void> {
-  if (items.length === 0) return;
-  const provider = getMarketProvider("tushare");
-  const end = endDate;
-
-  await upsertInstruments(
-    marketDb,
-    items.map((item) => ({
-      symbol: item.symbol,
-      assetClass: item.assetClass,
-      name: null,
-      market: null,
-      currency: null
-    }))
-  );
-
-  const lookbackDate = formatDate(addDays(parseDate(end) ?? new Date(), -config.autoIngest.lookbackDays));
-
-  for (const item of items) {
-    await checkpointOrThrow(control);
-    const symbol = item.symbol;
-    const latest = await getLatestPriceDate(marketDb, symbol);
-    const startDate = latest ? nextDate(latest) : lookbackDate;
-    if (startDate > end) continue;
-
-    try {
-      const prices = await provider.fetchDailyPrices({
-        token,
-        items: [item],
-        startDate,
-        endDate: end
-      });
-      await upsertPrices(marketDb, prices);
-      totals.inserted += prices.length;
-
-      if (item.assetClass === "stock") {
-        const basics = await provider.fetchDailyBasics({
-          token,
-          symbols: [symbol],
-          startDate,
-          endDate: end
-        });
-        await upsertDailyBasics(
-          marketDb,
-          basics.map((row) => ({
-            symbol: row.symbol,
-            tradeDate: row.tradeDate,
-            circMv: row.circMv,
-            totalMv: row.totalMv,
-            source: "tushare"
-          }))
-        );
-
-        const moneyflows = await provider.fetchDailyMoneyflows({
-          token,
-          symbol,
-          startDate,
-          endDate: end
-        });
-        await upsertDailyMoneyflows(
-          marketDb,
-          moneyflows.map((row) => ({
-            symbol: row.symbol,
-            tradeDate: row.tradeDate,
-            netMfVol: row.netMfVol,
-            netMfAmount: row.netMfAmount,
-            source: "tushare"
-          }))
-        );
-      }
-    } catch (err) {
-      totals.errors += 1;
-      console.error(`[mytrader] targets ingest failed: ${symbol}`);
-      console.error(err);
-    }
-  }
 }
 
 async function ensureTradingCalendar(
@@ -489,6 +415,8 @@ async function syncUniverseInstrumentMeta(
 ): Promise<{
   stockSymbols: Set<string>;
   etfSymbols: Set<string>;
+  futuresSymbols: Set<string>;
+  spotSymbols: Set<string>;
   catalogInserted: number;
   catalogUpdated: number;
   bucketCounts: Record<UniversePoolBucketId, number>;
@@ -507,6 +435,8 @@ async function syncUniverseInstrumentMeta(
 
   const stocks = eligible.filter((profile) => profile.assetClass === "stock");
   const etfs = eligible.filter((profile) => profile.assetClass === "etf");
+  const futures = eligible.filter((profile) => profile.assetClass === "futures");
+  const spot = eligible.filter((profile) => profile.assetClass === "spot");
 
   const catalogResult = await upsertInstrumentProfiles(marketDb, profiles);
   const bucketCounts = createEmptyBucketCounts();
@@ -536,23 +466,105 @@ async function syncUniverseInstrumentMeta(
 
     for (const profile of eligible) {
       await checkpointOrThrow(control);
+      const providerRaw =
+        (profile.providerData?.raw as Record<string, unknown> | undefined) ?? {};
       await conn.query(
         `
-          insert into instrument_meta (symbol, kind, name, market, currency, asset_class, updated_at)
+          insert into instrument_meta (
+            symbol, kind, name, market, currency, asset_class, asset_subclass,
+            commodity_group, metal_type, updated_at
+          )
           values ('${escapeSql(profile.symbol)}', '${escapeSql(profile.kind)}', ${
           profile.name ? `'${escapeSql(profile.name)}'` : "null"
         }, '${escapeSql(profile.market ?? "CN")}', '${escapeSql(
           profile.currency ?? "CNY"
-        )}', '${escapeSql(profile.assetClass ?? "stock")}', ${now})
+        )}', '${escapeSql(profile.assetClass ?? "stock")}', ${
+          profile.assetClass === "futures" ? "'futures'" : "null"
+        }, ${
+          profile.assetClass === "spot" ? "'spot'" : "null"
+        }, ${
+          profile.assetClass === "futures" || profile.assetClass === "spot" ? "'metal'" : "null"
+        }, ${now})
           on conflict(symbol) do update set
             kind = excluded.kind,
             name = excluded.name,
             market = excluded.market,
             currency = excluded.currency,
             asset_class = excluded.asset_class,
+            asset_subclass = excluded.asset_subclass,
+            commodity_group = excluded.commodity_group,
+            metal_type = excluded.metal_type,
             updated_at = excluded.updated_at
         `
       );
+      if (profile.assetClass === "futures") {
+        await conn.query(
+          `
+            insert into futures_contract_meta (
+              ts_code, symbol, exchange, fut_code, name, trade_unit, per_unit, quote_unit,
+              list_date, delist_date, updated_at
+            )
+            values (
+              '${escapeSql(profile.symbol)}',
+              ${toDuckdbNullableString(getRawString(providerRaw, "symbol"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "exchange"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "fut_code"))},
+              ${toDuckdbNullableString(profile.name)},
+              ${toDuckdbNullableString(getRawString(providerRaw, "trade_unit"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "per_unit"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "quote_unit"))},
+              ${toDuckdbNullableString(normalizeDate(getRawString(providerRaw, "list_date")))},
+              ${toDuckdbNullableString(normalizeDate(getRawString(providerRaw, "delist_date")))},
+              ${now}
+            )
+            on conflict(ts_code) do update set
+              symbol = excluded.symbol,
+              exchange = excluded.exchange,
+              fut_code = excluded.fut_code,
+              name = excluded.name,
+              trade_unit = excluded.trade_unit,
+              per_unit = excluded.per_unit,
+              quote_unit = excluded.quote_unit,
+              list_date = excluded.list_date,
+              delist_date = excluded.delist_date,
+              updated_at = excluded.updated_at
+          `
+        );
+      }
+      if (profile.assetClass === "spot") {
+        await conn.query(
+          `
+            insert into spot_sge_contract_meta (
+              ts_code, ts_name, trade_type, t_unit, p_unit, min_change, price_limit,
+              min_vol, max_vol, trade_mode, updated_at
+            )
+            values (
+              '${escapeSql(profile.symbol)}',
+              ${toDuckdbNullableString(getRawString(providerRaw, "ts_name") ?? profile.name)},
+              ${toDuckdbNullableString(getRawString(providerRaw, "trade_type"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "t_unit"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "p_unit"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "min_change"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "price_limit"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "min_vol"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "max_vol"))},
+              ${toDuckdbNullableString(getRawString(providerRaw, "trade_mode"))},
+              ${now}
+            )
+            on conflict(ts_code) do update set
+              ts_name = excluded.ts_name,
+              trade_type = excluded.trade_type,
+              t_unit = excluded.t_unit,
+              p_unit = excluded.p_unit,
+              min_change = excluded.min_change,
+              price_limit = excluded.price_limit,
+              min_vol = excluded.min_vol,
+              max_vol = excluded.max_vol,
+              trade_mode = excluded.trade_mode,
+              updated_at = excluded.updated_at
+          `
+        );
+      }
     }
     await conn.query("commit;");
   } finally {
@@ -562,6 +574,8 @@ async function syncUniverseInstrumentMeta(
   return {
     stockSymbols: new Set(stocks.map((p) => p.symbol)),
     etfSymbols: new Set(etfs.map((p) => p.symbol)),
+    futuresSymbols: new Set(futures.map((p) => p.symbol)),
+    spotSymbols: new Set(spot.map((p) => p.symbol)),
     catalogInserted: catalogResult.inserted,
     catalogUpdated: catalogResult.updated,
     bucketCounts
@@ -572,7 +586,8 @@ function createEmptyBucketCounts(): Record<UniversePoolBucketId, number> {
   return {
     cn_a: 0,
     etf: 0,
-    precious_metal: 0
+    metal_futures: 0,
+    metal_spot: 0
   };
 }
 
@@ -582,11 +597,13 @@ async function ingestUniverseTradeDate(
   tradeDate: string,
   stockSymbols: Set<string>,
   etfSymbols: Set<string>,
+  futuresSymbols: Set<string>,
+  spotSymbols: Set<string>,
   totals: IngestTotals
 ): Promise<void> {
   const tradeDateRaw = toTushareDate(tradeDate);
 
-  const [daily, fundDaily, basics, moneyflow] = await Promise.all([
+  const [daily, fundDaily, basics, moneyflow, futDaily, futSettle, sgeDaily] = await Promise.all([
     fetchTusharePaged(
       "daily",
       token,
@@ -610,6 +627,24 @@ async function ingestUniverseTradeDate(
       token,
       { trade_date: tradeDateRaw },
       "ts_code,trade_date,net_mf_vol,net_mf_amount"
+    ),
+    fetchTusharePagedSafe(
+      "fut_daily",
+      token,
+      { trade_date: tradeDateRaw },
+      "ts_code,trade_date,pre_close,pre_settle,open,high,low,close,settle,change1,change2,vol,amount,oi,oi_chg"
+    ),
+    fetchTusharePagedSafe(
+      "fut_settle",
+      token,
+      { trade_date: tradeDateRaw },
+      "ts_code,trade_date,settle,delv_settle"
+    ),
+    fetchTusharePagedSafe(
+      "sge_daily",
+      token,
+      { trade_date: tradeDateRaw },
+      "ts_code,trade_date,open,high,low,close,change,pct_change,vol,amount,oi,price_avg,settle_vol,settle_dire"
     )
   ]);
 
@@ -619,6 +654,16 @@ async function ingestUniverseTradeDate(
   const fundRows = mapDailyPriceRows(fundDaily, etfSymbols, "tushare", now);
   const basicRows = mapDailyBasicRows(basics, stockSymbols, "tushare", now);
   const moneyRows = mapDailyMoneyflowRows(moneyflow, stockSymbols, "tushare", now);
+  const futuresPriceRows = mapDailyPriceRows(futDaily, futuresSymbols, "tushare", now);
+  const futuresExtRows = mapFuturesExtRows(
+    futDaily,
+    futSettle,
+    futuresSymbols,
+    "tushare",
+    now
+  );
+  const spotPriceRows = mapDailyPriceRows(sgeDaily, spotSymbols, "tushare", now);
+  const spotExtRows = mapSpotExtRows(sgeDaily, spotSymbols, "tushare", now);
 
   const conn = await analysisHandle.connect();
   try {
@@ -633,7 +678,7 @@ async function ingestUniverseTradeDate(
       "volume",
       "source",
       "ingested_at"
-    ], [...dailyRows, ...fundRows]);
+    ], [...dailyRows, ...fundRows, ...futuresPriceRows, ...spotPriceRows]);
     await upsertDuckdbRows(conn, "daily_basics", [
       "symbol",
       "trade_date",
@@ -650,9 +695,45 @@ async function ingestUniverseTradeDate(
       "source",
       "ingested_at"
     ], moneyRows);
+    await upsertDuckdbRows(conn, "futures_daily_ext", [
+      "symbol",
+      "trade_date",
+      "pre_close",
+      "pre_settle",
+      "settle",
+      "change1",
+      "change2",
+      "amount",
+      "oi",
+      "oi_chg",
+      "delv_settle",
+      "source",
+      "ingested_at"
+    ], futuresExtRows);
+    await upsertDuckdbRows(conn, "spot_sge_daily_ext", [
+      "symbol",
+      "trade_date",
+      "price_avg",
+      "change",
+      "pct_change",
+      "amount",
+      "oi",
+      "settle_vol",
+      "settle_dire",
+      "source",
+      "ingested_at"
+    ], spotExtRows);
     await conn.query("commit;");
 
-    totals.inserted += dailyRows.length + fundRows.length + basicRows.length + moneyRows.length;
+    totals.inserted +=
+      dailyRows.length +
+      fundRows.length +
+      futuresPriceRows.length +
+      spotPriceRows.length +
+      basicRows.length +
+      moneyRows.length +
+      futuresExtRows.length +
+      spotExtRows.length;
   } catch (err) {
     totals.errors += 1;
     try {
@@ -663,6 +744,20 @@ async function ingestUniverseTradeDate(
     throw err;
   } finally {
     await conn.close();
+  }
+}
+
+async function fetchTusharePagedSafe(
+  apiName: string,
+  token: string,
+  params: Record<string, string | undefined>,
+  fields: string
+): Promise<{ fields: string[]; items: (string | number | null)[][] }> {
+  try {
+    return await fetchTusharePaged(apiName, token, params, fields);
+  } catch (error) {
+    console.warn(`[mytrader] universe ingest skipped ${apiName}: ${toErrorMessage(error)}`);
+    return { fields: [], items: [] };
   }
 }
 
@@ -768,6 +863,169 @@ function mapDailyMoneyflowRows(
   return result;
 }
 
+function mapFuturesExtRows(
+  futDaily: { fields: string[]; items: (string | number | null)[][] },
+  futSettle: { fields: string[]; items: (string | number | null)[][] },
+  allowed: Set<string>,
+  source: MarketDataSource,
+  ingestedAt: number
+): Array<
+  [
+    string,
+    string,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    string,
+    number
+  ]
+> {
+  const fields = futDaily.fields ?? [];
+  const rows = futDaily.items ?? [];
+  const idxSymbol = fields.indexOf("ts_code");
+  const idxDate = fields.indexOf("trade_date");
+  const idxPreClose = fields.indexOf("pre_close");
+  const idxPreSettle = fields.indexOf("pre_settle");
+  const idxSettle = fields.indexOf("settle");
+  const idxChange1 = fields.indexOf("change1");
+  const idxChange2 = fields.indexOf("change2");
+  const idxAmount = fields.indexOf("amount");
+  const idxOi = fields.indexOf("oi");
+  const idxOiChg = fields.indexOf("oi_chg");
+
+  const settleFields = futSettle.fields ?? [];
+  const settleRows = futSettle.items ?? [];
+  const settleSymbol = settleFields.indexOf("ts_code");
+  const settleDate = settleFields.indexOf("trade_date");
+  const settleDelv = settleFields.indexOf("delv_settle");
+  const delvMap = new Map<string, number | null>();
+  if (settleSymbol !== -1 && settleDate !== -1 && settleDelv !== -1) {
+    settleRows.forEach((row) => {
+      const symbol = String(row[settleSymbol] ?? "").trim();
+      const date = normalizeDate(row[settleDate]);
+      if (!symbol || !date) return;
+      delvMap.set(`${symbol}#${date}`, normalizeNumber(row[settleDelv]));
+    });
+  }
+
+  if (idxSymbol === -1 || idxDate === -1) return [];
+  const result: Array<
+    [
+      string,
+      string,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      string,
+      number
+    ]
+  > = [];
+  for (const row of rows) {
+    const symbol = String(row[idxSymbol]);
+    if (!allowed.has(symbol)) continue;
+    const tradeDate = normalizeDate(row[idxDate]);
+    if (!tradeDate) continue;
+    result.push([
+      symbol,
+      tradeDate,
+      idxPreClose === -1 ? null : normalizeNumber(row[idxPreClose]),
+      idxPreSettle === -1 ? null : normalizeNumber(row[idxPreSettle]),
+      idxSettle === -1 ? null : normalizeNumber(row[idxSettle]),
+      idxChange1 === -1 ? null : normalizeNumber(row[idxChange1]),
+      idxChange2 === -1 ? null : normalizeNumber(row[idxChange2]),
+      idxAmount === -1 ? null : normalizeNumber(row[idxAmount]),
+      idxOi === -1 ? null : normalizeNumber(row[idxOi]),
+      idxOiChg === -1 ? null : normalizeNumber(row[idxOiChg]),
+      delvMap.get(`${symbol}#${tradeDate}`) ?? null,
+      source,
+      ingestedAt
+    ]);
+  }
+  return result;
+}
+
+function mapSpotExtRows(
+  res: { fields: string[]; items: (string | number | null)[][] },
+  allowed: Set<string>,
+  source: MarketDataSource,
+  ingestedAt: number
+): Array<
+  [
+    string,
+    string,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    string | null,
+    string,
+    number
+  ]
+> {
+  const fields = res.fields ?? [];
+  const rows = res.items ?? [];
+  const idxSymbol = fields.indexOf("ts_code");
+  const idxDate = fields.indexOf("trade_date");
+  const idxPriceAvg = fields.indexOf("price_avg");
+  const idxChange = fields.indexOf("change");
+  const idxPctChange = fields.indexOf("pct_change");
+  const idxAmount = fields.indexOf("amount");
+  const idxOi = fields.indexOf("oi");
+  const idxSettleVol = fields.indexOf("settle_vol");
+  const idxSettleDire = fields.indexOf("settle_dire");
+  if (idxSymbol === -1 || idxDate === -1) return [];
+
+  const result: Array<
+    [
+      string,
+      string,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      string | null,
+      string,
+      number
+    ]
+  > = [];
+  for (const row of rows) {
+    const symbol = String(row[idxSymbol]);
+    if (!allowed.has(symbol)) continue;
+    const tradeDate = normalizeDate(row[idxDate]);
+    if (!tradeDate) continue;
+    result.push([
+      symbol,
+      tradeDate,
+      idxPriceAvg === -1 ? null : normalizeNumber(row[idxPriceAvg]),
+      idxChange === -1 ? null : normalizeNumber(row[idxChange]),
+      idxPctChange === -1 ? null : normalizeNumber(row[idxPctChange]),
+      idxAmount === -1 ? null : normalizeNumber(row[idxAmount]),
+      idxOi === -1 ? null : normalizeNumber(row[idxOi]),
+      idxSettleVol === -1 ? null : normalizeNumber(row[idxSettleVol]),
+      idxSettleDire === -1 ? null : String(row[idxSettleDire] ?? "").trim() || null,
+      source,
+      ingestedAt
+    ]);
+  }
+  return result;
+}
+
 async function upsertDuckdbRows(
   conn: AsyncDuckDBConnection,
   table: string,
@@ -806,6 +1064,26 @@ function formatDuckdbValue(value: unknown): string {
   return `'${escapeSql(String(value))}'`;
 }
 
+function toDuckdbNullableString(value: string | null): string {
+  if (!value) return "null";
+  return `'${escapeSql(value)}'`;
+}
+
+function getRawString(
+  raw: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = raw[key];
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
 async function getUniverseCursorDate(
   analysisHandle: Awaited<ReturnType<typeof openAnalysisDuckdb>>,
   fallback: string
@@ -841,19 +1119,6 @@ async function setUniverseCursorDate(
   } finally {
     await conn.close();
   }
-}
-
-async function getLatestPriceDate(
-  marketDb: SqliteDatabase,
-  symbol: string
-): Promise<string | null> {
-  const rows = await marketDb.exec(
-    `select trade_date from daily_prices where symbol = '${escapeSql(symbol)}' order by trade_date desc limit 1`
-  );
-  if (!rows.length) return null;
-  const values = rows[0].values;
-  if (!values.length) return null;
-  return (values[0][0] as string) ?? null;
 }
 
 function escapeSql(value: string): string {
