@@ -5,8 +5,11 @@ import type {
   UniversePoolBucketId
 } from "@mytrader/shared";
 
-import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analysisDuckdb";
-import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
+import {
+  openAnalysisDuckdb,
+  ensureAnalysisDuckdbSchema,
+  type AnalysisDuckdbConnection
+} from "../storage/analysisDuckdb";
 import type { SqliteDatabase } from "../storage/sqlite";
 import {
   getMarketTargetTaskMatrixConfig,
@@ -308,6 +311,8 @@ export async function runUniverseIngest(input: {
         spotSymbols,
         catalogInserted,
         catalogUpdated,
+        duckdbInserted,
+        duckdbUpdated,
         bucketCounts
       } =
         await syncUniverseInstrumentMeta(
@@ -326,7 +331,11 @@ export async function runUniverseIngest(input: {
         asOfTradeDate
       );
 
-      const totals: IngestTotals = { inserted: 0, updated: 0, errors: 0 };
+      const totals: IngestTotals = {
+        inserted: duckdbInserted,
+        updated: duckdbUpdated,
+        errors: 0
+      };
       let lastDone: string | null = null;
 
       for (const tradeDate of tradeDates) {
@@ -639,6 +648,8 @@ async function syncUniverseInstrumentMeta(
   spotSymbols: Set<string>;
   catalogInserted: number;
   catalogUpdated: number;
+  duckdbInserted: number;
+  duckdbUpdated: number;
   bucketCounts: Record<UniversePoolBucketId, number>;
 }> {
   const provider = getMarketProvider("tushare");
@@ -683,11 +694,37 @@ async function syncUniverseInstrumentMeta(
   try {
     await conn.query("begin transaction;");
     const now = Date.now();
+    let duckdbInserted = 0;
+    let duckdbUpdated = 0;
+
+    const existingInstrumentSymbols = await getDuckdbExistingSingleKeys(
+      conn,
+      "instrument_meta",
+      "symbol",
+      eligible.map((profile) => profile.symbol)
+    );
+    const existingFuturesSymbols = await getDuckdbExistingSingleKeys(
+      conn,
+      "futures_contract_meta",
+      "ts_code",
+      futures.map((profile) => profile.symbol)
+    );
+    const existingSpotSymbols = await getDuckdbExistingSingleKeys(
+      conn,
+      "spot_sge_contract_meta",
+      "ts_code",
+      spot.map((profile) => profile.symbol)
+    );
 
     for (const profile of eligible) {
       await checkpointOrThrow(control);
       const providerRaw =
         (profile.providerData?.raw as Record<string, unknown> | undefined) ?? {};
+      if (existingInstrumentSymbols.has(profile.symbol)) {
+        duckdbUpdated += 1;
+      } else {
+        duckdbInserted += 1;
+      }
       await conn.query(
         `
           insert into instrument_meta (
@@ -718,6 +755,11 @@ async function syncUniverseInstrumentMeta(
         `
       );
       if (profile.assetClass === "futures") {
+        if (existingFuturesSymbols.has(profile.symbol)) {
+          duckdbUpdated += 1;
+        } else {
+          duckdbInserted += 1;
+        }
         await conn.query(
           `
             insert into futures_contract_meta (
@@ -752,6 +794,11 @@ async function syncUniverseInstrumentMeta(
         );
       }
       if (profile.assetClass === "spot") {
+        if (existingSpotSymbols.has(profile.symbol)) {
+          duckdbUpdated += 1;
+        } else {
+          duckdbInserted += 1;
+        }
         await conn.query(
           `
             insert into spot_sge_contract_meta (
@@ -787,19 +834,20 @@ async function syncUniverseInstrumentMeta(
       }
     }
     await conn.query("commit;");
+    return {
+      stockSymbols: new Set(stocks.map((p) => p.symbol)),
+      etfSymbols: new Set(etfs.map((p) => p.symbol)),
+      futuresSymbols: new Set(futures.map((p) => p.symbol)),
+      spotSymbols: new Set(spot.map((p) => p.symbol)),
+      catalogInserted: catalogResult.inserted,
+      catalogUpdated: catalogResult.updated,
+      duckdbInserted,
+      duckdbUpdated,
+      bucketCounts
+    };
   } finally {
     await conn.close();
   }
-
-  return {
-    stockSymbols: new Set(stocks.map((p) => p.symbol)),
-    etfSymbols: new Set(etfs.map((p) => p.symbol)),
-    futuresSymbols: new Set(futures.map((p) => p.symbol)),
-    spotSymbols: new Set(spot.map((p) => p.symbol)),
-    catalogInserted: catalogResult.inserted,
-    catalogUpdated: catalogResult.updated,
-    bucketCounts
-  };
 }
 
 function createEmptyBucketCounts(): Record<UniversePoolBucketId, number> {
@@ -1283,7 +1331,7 @@ function mapSpotExtRows(
 }
 
 async function upsertDuckdbRows(
-  conn: AsyncDuckDBConnection,
+  conn: AnalysisDuckdbConnection,
   table: string,
   columns: string[],
   rows: any[][]
@@ -1324,6 +1372,36 @@ async function upsertDuckdbRows(
   return { inserted, updated };
 }
 
+async function getDuckdbExistingSingleKeys(
+  conn: AnalysisDuckdbConnection,
+  table: string,
+  keyColumn: string,
+  keys: string[]
+): Promise<Set<string>> {
+  const normalized = Array.from(new Set(keys.map((value) => value.trim()).filter(Boolean)));
+  if (normalized.length === 0) return new Set<string>();
+
+  const existing = new Set<string>();
+  const chunkSize = 500;
+  for (let idx = 0; idx < normalized.length; idx += chunkSize) {
+    const chunk = normalized.slice(idx, idx + chunkSize);
+    const valuesSql = chunk.map((value) => formatDuckdbValue(value)).join(", ");
+    const result = await conn.query(
+      `
+        select "${keyColumn}" as key
+        from ${table}
+        where "${keyColumn}" in (${valuesSql})
+      `
+    );
+    const rows = result.toArray() as Array<{ key?: string | null }>;
+    rows.forEach((row) => {
+      const value = typeof row.key === "string" ? row.key.trim() : "";
+      if (value) existing.add(value);
+    });
+  }
+  return existing;
+}
+
 function formatDuckdbValue(value: unknown): string {
   if (value === null || value === undefined) return "null";
   if (typeof value === "number") {
@@ -1335,7 +1413,7 @@ function formatDuckdbValue(value: unknown): string {
 }
 
 async function countDuckdbExistingRowsByKey(
-  conn: AsyncDuckDBConnection,
+  conn: AnalysisDuckdbConnection,
   table: string,
   keyColumnA: string,
   keyColumnB: string,

@@ -107,7 +107,13 @@ export async function enqueueManagedIngest(input: {
   const now = Date.now();
 
   for (const scope of scopes) {
-    if (hasScopeInFlight(scope)) {
+    if (
+      hasScopeInFlight({
+        scope,
+        mode: input.mode,
+        source: input.source
+      })
+    ) {
       skipped += 1;
       continue;
     }
@@ -466,9 +472,24 @@ function buildControl(sessionId: number): IngestExecutionControl {
   };
 }
 
-function hasScopeInFlight(scope: JobScope): boolean {
-  if (state.currentJob?.scope === scope) return true;
-  return state.queue.some((job) => job.scope === scope);
+function hasScopeInFlight(input: {
+  scope: JobScope;
+  mode: IngestRunMode;
+  source: JobSource;
+}): boolean {
+  if (
+    state.currentJob?.scope === input.scope &&
+    state.currentJob.mode === input.mode &&
+    state.currentJob.source === input.source
+  ) {
+    return true;
+  }
+  return state.queue.some(
+    (job) =>
+      job.scope === input.scope &&
+      job.mode === input.mode &&
+      job.source === input.source
+  );
 }
 
 function expandScopes(scope: OrchestratorScope): JobScope[] {

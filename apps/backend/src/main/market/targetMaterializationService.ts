@@ -1,12 +1,14 @@
-import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
-
 import type {
   AssetClass,
   TargetTaskModuleId,
   TargetTaskStatus
 } from "@mytrader/shared";
 
-import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analysisDuckdb";
+import {
+  openAnalysisDuckdb,
+  ensureAnalysisDuckdbSchema,
+  type AnalysisDuckdbConnection
+} from "../storage/analysisDuckdb";
 import { get } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 import { getMarketTargetTaskMatrixConfig } from "../storage/marketSettingsRepository";
@@ -445,7 +447,7 @@ export async function materializeTargetsFromSsot(
 }
 
 async function queryOne<T>(
-  conn: AsyncDuckDBConnection,
+  conn: AnalysisDuckdbConnection,
   sql: string
 ): Promise<T | null> {
   const result = await conn.query(sql);

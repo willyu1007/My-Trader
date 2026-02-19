@@ -12,8 +12,8 @@
     "verify:position-engine": "pnpm run build && node dist/verify-position-engine.js"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.4.4-r.1",
     "@mytrader/shared": "workspace:*",
-    "@duckdb/duckdb-wasm": "^1.28.1",
     "sql.js": "^1.11.0"
   },
   "devDependencies": {

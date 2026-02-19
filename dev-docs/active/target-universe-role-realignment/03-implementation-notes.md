@@ -34,3 +34,11 @@
 - 2026-02-19: 前端数据管理页补齐双池控制面板：
   - 新增“目标任务矩阵（SSOT-first）”面板，支持模块开关、回补窗口、覆盖率预览、状态筛选、手动物化。
   - 启用并接线“全量池配置”面板，恢复 `metal_futures/metal_spot` 的可视化配置入口。
+- 2026-02-19: DuckDB 接入层稳定性修复：
+  - 移除 `@duckdb/duckdb-wasm` + 自定义 worker 适配，改用 `@duckdb/node-api` 持久化引擎。
+  - 保持 `openAnalysisDuckdb/ensureAnalysisDuckdbSchema` API 不变，仅替换底层连接实现，消除 reopen 后只读/损坏问题。
+- 2026-02-19: Universe 标签与统计语义修正：
+  - `metal_spot` 识别补充 `iAu/iAg` 规则，保证 SGE 国际板合约进入全量池。
+  - Universe 运行统计新增 DuckDB 元数据 upsert 计数（`instrument_meta/futures_contract_meta/spot_sge_contract_meta`），`ingest_runs.inserted/updated` 与真实写入对齐。
+- 2026-02-19: 调度去重策略修正：
+  - Orchestrator 入队去重从“按 scope”改为“按 scope+mode+source”，避免 `schedule` 压掉 `startup`，保证启动补跑可执行。

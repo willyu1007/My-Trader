@@ -1,167 +1,72 @@
 import path from "node:path";
-import { Worker as NodeWorker } from "node:worker_threads";
 
-import type {
-  AsyncDuckDB,
-  AsyncDuckDBConnection,
-  DuckDBAccessMode
-} from "@duckdb/duckdb-wasm";
+import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 
-type DuckdbModule = typeof import("@duckdb/duckdb-wasm");
-
-type WorkerLike = {
-  onmessage: ((event: { data: unknown }) => void) | null;
-  onerror: ((event: unknown) => void) | null;
-  postMessage: (data: unknown, transferList?: ArrayBuffer[]) => void;
-  terminate: () => void;
-  addEventListener: (type: string, listener: (event: unknown) => void) => void;
-  removeEventListener: (type: string, listener: (event: unknown) => void) => void;
+export type AnalysisDuckdbQueryResult = {
+  toArray: () => Array<Record<string, unknown>>;
 };
 
-let duckdbModule: DuckdbModule | null = null;
-
-async function getDuckdbModule(): Promise<DuckdbModule> {
-  if (!duckdbModule) {
-    duckdbModule = await import("@duckdb/duckdb-wasm");
-  }
-  return duckdbModule;
-}
-
-function createNodeWebWorker(modulePath: string): WorkerLike {
-  const bootstrap = `
-    const { parentPort, workerData } = require('node:worker_threads');
-    const listeners = new Map();
-    function dispatch(type, data) {
-      const event = { type, data, target: globalThis, currentTarget: globalThis };
-      const handler = globalThis['on' + type];
-      if (typeof handler === 'function') {
-        try { handler(event); } catch (e) { console.error(e); }
-      }
-      const list = listeners.get(type);
-      if (list) {
-        for (const fn of list) {
-          try { fn.call(globalThis, event); } catch (e) { console.error(e); }
-        }
-      }
-    }
-    globalThis.addEventListener = (type, fn) => {
-      const list = listeners.get(type) || [];
-      list.push(fn);
-      listeners.set(type, list);
-    };
-    globalThis.removeEventListener = (type, fn) => {
-      const list = listeners.get(type);
-      if (!list) return;
-      const idx = list.indexOf(fn);
-      if (idx >= 0) list.splice(idx, 1);
-    };
-    globalThis.dispatchEvent = (event) => dispatch(event.type, event.data);
-    globalThis.postMessage = (data, transferList) => parentPort.postMessage(data, transferList);
-    parentPort.on('message', (data) => dispatch('message', data));
-    parentPort.on('error', (err) => dispatch('error', err));
-    require(workerData.modulePath);
-  `;
-
-  const worker = new NodeWorker(bootstrap, {
-    eval: true,
-    workerData: { modulePath }
-  });
-
-  const messageListeners = new Set<(event: { data: unknown }) => void>();
-  const errorListeners = new Set<(event: unknown) => void>();
-
-  const wrapper: WorkerLike = {
-    onmessage: null,
-    onerror: null,
-    addEventListener(type, listener) {
-      if (type === "message") {
-        messageListeners.add(listener as (event: { data: unknown }) => void);
-        return;
-      }
-      if (type === "error") {
-        errorListeners.add(listener);
-      }
-    },
-    removeEventListener(type, listener) {
-      if (type === "message") {
-        messageListeners.delete(listener as (event: { data: unknown }) => void);
-        return;
-      }
-      if (type === "error") {
-        errorListeners.delete(listener);
-      }
-    },
-    postMessage(data, transferList) {
-      worker.postMessage(data, transferList as any);
-    },
-    terminate() {
-      worker.terminate();
-    }
-  };
-
-  worker.on("message", (data) => {
-    const event = { data };
-    if (typeof wrapper.onmessage === "function") wrapper.onmessage(event);
-    messageListeners.forEach((listener) => {
-      listener(event);
-    });
-  });
-  worker.on("error", (error) => {
-    if (typeof wrapper.onerror === "function") wrapper.onerror(error);
-    errorListeners.forEach((listener) => {
-      listener(error);
-    });
-  });
-
-  return wrapper;
-}
+export type AnalysisDuckdbConnection = {
+  query: (sql: string) => Promise<AnalysisDuckdbQueryResult>;
+  close: () => Promise<void>;
+};
 
 export type AnalysisDuckdbHandle = {
-  db: AsyncDuckDB;
-  connect: () => Promise<AsyncDuckDBConnection>;
+  connect: () => Promise<AnalysisDuckdbConnection>;
   close: () => Promise<void>;
 };
 
 export async function openAnalysisDuckdb(
   analysisDbPath: string
 ): Promise<AnalysisDuckdbHandle> {
-  const duckdb = await getDuckdbModule();
-
-  const wasmMvp = require.resolve("@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm");
-  const wasmEh = require.resolve("@duckdb/duckdb-wasm/dist/duckdb-eh.wasm");
-  const workerMvp = require.resolve(
-    "@duckdb/duckdb-wasm/dist/duckdb-node-mvp.worker.cjs"
-  );
-  const workerEh = require.resolve(
-    "@duckdb/duckdb-wasm/dist/duckdb-node-eh.worker.cjs"
-  );
-
-  const bundles = {
-    mvp: { mainModule: wasmMvp, mainWorker: workerMvp },
-    eh: { mainModule: wasmEh, mainWorker: workerEh }
-  } as const;
-
-  const bundle = await duckdb.selectBundle(bundles as any);
-  if (!bundle.mainWorker) {
-    throw new Error("[mytrader] DuckDB bundle missing worker entry.");
-  }
-  const worker = createNodeWebWorker(bundle.mainWorker);
-
-  const logger = new duckdb.VoidLogger();
-  const db = new duckdb.AsyncDuckDB(logger, worker as any);
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-
-  const accessMode = duckdb.DuckDBAccessMode.READ_WRITE as DuckDBAccessMode;
-  await db.open({
-    path: path.resolve(analysisDbPath),
-    accessMode
+  const instance = await DuckDBInstance.create(path.resolve(analysisDbPath), {
+    access_mode: "read_write"
   });
+  const openedConnections = new Set<DuckDBConnection>();
+  let closed = false;
+
+  const closeConnection = (connection: DuckDBConnection): void => {
+    if (!openedConnections.delete(connection)) return;
+    try {
+      connection.closeSync();
+    } catch {
+      // ignore close errors during teardown
+    }
+  };
 
   return {
-    db,
-    connect: async () => await db.connect(),
+    connect: async () => {
+      if (closed) {
+        throw new Error("[mytrader] analysis.duckdb handle already closed.");
+      }
+      const rawConnection = await instance.connect();
+      openedConnections.add(rawConnection);
+      return {
+        query: async (sql: string) => {
+          const reader = await rawConnection.runAndReadAll(sql);
+          const rows =
+            (reader.getRowObjectsJson() as Array<Record<string, unknown>>) ?? [];
+          return {
+            toArray: () => rows
+          };
+        },
+        close: async () => {
+          closeConnection(rawConnection);
+        }
+      };
+    },
     close: async () => {
-      await db.terminate();
+      if (closed) return;
+      closed = true;
+      for (const connection of openedConnections) {
+        try {
+          connection.closeSync();
+        } catch {
+          // ignore close errors during teardown
+        }
+      }
+      openedConnections.clear();
+      instance.closeSync();
     }
   };
 }
