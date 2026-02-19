@@ -10,24 +10,40 @@ import {
   OtherDataManagementTargetPoolEditorPane,
   type OtherDataManagementTargetPoolEditorPaneProps
 } from "./OtherDataManagementTargetPoolEditorPane";
+import {
+  OtherDataManagementUniversePoolPanel,
+  type OtherDataManagementUniversePoolPanelProps
+} from "./OtherDataManagementUniversePoolPanel";
 
 export type OtherDataManagementTargetPoolSectionProps = Pick<
   OtherViewProps,
   | "Button"
+  | "UNIVERSE_POOL_BUCKET_ORDER"
+  | "formatCnDate"
+  | "getUniversePoolBucketLabel"
   | "handleResetTargetsDraft"
+  | "handleSaveUniversePoolConfig"
   | "handleSaveTargets"
   | "handleTargetsEditorResizeKeyDown"
   | "handleTargetsEditorResizePointerDown"
+  | "handleToggleUniversePoolBucket"
   | "marketTargetsDiffPreview"
   | "marketTargetsDirty"
   | "marketTargetsLoading"
   | "marketTargetsPreview"
   | "marketTargetsSaving"
+  | "marketUniverseBucketStatusById"
+  | "marketUniverseEnabledBuckets"
+  | "marketUniversePoolConfig"
+  | "marketUniversePoolDirty"
+  | "marketUniversePoolLoading"
+  | "marketUniversePoolSaving"
   | "refreshMarketTargets"
   | "refreshMarketTargetsDiff"
   | "targetsEditorGridRef"
   | "targetsEditorLeftPct"
 > &
+  OtherDataManagementUniversePoolPanelProps &
   OtherDataManagementTargetPoolEditorPaneProps &
   OtherDataManagementTargetPoolDiffPaneProps;
 
@@ -65,9 +81,32 @@ export function OtherDataManagementTargetPoolSection(
     setMarketTargetPoolDetailMetric: props.setMarketTargetPoolDetailMetric,
     setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope
   } satisfies OtherDataManagementTargetPoolDiffPaneProps;
+  const universePanelProps = {
+    Button: props.Button,
+    UNIVERSE_POOL_BUCKET_ORDER: props.UNIVERSE_POOL_BUCKET_ORDER,
+    formatCnDate: props.formatCnDate,
+    getUniversePoolBucketLabel: props.getUniversePoolBucketLabel,
+    handleSaveUniversePoolConfig: props.handleSaveUniversePoolConfig,
+    handleToggleUniversePoolBucket: props.handleToggleUniversePoolBucket,
+    marketUniverseBucketStatusById: props.marketUniverseBucketStatusById,
+    marketUniverseEnabledBuckets: props.marketUniverseEnabledBuckets,
+    marketUniversePoolConfig: props.marketUniversePoolConfig,
+    marketUniversePoolDirty: props.marketUniversePoolDirty,
+    marketUniversePoolLoading: props.marketUniversePoolLoading,
+    marketUniversePoolSaving: props.marketUniversePoolSaving
+  } satisfies OtherDataManagementUniversePoolPanelProps;
 
   return (
     <>
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-bold text-slate-900 dark:text-white">
+            全量池
+          </h3>
+        </div>
+        <OtherDataManagementUniversePoolPanel {...universePanelProps} />
+      </section>
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-bold text-slate-900 dark:text-white">

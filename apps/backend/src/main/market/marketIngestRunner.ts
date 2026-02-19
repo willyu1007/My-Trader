@@ -9,13 +9,14 @@ import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analy
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import type { SqliteDatabase } from "../storage/sqlite";
 import {
+  getMarketTargetTaskMatrixConfig,
   updateMarketUniversePoolBucketStates
 } from "../storage/marketSettingsRepository";
 import { getMarketDataSourceConfig } from "../storage/marketDataSourceRepository";
 import { createIngestRun, finishIngestRun } from "./ingestRunsRepository";
 import { ingestLock } from "./ingestLock";
 import { upsertInstrumentProfiles } from "./instrumentCatalogRepository";
-import { upsertInstruments } from "./marketRepository";
+import { getInstrumentsBySymbols, upsertInstruments } from "./marketRepository";
 import { getMarketProvider } from "./providers";
 import { hasUniversePoolTag } from "./universePoolBuckets";
 import {
@@ -40,6 +41,20 @@ type IngestTotals = {
   inserted: number;
   updated: number;
   errors: number;
+};
+
+type DuckdbUpsertStats = {
+  inserted: number;
+  updated: number;
+};
+
+type TargetGapBackfillStats = {
+  attemptedSymbols: number;
+  inserted: number;
+  updated: number;
+  errors: number;
+  startDate: string;
+  endDate: string;
 };
 
 export type IngestCheckpointResult = "continue" | "cancel";
@@ -107,26 +122,56 @@ export async function runTargetsIngest(input: {
       }
 
       const totals: IngestTotals = { inserted: 0, updated: 0, errors: 0 };
-      const result = await materializeTargetsFromSsot({
+      const matrixConfig = await getMarketTargetTaskMatrixConfig(input.businessDb);
+      let result = await materializeTargetsFromSsot({
         businessDb: input.businessDb,
         marketDb: input.marketDb,
         analysisDbPath: input.analysisDbPath,
         asOfTradeDate,
         sourceRunId: runId
       });
-      totals.inserted = result.completeCount;
-      totals.updated = result.partialCount;
-      totals.errors = result.missingCount;
+      totals.inserted += result.insertedRows;
+      totals.updated += result.updatedRows;
+
+      let backfillStats: TargetGapBackfillStats | null = null;
+      if (result.missingSymbols.length > 0) {
+        await checkpointOrThrow(input.control);
+        backfillStats = await backfillMissingTargetsFromUniverse({
+          marketDb: input.marketDb,
+          analysisDbPath: input.analysisDbPath,
+          token,
+          asOfTradeDate,
+          lookbackDays: matrixConfig.defaultLookbackDays,
+          symbols: result.missingSymbols,
+          control: input.control
+        });
+        await checkpointOrThrow(input.control);
+        result = await materializeTargetsFromSsot({
+          businessDb: input.businessDb,
+          marketDb: input.marketDb,
+          analysisDbPath: input.analysisDbPath,
+          asOfTradeDate,
+          sourceRunId: runId
+        });
+        totals.inserted += result.insertedRows;
+        totals.updated += result.updatedRows;
+      }
 
       await finishIngestRun(input.marketDb, {
         id: runId,
-        status: totals.errors > 0 ? "partial" : "success",
+        status: result.missingCount > 0 ? "partial" : "success",
         asOfTradeDate,
         symbolCount: result.symbolCount,
         inserted: totals.inserted,
         updated: totals.updated,
         errors: totals.errors,
-        meta: { ...(input.meta ?? {}), kind: "targets" }
+        meta: {
+          ...(input.meta ?? {}),
+          kind: "targets",
+          matrixLookbackDays: matrixConfig.defaultLookbackDays,
+          missingModules: result.missingCount,
+          backfill: backfillStats
+        }
       });
     } catch (err) {
       if (err instanceof IngestCanceledError) {
@@ -344,6 +389,101 @@ export async function runUniverseIngest(input: {
 
 function getMetaArray<T>(value: unknown, fallback: T[]): T[] {
   return Array.isArray(value) ? (value as T[]) : fallback;
+}
+
+async function backfillMissingTargetsFromUniverse(input: {
+  marketDb: SqliteDatabase;
+  analysisDbPath: string;
+  token: string;
+  asOfTradeDate: string;
+  lookbackDays: number;
+  symbols: string[];
+  control?: IngestExecutionControl;
+}): Promise<TargetGapBackfillStats> {
+  const normalizedSymbols = Array.from(
+    new Set(input.symbols.map((value) => value.trim()).filter(Boolean))
+  );
+  const lookbackDays = Math.max(
+    1,
+    Math.min(720, Math.floor(Number(input.lookbackDays) || 180))
+  );
+  const asOf = parseDate(input.asOfTradeDate) ?? new Date();
+  const startDate = formatDate(addDays(asOf, -(lookbackDays - 1)));
+  const endDate = input.asOfTradeDate;
+
+  const bySymbol = await getInstrumentsBySymbols(input.marketDb, normalizedSymbols);
+  const stockSymbols = new Set<string>();
+  const etfSymbols = new Set<string>();
+  const futuresSymbols = new Set<string>();
+  const spotSymbols = new Set<string>();
+  normalizedSymbols.forEach((symbol) => {
+    const assetClass = bySymbol.get(symbol)?.assetClass;
+    if (assetClass === "stock") stockSymbols.add(symbol);
+    if (assetClass === "etf") etfSymbols.add(symbol);
+    if (assetClass === "futures") futuresSymbols.add(symbol);
+    if (assetClass === "spot") spotSymbols.add(symbol);
+  });
+
+  const attemptedSymbols =
+    stockSymbols.size + etfSymbols.size + futuresSymbols.size + spotSymbols.size;
+  if (attemptedSymbols === 0) {
+    return {
+      attemptedSymbols: 0,
+      inserted: 0,
+      updated: 0,
+      errors: 0,
+      startDate,
+      endDate
+    };
+  }
+
+  const tradeDates = await listOpenTradeDatesBetween(
+    input.marketDb,
+    "CN",
+    startDate,
+    endDate
+  );
+  if (tradeDates.length === 0) {
+    return {
+      attemptedSymbols,
+      inserted: 0,
+      updated: 0,
+      errors: 0,
+      startDate,
+      endDate
+    };
+  }
+
+  const totals: IngestTotals = { inserted: 0, updated: 0, errors: 0 };
+  const analysisHandle = await openAnalysisDuckdb(input.analysisDbPath);
+  try {
+    await ensureAnalysisDuckdbSchema(analysisHandle);
+    for (const tradeDate of tradeDates) {
+      await checkpointOrThrow(input.control);
+      await ingestUniverseTradeDate(
+        analysisHandle,
+        input.token,
+        tradeDate,
+        stockSymbols,
+        etfSymbols,
+        futuresSymbols,
+        spotSymbols,
+        totals
+      );
+      await yieldToEventLoop();
+    }
+  } finally {
+    await analysisHandle.close();
+  }
+
+  return {
+    attemptedSymbols,
+    inserted: totals.inserted,
+    updated: totals.updated,
+    errors: totals.errors,
+    startDate,
+    endDate
+  };
 }
 
 async function ensureTradingCalendar(
@@ -603,50 +743,65 @@ async function ingestUniverseTradeDate(
 ): Promise<void> {
   const tradeDateRaw = toTushareDate(tradeDate);
 
-  const [daily, fundDaily, basics, moneyflow, futDaily, futSettle, sgeDaily] = await Promise.all([
-    fetchTusharePaged(
-      "daily",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,open,high,low,close,vol"
-    ),
-    fetchTusharePaged(
-      "fund_daily",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,open,high,low,close,vol"
-    ),
-    fetchTusharePaged(
-      "daily_basic",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,circ_mv,total_mv"
-    ),
-    fetchTusharePaged(
-      "moneyflow",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,net_mf_vol,net_mf_amount"
-    ),
-    fetchTusharePagedSafe(
-      "fut_daily",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,pre_close,pre_settle,open,high,low,close,settle,change1,change2,vol,amount,oi,oi_chg"
-    ),
-    fetchTusharePagedSafe(
-      "fut_settle",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,settle,delv_settle"
-    ),
-    fetchTusharePagedSafe(
-      "sge_daily",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,open,high,low,close,change,pct_change,vol,amount,oi,price_avg,settle_vol,settle_dire"
-    )
-  ]);
+  const [daily, fundDaily, basics, moneyflow, futDaily, futSettle, sgeDaily] =
+    await Promise.all([
+      stockSymbols.size > 0
+        ? fetchTusharePaged(
+            "daily",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,open,high,low,close,vol"
+          )
+        : createEmptyTusharePagedResult(),
+      etfSymbols.size > 0
+        ? fetchTusharePaged(
+            "fund_daily",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,open,high,low,close,vol"
+          )
+        : createEmptyTusharePagedResult(),
+      stockSymbols.size > 0
+        ? fetchTusharePaged(
+            "daily_basic",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,circ_mv,total_mv"
+          )
+        : createEmptyTusharePagedResult(),
+      stockSymbols.size > 0
+        ? fetchTusharePaged(
+            "moneyflow",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,net_mf_vol,net_mf_amount"
+          )
+        : createEmptyTusharePagedResult(),
+      futuresSymbols.size > 0
+        ? fetchTusharePagedSafe(
+            "fut_daily",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,pre_close,pre_settle,open,high,low,close,settle,change1,change2,vol,amount,oi,oi_chg"
+          )
+        : createEmptyTusharePagedResult(),
+      futuresSymbols.size > 0
+        ? fetchTusharePagedSafe(
+            "fut_settle",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,settle,delv_settle"
+          )
+        : createEmptyTusharePagedResult(),
+      spotSymbols.size > 0
+        ? fetchTusharePagedSafe(
+            "sge_daily",
+            token,
+            { trade_date: tradeDateRaw },
+            "ts_code,trade_date,open,high,low,close,change,pct_change,vol,amount,oi,price_avg,settle_vol,settle_dire"
+          )
+        : createEmptyTusharePagedResult()
+    ]);
 
   const now = Date.now();
 
@@ -668,72 +823,86 @@ async function ingestUniverseTradeDate(
   const conn = await analysisHandle.connect();
   try {
     await conn.query("begin transaction;");
-    await upsertDuckdbRows(conn, "daily_prices", [
-      "symbol",
-      "trade_date",
-      "open",
-      "high",
-      "low",
-      "close",
-      "volume",
-      "source",
-      "ingested_at"
-    ], [...dailyRows, ...fundRows, ...futuresPriceRows, ...spotPriceRows]);
-    await upsertDuckdbRows(conn, "daily_basics", [
-      "symbol",
-      "trade_date",
-      "circ_mv",
-      "total_mv",
-      "source",
-      "ingested_at"
-    ], basicRows);
-    await upsertDuckdbRows(conn, "daily_moneyflows", [
-      "symbol",
-      "trade_date",
-      "net_mf_vol",
-      "net_mf_amount",
-      "source",
-      "ingested_at"
-    ], moneyRows);
-    await upsertDuckdbRows(conn, "futures_daily_ext", [
-      "symbol",
-      "trade_date",
-      "pre_close",
-      "pre_settle",
-      "settle",
-      "change1",
-      "change2",
-      "amount",
-      "oi",
-      "oi_chg",
-      "delv_settle",
-      "source",
-      "ingested_at"
-    ], futuresExtRows);
-    await upsertDuckdbRows(conn, "spot_sge_daily_ext", [
-      "symbol",
-      "trade_date",
-      "price_avg",
-      "change",
-      "pct_change",
-      "amount",
-      "oi",
-      "settle_vol",
-      "settle_dire",
-      "source",
-      "ingested_at"
-    ], spotExtRows);
+    const priceStats = await upsertDuckdbRows(
+      conn,
+      "daily_prices",
+      [
+        "symbol",
+        "trade_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "source",
+        "ingested_at"
+      ],
+      [...dailyRows, ...fundRows, ...futuresPriceRows, ...spotPriceRows]
+    );
+    const basicStats = await upsertDuckdbRows(
+      conn,
+      "daily_basics",
+      ["symbol", "trade_date", "circ_mv", "total_mv", "source", "ingested_at"],
+      basicRows
+    );
+    const moneyflowStats = await upsertDuckdbRows(
+      conn,
+      "daily_moneyflows",
+      ["symbol", "trade_date", "net_mf_vol", "net_mf_amount", "source", "ingested_at"],
+      moneyRows
+    );
+    const futuresExtStats = await upsertDuckdbRows(
+      conn,
+      "futures_daily_ext",
+      [
+        "symbol",
+        "trade_date",
+        "pre_close",
+        "pre_settle",
+        "settle",
+        "change1",
+        "change2",
+        "amount",
+        "oi",
+        "oi_chg",
+        "delv_settle",
+        "source",
+        "ingested_at"
+      ],
+      futuresExtRows
+    );
+    const spotExtStats = await upsertDuckdbRows(
+      conn,
+      "spot_sge_daily_ext",
+      [
+        "symbol",
+        "trade_date",
+        "price_avg",
+        "change",
+        "pct_change",
+        "amount",
+        "oi",
+        "settle_vol",
+        "settle_dire",
+        "source",
+        "ingested_at"
+      ],
+      spotExtRows
+    );
     await conn.query("commit;");
 
     totals.inserted +=
-      dailyRows.length +
-      fundRows.length +
-      futuresPriceRows.length +
-      spotPriceRows.length +
-      basicRows.length +
-      moneyRows.length +
-      futuresExtRows.length +
-      spotExtRows.length;
+      priceStats.inserted +
+      basicStats.inserted +
+      moneyflowStats.inserted +
+      futuresExtStats.inserted +
+      spotExtStats.inserted;
+    totals.updated +=
+      priceStats.updated +
+      basicStats.updated +
+      moneyflowStats.updated +
+      futuresExtStats.updated +
+      spotExtStats.updated;
   } catch (err) {
     totals.errors += 1;
     try {
@@ -759,6 +928,13 @@ async function fetchTusharePagedSafe(
     console.warn(`[mytrader] universe ingest skipped ${apiName}: ${toErrorMessage(error)}`);
     return { fields: [], items: [] };
   }
+}
+
+function createEmptyTusharePagedResult(): Promise<{
+  fields: string[];
+  items: (string | number | null)[][];
+}> {
+  return Promise.resolve({ fields: [], items: [] });
 }
 
 function mapDailyPriceRows(
@@ -1031,8 +1207,8 @@ async function upsertDuckdbRows(
   table: string,
   columns: string[],
   rows: any[][]
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<DuckdbUpsertStats> {
+  if (rows.length === 0) return { inserted: 0, updated: 0 };
 
   const chunkSize = 500;
   const cols = columns.map((c) => `"${c}"`).join(", ");
@@ -1042,8 +1218,19 @@ async function upsertDuckdbRows(
     .map((c) => `"${c}" = excluded.\"${c}\"`)
     .join(", ");
 
-  for (let idx = 0; idx < rows.length; idx += chunkSize) {
-    const chunk = rows.slice(idx, idx + chunkSize);
+  const dedupedRows = dedupeDuckdbRowsByKey(rows);
+  let inserted = 0;
+  let updated = 0;
+
+  for (let idx = 0; idx < dedupedRows.length; idx += chunkSize) {
+    const chunk = dedupedRows.slice(idx, idx + chunkSize);
+    const existing = await countDuckdbExistingRowsByKey(
+      conn,
+      table,
+      columns[0],
+      columns[1],
+      chunk
+    );
     const valuesSql = chunk.map((row) => `(${row.map(formatDuckdbValue).join(", ")})`).join(", ");
     const sql = `
       insert into ${table} (${cols})
@@ -1051,7 +1238,10 @@ async function upsertDuckdbRows(
       on conflict(${keyCols}) do update set ${updateCols}
     `;
     await conn.query(sql);
+    inserted += Math.max(0, chunk.length - existing);
+    updated += Math.max(0, existing);
   }
+  return { inserted, updated };
 }
 
 function formatDuckdbValue(value: unknown): string {
@@ -1062,6 +1252,49 @@ function formatDuckdbValue(value: unknown): string {
   }
   if (typeof value === "boolean") return value ? "true" : "false";
   return `'${escapeSql(String(value))}'`;
+}
+
+async function countDuckdbExistingRowsByKey(
+  conn: AsyncDuckDBConnection,
+  table: string,
+  keyColumnA: string,
+  keyColumnB: string,
+  rows: any[][]
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const keyRows = dedupeDuckdbRowsByKey(rows).map((row) => [
+    row[0],
+    row[1]
+  ]);
+  if (keyRows.length === 0) return 0;
+
+  const valuesSql = keyRows
+    .map(([a, b]) => `(${formatDuckdbValue(a)}, ${formatDuckdbValue(b)})`)
+    .join(", ");
+  const result = await conn.query(
+    `
+      with keyset as (
+        select * from (values ${valuesSql}) as v(k1, k2)
+      )
+      select count(*) as total
+      from ${table} t
+      inner join keyset k
+        on t."${keyColumnA}" = k.k1
+       and t."${keyColumnB}" = k.k2
+    `
+  );
+  const rowsObj = result.toArray() as Array<{ total?: number }>;
+  return Number(rowsObj[0]?.total ?? 0);
+}
+
+function dedupeDuckdbRowsByKey(rows: any[][]): any[][] {
+  if (rows.length <= 1) return rows;
+  const map = new Map<string, any[]>();
+  rows.forEach((row) => {
+    const key = `${String(row[0] ?? "")}\u0000${String(row[1] ?? "")}`;
+    map.set(key, row);
+  });
+  return Array.from(map.values());
 }
 
 function toDuckdbNullableString(value: string | null): string {

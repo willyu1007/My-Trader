@@ -122,6 +122,7 @@ export type OtherViewProps = DashboardMarketState &
 export function OtherView(props: OtherViewProps) {
   const { Panel, otherTab, otherTabs, setOtherTab } = props;
   const dataManagementTabProps = {
+    formatCnDate: props.formatCnDate,
     formatDateTime: props.formatDateTime,
     formatIngestRunStatusLabel: props.formatIngestRunStatusLabel,
     formatIngestRunTone: props.formatIngestRunTone,
@@ -194,6 +195,16 @@ export function OtherView(props: OtherViewProps) {
     setMarketCurrentTargetsModalOpen: props.setMarketCurrentTargetsModalOpen,
     setMarketTargetPoolDetailMetric: props.setMarketTargetPoolDetailMetric,
     setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope,
+    UNIVERSE_POOL_BUCKET_ORDER: props.UNIVERSE_POOL_BUCKET_ORDER,
+    getUniversePoolBucketLabel: props.getUniversePoolBucketLabel,
+    handleSaveUniversePoolConfig: props.handleSaveUniversePoolConfig,
+    handleToggleUniversePoolBucket: props.handleToggleUniversePoolBucket,
+    marketUniverseBucketStatusById: props.marketUniverseBucketStatusById,
+    marketUniverseEnabledBuckets: props.marketUniverseEnabledBuckets,
+    marketUniversePoolConfig: props.marketUniversePoolConfig,
+    marketUniversePoolDirty: props.marketUniversePoolDirty,
+    marketUniversePoolLoading: props.marketUniversePoolLoading,
+    marketUniversePoolSaving: props.marketUniversePoolSaving,
     handleBatchSetRegistryAutoIngest: props.handleBatchSetRegistryAutoIngest,
     handleSetRegistryAutoIngest: props.handleSetRegistryAutoIngest,
     handleToggleRegistrySymbol: props.handleToggleRegistrySymbol,

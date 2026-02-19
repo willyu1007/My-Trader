@@ -16,10 +16,15 @@ import {
   OtherDataManagementTargetPoolSection,
   type OtherDataManagementTargetPoolSectionProps
 } from "./data-management/OtherDataManagementTargetPoolSection";
+import {
+  OtherDataManagementTargetTaskPanel,
+  type OtherDataManagementTargetTaskPanelProps
+} from "./data-management/OtherDataManagementTargetTaskPanel";
 
 export type OtherDataManagementTabProps = OtherDataManagementSourceSectionProps &
   OtherDataManagementSchedulerSectionProps &
   OtherDataManagementTargetPoolSectionProps &
+  OtherDataManagementTargetTaskPanelProps &
   OtherDataManagementRegistrySectionProps;
 
 export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
@@ -67,6 +72,11 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
   } satisfies OtherDataManagementSchedulerSectionProps;
   const targetPoolSectionProps = {
     Button: props.Button,
+    UNIVERSE_POOL_BUCKET_ORDER: props.UNIVERSE_POOL_BUCKET_ORDER,
+    formatCnDate: props.formatCnDate,
+    getUniversePoolBucketLabel: props.getUniversePoolBucketLabel,
+    handleSaveUniversePoolConfig: props.handleSaveUniversePoolConfig,
+    handleToggleUniversePoolBucket: props.handleToggleUniversePoolBucket,
     handleResetTargetsDraft: props.handleResetTargetsDraft,
     handleSaveTargets: props.handleSaveTargets,
     handleTargetsEditorResizeKeyDown: props.handleTargetsEditorResizeKeyDown,
@@ -103,7 +113,13 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
     marketTargetPoolStatsScope: props.marketTargetPoolStatsScope,
     setMarketCurrentTargetsModalOpen: props.setMarketCurrentTargetsModalOpen,
     setMarketTargetPoolDetailMetric: props.setMarketTargetPoolDetailMetric,
-    setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope
+    setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope,
+    marketUniverseBucketStatusById: props.marketUniverseBucketStatusById,
+    marketUniverseEnabledBuckets: props.marketUniverseEnabledBuckets,
+    marketUniversePoolConfig: props.marketUniversePoolConfig,
+    marketUniversePoolDirty: props.marketUniversePoolDirty,
+    marketUniversePoolLoading: props.marketUniversePoolLoading,
+    marketUniversePoolSaving: props.marketUniversePoolSaving
   } satisfies OtherDataManagementTargetPoolSectionProps;
   const registrySectionProps = {
     Button: props.Button,
@@ -124,11 +140,18 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
     setMarketRegistryAutoFilter: props.setMarketRegistryAutoFilter,
     setMarketRegistryQuery: props.setMarketRegistryQuery
   } satisfies OtherDataManagementRegistrySectionProps;
+  const targetTaskPanelProps = {
+    Button: props.Button,
+    Input: props.Input,
+    PopoverSelect: props.PopoverSelect,
+    formatCnDate: props.formatCnDate
+  } satisfies OtherDataManagementTargetTaskPanelProps;
   return (
     <>
       {createElement(OtherDataManagementSourceSection, sourceSectionProps)}
       {createElement(OtherDataManagementSchedulerSection, schedulerSectionProps)}
       {createElement(OtherDataManagementTargetPoolSection, targetPoolSectionProps)}
+      {createElement(OtherDataManagementTargetTaskPanel, targetTaskPanelProps)}
       {createElement(OtherDataManagementRegistrySection, registrySectionProps)}
     </>
   );

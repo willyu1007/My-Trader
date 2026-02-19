@@ -7,6 +7,7 @@ import type {
 } from "@mytrader/shared";
 
 import { openAnalysisDuckdb, ensureAnalysisDuckdbSchema } from "../storage/analysisDuckdb";
+import { get } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 import { getMarketTargetTaskMatrixConfig } from "../storage/marketSettingsRepository";
 import { upsertDailyBasics } from "./dailyBasicRepository";
@@ -39,6 +40,9 @@ export interface MaterializeTargetsFromSsotResult {
   partialCount: number;
   missingCount: number;
   notApplicableCount: number;
+  insertedRows: number;
+  updatedRows: number;
+  missingSymbols: string[];
 }
 
 type DailyPriceRow = {
@@ -146,6 +150,9 @@ export async function materializeTargetsFromSsot(
   let partialCount = 0;
   let missingCount = 0;
   let notApplicableCount = 0;
+  let insertedRows = 0;
+  let updatedRows = 0;
+  const missingSymbols = new Set<string>();
   try {
     await ensureAnalysisDuckdbSchema(handle);
     const conn = await handle.connect();
@@ -294,7 +301,10 @@ export async function materializeTargetsFromSsot(
           const status = symbolStatuses[idx];
           if (status === "complete") completeCount += 1;
           if (status === "partial") partialCount += 1;
-          if (status === "missing") missingCount += 1;
+          if (status === "missing") {
+            missingCount += 1;
+            missingSymbols.add(symbol);
+          }
           if (status === "not_applicable") notApplicableCount += 1;
           statusRows.push({
             symbol,
@@ -309,11 +319,87 @@ export async function materializeTargetsFromSsot(
         });
       }
 
-      await upsertInstruments(input.marketDb, instrumentInserts);
-      await upsertPrices(input.marketDb, priceInserts);
-      await upsertDailyBasics(input.marketDb, basicInserts);
-      await upsertDailyMoneyflows(input.marketDb, moneyflowInserts);
-      await upsertTargetTaskStatuses(input.marketDb, statusRows);
+      const uniqueInstrumentInserts = dedupeByKey(instrumentInserts, (row) => row.symbol);
+      const uniquePriceInserts = dedupeByKey(
+        priceInserts,
+        (row) => `${row.symbol}#${row.tradeDate}`
+      );
+      const uniqueBasicInserts = dedupeByKey(
+        basicInserts,
+        (row) => `${row.symbol}#${row.tradeDate}`
+      );
+      const uniqueMoneyflowInserts = dedupeByKey(
+        moneyflowInserts,
+        (row) => `${row.symbol}#${row.tradeDate}`
+      );
+      const uniqueStatusRows = dedupeByKey(
+        statusRows,
+        (row) => `${row.symbol}#${row.moduleId}`
+      );
+
+      const [
+        existingInstruments,
+        existingPrices,
+        existingBasics,
+        existingMoneyflows,
+        existingStatuses
+      ] = await Promise.all([
+        countExistingSingleKeys(
+          input.marketDb,
+          "instruments",
+          "symbol",
+          uniqueInstrumentInserts.map((row) => row.symbol)
+        ),
+        countExistingCompositeKeys(
+          input.marketDb,
+          "daily_prices",
+          "symbol",
+          "trade_date",
+          uniquePriceInserts.map((row) => [row.symbol, row.tradeDate])
+        ),
+        countExistingCompositeKeys(
+          input.marketDb,
+          "daily_basics",
+          "symbol",
+          "trade_date",
+          uniqueBasicInserts.map((row) => [row.symbol, row.tradeDate])
+        ),
+        countExistingCompositeKeys(
+          input.marketDb,
+          "daily_moneyflows",
+          "symbol",
+          "trade_date",
+          uniqueMoneyflowInserts.map((row) => [row.symbol, row.tradeDate])
+        ),
+        countExistingCompositeKeys(
+          input.marketDb,
+          "target_task_status",
+          "symbol",
+          "module_id",
+          uniqueStatusRows.map((row) => [row.symbol, row.moduleId])
+        )
+      ]);
+
+      await upsertInstruments(input.marketDb, uniqueInstrumentInserts);
+      await upsertPrices(input.marketDb, uniquePriceInserts);
+      await upsertDailyBasics(input.marketDb, uniqueBasicInserts);
+      await upsertDailyMoneyflows(input.marketDb, uniqueMoneyflowInserts);
+      await upsertTargetTaskStatuses(input.marketDb, uniqueStatusRows);
+
+      const totalRows =
+        uniqueInstrumentInserts.length +
+        uniquePriceInserts.length +
+        uniqueBasicInserts.length +
+        uniqueMoneyflowInserts.length +
+        uniqueStatusRows.length;
+      const existingRows =
+        existingInstruments +
+        existingPrices +
+        existingBasics +
+        existingMoneyflows +
+        existingStatuses;
+      insertedRows = Math.max(0, totalRows - existingRows);
+      updatedRows = Math.max(0, existingRows);
     } finally {
       await conn.close();
     }
@@ -334,7 +420,10 @@ export async function materializeTargetsFromSsot(
       completeCount,
       partialCount,
       missingCount,
-      notApplicableCount
+      notApplicableCount,
+      insertedRows,
+      updatedRows,
+      missingSymbols: Array.from(missingSymbols.values())
     };
   } catch (error) {
     await finishTargetMaterializationRun(input.marketDb, {
@@ -388,3 +477,86 @@ function escapeSql(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+function dedupeByKey<T>(rows: T[], keyFn: (row: T) => string): T[] {
+  if (rows.length <= 1) return rows;
+  const map = new Map<string, T>();
+  rows.forEach((row) => {
+    const key = keyFn(row);
+    if (!key) return;
+    map.set(key, row);
+  });
+  return Array.from(map.values());
+}
+
+async function countExistingSingleKeys(
+  db: SqliteDatabase,
+  table: string,
+  column: string,
+  keys: string[]
+): Promise<number> {
+  const normalized = Array.from(new Set(keys.map((key) => key.trim()).filter(Boolean)));
+  if (normalized.length === 0) return 0;
+
+  let total = 0;
+  for (const chunk of chunkArray(normalized, 300)) {
+    const placeholders = chunk.map(() => "(?)").join(", ");
+    const row = await get<{ total: number }>(
+      db,
+      `
+        with keyset(${column}) as (values ${placeholders})
+        select count(*) as total
+        from ${table} t
+        inner join keyset k
+          on t.${column} = k.${column}
+      `,
+      chunk
+    );
+    total += Number(row?.total ?? 0);
+  }
+  return total;
+}
+
+async function countExistingCompositeKeys(
+  db: SqliteDatabase,
+  table: string,
+  columnA: string,
+  columnB: string,
+  keys: Array<[string, string]>
+): Promise<number> {
+  const normalized = dedupeByKey(
+    keys
+      .map(([a, b]) => [a.trim(), b.trim()] as [string, string])
+      .filter(([a, b]) => Boolean(a) && Boolean(b)),
+    ([a, b]) => `${a}\u0000${b}`
+  );
+  if (normalized.length === 0) return 0;
+
+  let total = 0;
+  for (const chunk of chunkArray(normalized, 250)) {
+    const placeholders = chunk.map(() => "(?, ?)").join(", ");
+    const params = chunk.flatMap(([a, b]) => [a, b]);
+    const row = await get<{ total: number }>(
+      db,
+      `
+        with keyset(${columnA}, ${columnB}) as (values ${placeholders})
+        select count(*) as total
+        from ${table} t
+        inner join keyset k
+          on t.${columnA} = k.${columnA}
+         and t.${columnB} = k.${columnB}
+      `,
+      params
+    );
+    total += Number(row?.total ?? 0);
+  }
+  return total;
+}
+
+function chunkArray<T>(rows: T[], chunkSize: number): T[][] {
+  if (rows.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    chunks.push(rows.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
