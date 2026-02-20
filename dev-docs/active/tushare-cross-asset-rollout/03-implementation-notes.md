@@ -22,6 +22,8 @@
 - 2026-02-20：为 P0 扩展数据源增加容错：新增 `fetchTusharePagedWithFallback`，当可选数据源接口不可用时记录告警并继续 run，避免影响 stock/etf 核心链路。
 - 2026-02-20：前端市场筛选补齐 P0 新增 kind：`stock/fund/index/futures/spot`，支持在搜索结果中直接筛选新增资产目录。
 - 2026-02-20：尝试执行 Electron 实网回归前置检查（读取本地 token + 调用 provider 冒烟）；结果显示当前活跃账号 `tushare_token_v1` 解析后为 `source=none`，暂时无法执行真实 API 回归。
+- 2026-02-20：补齐 backend DuckDB 类型声明（`apps/backend/src/types/duckdb-wasm.d.ts`），消除 `@duckdb/duckdb-wasm` 缺少声明导致的 `typecheck` 阻断。
+- 2026-02-20：完成“此前改动”综合回归：`pnpm typecheck` 与 `pnpm build` 均通过；P0 门禁 orchestrator 冒烟复跑通过；P0 provider 扩展逻辑 mock 冒烟通过（含 optional spot catalog 降级路径）。
 
 ## Pending decisions / TODO
 - P2 增强模块首批灰度名单（接口级）需要在权限探测后锁定。

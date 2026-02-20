@@ -174,3 +174,15 @@ where available_date > as_of_trade_date;
   - 使用 Electron 临时脚本读取活跃账号 token 并准备执行 `index/futures/spot` feed 冒烟
   - 结果：`token.configured=false`, `token.source=none`（无法获取可用 Tushare token）
   - 结论：真实 API 的 P0 全量/增量回归暂不可执行，需先在活跃账号配置可用 token
+- 2026-02-20：DuckDB 类型阻断修复 -> ✅
+  - 新增：`apps/backend/src/types/duckdb-wasm.d.ts`
+  - `pnpm -C apps/backend typecheck` -> ✅
+  - `pnpm -C /Volumes/DataDisk/Project/My-Trader typecheck` -> ✅
+- 2026-02-20：全量构建回归（修复后）-> ✅
+  - `pnpm -C /Volumes/DataDisk/Project/My-Trader build` -> ✅
+- 2026-02-20：P0 provider 扩展逻辑 mock 冒烟 -> ✅
+  - 方式：stub `global.fetch`，覆盖 `stock_basic/fund_basic/index_basic/fut_basic/sge_basic`
+  - 断言通过：`index`/`futures` 目录可入链、ETF 过滤生效、`sge_basic` 失败时走 optional catalog 降级且不阻断整体 catalog 返回
+- 2026-02-20：P0 门禁 orchestrator 冒烟复跑（真实账号库）-> ✅
+  - 对账：`ingest_runs` 行数保持不变（before=90, afterManual=90, afterSchedule=90）
+  - 结论：`p0Enabled=false` 时 manual 阻断、schedule 跳过，且测试后开关恢复
