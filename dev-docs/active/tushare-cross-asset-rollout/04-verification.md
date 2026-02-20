@@ -159,3 +159,11 @@ where available_date > as_of_trade_date;
 - 2026-02-20：P0 门禁 UI 代码路径校验（静态）-> ✅
   - 前端触发前置阻断：`apps/frontend/src/components/Dashboard.tsx:3014`
   - 手动拉取按钮禁用条件：`apps/frontend/src/components/Dashboard.tsx:9207`、`apps/frontend/src/components/Dashboard.tsx:9219`、`apps/frontend/src/components/Dashboard.tsx:9231`
+- 2026-02-20：Phase B 首段实现后编译回归 -> ⚠️部分通过
+  - `pnpm -C packages/shared build` -> ✅
+  - `pnpm -C apps/frontend typecheck` -> ✅
+  - `pnpm -C apps/backend typecheck` -> ❌（已知阻塞不变：`@duckdb/duckdb-wasm` 类型声明缺失）
+- 2026-02-20：Phase B 代码路径校验（静态）-> ✅
+  - `InstrumentKind/MarketInstrumentKind` 已扩展：`stock/fund/index/futures/spot`
+  - `tushareProvider.fetchInstrumentCatalog` 已纳入 `index_basic/fut_basic/sge_basic`（optional）
+  - `runUniverseIngest/ingestUniverseTradeDate` 已接入 `index_daily/fut_daily/sge_daily`，run `meta.universeCounts` 包含 `indexes/futures/spots`

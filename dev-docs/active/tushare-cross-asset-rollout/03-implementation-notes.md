@@ -17,6 +17,9 @@
 - 2026-02-20：按评审决议补充“收口硬规则”：P0/P1/P2 全部门禁通过后，rollout 切换为默认全开态；删除面向业务用户的 rollout UI/UX；专项权限开关 `p2SpecialPermissionStkPremarketV1` 继续保留权限实测门禁。
 - 2026-02-20：完成批次开关仓储级冒烟（真实账号库）：`rollout_flags_v1` 的 get/set/get/restore 全链路通过，`updatedAt` 正常推进且最终恢复原值。
 - 2026-02-20：完成 P0 门禁 orchestrator 级冒烟（真实账号库）：`p0Enabled=false` 时 manual enqueue 被阻断报错、schedule enqueue 被跳过；两者均未新增 `ingest_runs` 记录，测试后已恢复开关原值。
+- 2026-02-20：进入 Phase B（P0 rollout）首段实现：扩展 `InstrumentKind/MarketInstrumentKind` 支持 `index/futures/spot`，并将 `tushareProvider.fetchInstrumentCatalog` 扩展为股票/ETF + 指数主档 + 期货主档 + SGE 现货主档（后 3 类按 optional catalog 处理，权限不足时降级为空集合）。
+- 2026-02-20：扩展 Universe ingest（日线）到 P0 资产集：在 `ingestUniverseTradeDate` 增加 `index_daily/fut_daily/sge_daily` 拉取并写入 DuckDB `daily_prices`；同时在 run `meta.universeCounts` 增加 `indexes/futures/spots` 计数，`symbolCount` 覆盖 stock/etf/index/futures/spot 总量。
+- 2026-02-20：为 P0 扩展数据源增加容错：新增 `fetchTusharePagedWithFallback`，当可选数据源接口不可用时记录告警并继续 run，避免影响 stock/etf 核心链路。
 
 ## Pending decisions / TODO
 - P2 增强模块首批灰度名单（接口级）需要在权限探测后锁定。

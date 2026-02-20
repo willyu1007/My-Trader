@@ -247,7 +247,12 @@ export type MarketDataSource = "tushare" | "csv";
 
 export type MarketProviderId = "tushare";
 
-export type InstrumentKind = "stock" | "fund";
+export type InstrumentKind =
+  | "stock"
+  | "fund"
+  | "index"
+  | "futures"
+  | "spot";
 
 export interface InstrumentProfileSummary {
   provider: MarketProviderId;

@@ -4,7 +4,12 @@ import type { PriceInput } from "../marketRepository";
 
 export type MarketProviderId = "tushare";
 
-export type MarketInstrumentKind = "stock" | "fund";
+export type MarketInstrumentKind =
+  | "stock"
+  | "fund"
+  | "index"
+  | "futures"
+  | "spot";
 
 export type ProviderInstrumentProfile = {
   provider: MarketProviderId;

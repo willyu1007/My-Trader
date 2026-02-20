@@ -5,7 +5,7 @@
 - Last updated: 2026-02-20
 - Upstream planning task: `dev-docs/archive/tushare-cross-asset-coverage-planning/`
 - Related implementation base: `dev-docs/active/real-data-auto-fetch/`
-- Next step: 在桌面端完成 rollout flags 行为手工验收（P0 开关关闭/开启对手动与调度拉取的影响），并开始 P0 首轮全量 + 增量回归。
+- Next step: 在 Phase B 继续完成 P0 资产链路（指数上下文/期货/现货）实跑回归，并补齐 P0 覆盖率与质量门禁验收。
 
 ## Goal
 承接 `tushare-cross-asset-coverage-planning` 的规划定稿，完成 P0/P1/P2 三个批次的分阶段实施与门禁验收，形成可持续运行的多资产数据池（Universe + Target，SSOT-first）。

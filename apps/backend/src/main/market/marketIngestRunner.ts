@@ -201,7 +201,15 @@ export async function runUniverseIngest(input: {
 
       await syncDuckdbTradeCalendar(handle, input.marketDb, "CN", today);
 
-      const { stockSymbols, etfSymbols, catalogInserted, catalogUpdated } =
+      const {
+        stockSymbols,
+        etfSymbols,
+        indexSymbols,
+        futuresSymbols,
+        spotSymbols,
+        catalogInserted,
+        catalogUpdated
+      } =
         await syncUniverseInstrumentMeta(
         input.marketDb,
         handle,
@@ -229,6 +237,9 @@ export async function runUniverseIngest(input: {
           tradeDate,
           stockSymbols,
           etfSymbols,
+          indexSymbols,
+          futuresSymbols,
+          spotSymbols,
           totals
         );
         lastDone = tradeDate;
@@ -240,7 +251,12 @@ export async function runUniverseIngest(input: {
         id: runId,
         status: totals.errors > 0 ? "partial" : "success",
         asOfTradeDate,
-        symbolCount: stockSymbols.size + etfSymbols.size,
+        symbolCount:
+          stockSymbols.size +
+          etfSymbols.size +
+          indexSymbols.size +
+          futuresSymbols.size +
+          spotSymbols.size,
         inserted: totals.inserted,
         updated: totals.updated,
         errors: totals.errors,
@@ -249,7 +265,13 @@ export async function runUniverseIngest(input: {
           windowYears: 3,
           instrumentCatalog: { inserted: catalogInserted, updated: catalogUpdated },
           lastTradeDate: lastDone,
-          universeCounts: { stocks: stockSymbols.size, etfs: etfSymbols.size }
+          universeCounts: {
+            stocks: stockSymbols.size,
+            etfs: etfSymbols.size,
+            indexes: indexSymbols.size,
+            futures: futuresSymbols.size,
+            spots: spotSymbols.size
+          }
         }
       });
     } catch (err) {
@@ -430,6 +452,9 @@ async function syncUniverseInstrumentMeta(
 ): Promise<{
   stockSymbols: Set<string>;
   etfSymbols: Set<string>;
+  indexSymbols: Set<string>;
+  futuresSymbols: Set<string>;
+  spotSymbols: Set<string>;
   catalogInserted: number;
   catalogUpdated: number;
 }> {
@@ -438,6 +463,9 @@ async function syncUniverseInstrumentMeta(
 
   const stocks = profiles.filter((profile) => profile.assetClass === "stock");
   const etfs = profiles.filter((profile) => profile.assetClass === "etf");
+  const indexes = profiles.filter((profile) => profile.kind === "index");
+  const futures = profiles.filter((profile) => profile.kind === "futures");
+  const spots = profiles.filter((profile) => profile.kind === "spot");
 
   const catalogResult = await upsertInstrumentProfiles(marketDb, profiles);
 
@@ -457,8 +485,11 @@ async function syncUniverseInstrumentMeta(
     await conn.query("begin transaction;");
     const now = Date.now();
 
-    for (const profile of [...stocks, ...etfs]) {
+    for (const profile of profiles) {
       await checkpointOrThrow(control);
+      const assetClassSql = profile.assetClass
+        ? `'${escapeSql(profile.assetClass)}'`
+        : "null";
       await conn.query(
         `
           insert into instrument_meta (symbol, kind, name, market, currency, asset_class, updated_at)
@@ -466,7 +497,7 @@ async function syncUniverseInstrumentMeta(
           profile.name ? `'${escapeSql(profile.name)}'` : "null"
         }, '${escapeSql(profile.market ?? "CN")}', '${escapeSql(
           profile.currency ?? "CNY"
-        )}', '${escapeSql(profile.assetClass ?? "stock")}', ${now})
+        )}', ${assetClassSql}, ${now})
           on conflict(symbol) do update set
             kind = excluded.kind,
             name = excluded.name,
@@ -485,6 +516,9 @@ async function syncUniverseInstrumentMeta(
   return {
     stockSymbols: new Set(stocks.map((p) => p.symbol)),
     etfSymbols: new Set(etfs.map((p) => p.symbol)),
+    indexSymbols: new Set(indexes.map((p) => p.symbol)),
+    futuresSymbols: new Set(futures.map((p) => p.symbol)),
+    spotSymbols: new Set(spots.map((p) => p.symbol)),
     catalogInserted: catalogResult.inserted,
     catalogUpdated: catalogResult.updated
   };
@@ -496,11 +530,15 @@ async function ingestUniverseTradeDate(
   tradeDate: string,
   stockSymbols: Set<string>,
   etfSymbols: Set<string>,
+  indexSymbols: Set<string>,
+  futuresSymbols: Set<string>,
+  spotSymbols: Set<string>,
   totals: IngestTotals
 ): Promise<void> {
   const tradeDateRaw = toTushareDate(tradeDate);
 
-  const [daily, fundDaily, basics, moneyflow] = await Promise.all([
+  const [daily, fundDaily, basics, moneyflow, indexDaily, futuresDaily, spotDaily] =
+    await Promise.all([
     fetchTusharePaged(
       "daily",
       token,
@@ -524,13 +562,45 @@ async function ingestUniverseTradeDate(
       token,
       { trade_date: tradeDateRaw },
       "ts_code,trade_date,net_mf_vol,net_mf_amount"
-    )
+    ),
+    indexSymbols.size > 0
+      ? fetchTusharePagedWithFallback(
+          "index_daily",
+          token,
+          { trade_date: tradeDateRaw },
+          "ts_code,trade_date,open,high,low,close,vol"
+        )
+      : { fields: [], items: [] },
+    futuresSymbols.size > 0
+      ? fetchTusharePagedWithFallback(
+          "fut_daily",
+          token,
+          { trade_date: tradeDateRaw },
+          "ts_code,trade_date,open,high,low,close,vol"
+        )
+      : { fields: [], items: [] },
+    spotSymbols.size > 0
+      ? fetchTusharePagedWithFallback(
+          "sge_daily",
+          token,
+          { trade_date: tradeDateRaw },
+          "ts_code,trade_date,open,high,low,close,vol"
+        )
+      : { fields: [], items: [] }
   ]);
 
   const now = Date.now();
 
   const dailyRows = mapDailyPriceRows(daily, stockSymbols, "tushare", now);
   const fundRows = mapDailyPriceRows(fundDaily, etfSymbols, "tushare", now);
+  const indexRows = mapDailyPriceRows(indexDaily, indexSymbols, "tushare", now);
+  const futuresRows = mapDailyPriceRows(
+    futuresDaily,
+    futuresSymbols,
+    "tushare",
+    now
+  );
+  const spotRows = mapDailyPriceRows(spotDaily, spotSymbols, "tushare", now);
   const basicRows = mapDailyBasicRows(basics, stockSymbols, "tushare", now);
   const moneyRows = mapDailyMoneyflowRows(moneyflow, stockSymbols, "tushare", now);
 
@@ -547,7 +617,13 @@ async function ingestUniverseTradeDate(
       "volume",
       "source",
       "ingested_at"
-    ], [...dailyRows, ...fundRows]);
+    ], [
+      ...dailyRows,
+      ...fundRows,
+      ...indexRows,
+      ...futuresRows,
+      ...spotRows
+    ]);
     await upsertDuckdbRows(conn, "daily_basics", [
       "symbol",
       "trade_date",
@@ -566,7 +642,14 @@ async function ingestUniverseTradeDate(
     ], moneyRows);
     await conn.query("commit;");
 
-    totals.inserted += dailyRows.length + fundRows.length + basicRows.length + moneyRows.length;
+    totals.inserted +=
+      dailyRows.length +
+      fundRows.length +
+      indexRows.length +
+      futuresRows.length +
+      spotRows.length +
+      basicRows.length +
+      moneyRows.length;
   } catch (err) {
     totals.errors += 1;
     try {
@@ -577,6 +660,23 @@ async function ingestUniverseTradeDate(
     throw err;
   } finally {
     await conn.close();
+  }
+}
+
+async function fetchTusharePagedWithFallback(
+  apiName: string,
+  token: string,
+  params: Record<string, string | undefined>,
+  fields: string
+): Promise<{ fields: string[]; items: (string | number | null)[][] }> {
+  try {
+    return await fetchTusharePaged(apiName, token, params, fields);
+  } catch (error) {
+    console.warn(
+      `[mytrader] optional universe feed ${apiName} unavailable for current run, continue.`
+    );
+    console.warn(error);
+    return { fields: [], items: [] };
   }
 }
 

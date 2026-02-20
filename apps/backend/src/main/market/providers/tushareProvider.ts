@@ -59,11 +59,21 @@ export const tushareProvider: MarketProvider = {
   },
 
   async fetchInstrumentCatalog(input): Promise<ProviderInstrumentProfile[]> {
-    const [stocks, funds] = await Promise.all([
-      fetchStockBasic(input.token),
-      fetchFundBasic(input.token)
-    ]);
-    return [...stocks, ...funds];
+    const [stocks, funds, indexProfiles, futuresProfiles, spotProfiles] =
+      await Promise.all([
+        fetchStockBasic(input.token),
+        fetchFundBasic(input.token),
+        fetchOptionalCatalog("index_basic", () => fetchIndexBasic(input.token)),
+        fetchOptionalCatalog("fut_basic", () => fetchFuturesBasic(input.token)),
+        fetchOptionalCatalog("sge_basic", () => fetchSpotBasic(input.token))
+      ]);
+    return [
+      ...stocks,
+      ...funds,
+      ...indexProfiles,
+      ...futuresProfiles,
+      ...spotProfiles
+    ];
   },
 
   async fetchTradingCalendar(
@@ -349,6 +359,234 @@ async function fetchFundBasic(token: string): Promise<ProviderInstrumentProfile[
     } satisfies FundProfile;
   })
     .filter((row): row is FundProfile => row !== null);
+}
+
+async function fetchIndexBasic(
+  token: string
+): Promise<ProviderInstrumentProfile[]> {
+  const res = await callTushare(
+    "index_basic",
+    token,
+    {},
+    "ts_code,name,market,publisher,category,base_date,list_date,exp_date"
+  );
+
+  const fields = res.fields ?? [];
+  const rows = res.items ?? [];
+  const idxTsCode = fields.indexOf("ts_code");
+  if (idxTsCode === -1) {
+    throw new Error("Tushare index_basic 响应缺少 ts_code。");
+  }
+
+  const idxName = fields.indexOf("name");
+  const idxMarket = fields.indexOf("market");
+  const idxPublisher = fields.indexOf("publisher");
+  const idxCategory = fields.indexOf("category");
+  const idxBaseDate = fields.indexOf("base_date");
+  const idxListDate = fields.indexOf("list_date");
+  const idxExpDate = fields.indexOf("exp_date");
+
+  return rows.map((row) => {
+    const symbol = String(row[idxTsCode]);
+    const name = idxName === -1 ? null : normalizeString(row[idxName]);
+    const market = idxMarket === -1 ? null : normalizeString(row[idxMarket]);
+    const publisher = idxPublisher === -1 ? null : normalizeString(row[idxPublisher]);
+    const category = idxCategory === -1 ? null : normalizeString(row[idxCategory]);
+    const baseDate = idxBaseDate === -1 ? null : normalizeDate(row[idxBaseDate]);
+    const listDate = idxListDate === -1 ? null : normalizeDate(row[idxListDate]);
+    const expDate = idxExpDate === -1 ? null : normalizeDate(row[idxExpDate]);
+
+    const providerData: Record<string, unknown> = {
+      kind: "index_basic",
+      raw: buildRowObject(fields, row),
+      publisher,
+      category,
+      baseDate,
+      listDate,
+      expDate
+    };
+
+    const tags = buildProviderTags({
+      kind: "index",
+      market,
+      publisher,
+      category
+    });
+
+    return {
+      provider: "tushare",
+      kind: "index",
+      symbol,
+      name,
+      assetClass: null,
+      market: "CN",
+      currency: "CNY",
+      tags,
+      providerData
+    } satisfies ProviderInstrumentProfile;
+  });
+}
+
+async function fetchFuturesBasic(
+  token: string
+): Promise<ProviderInstrumentProfile[]> {
+  const exchanges = ["CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"];
+  const profiles: ProviderInstrumentProfile[] = [];
+  const seenSymbols = new Set<string>();
+
+  for (const exchangeParam of exchanges) {
+    const res = await callTushare(
+      "fut_basic",
+      token,
+      { exchange: exchangeParam },
+      "ts_code,symbol,exchange,name,fut_code,multiplier,trade_unit,quote_unit,list_date,delist_date"
+    );
+
+    const fields = res.fields ?? [];
+    const rows = res.items ?? [];
+    const idxTsCode = fields.indexOf("ts_code");
+    if (idxTsCode === -1) {
+      throw new Error("Tushare fut_basic 响应缺少 ts_code。");
+    }
+
+    const idxName = fields.indexOf("name");
+    const idxExchange = fields.indexOf("exchange");
+    const idxFutCode = fields.indexOf("fut_code");
+    const idxMultiplier = fields.indexOf("multiplier");
+    const idxTradeUnit = fields.indexOf("trade_unit");
+    const idxQuoteUnit = fields.indexOf("quote_unit");
+    const idxListDate = fields.indexOf("list_date");
+    const idxDelistDate = fields.indexOf("delist_date");
+
+    for (const row of rows) {
+      const symbol = String(row[idxTsCode]);
+      if (!symbol || seenSymbols.has(symbol)) continue;
+      seenSymbols.add(symbol);
+
+      const name = idxName === -1 ? null : normalizeString(row[idxName]);
+      const exchange =
+        idxExchange === -1 ? exchangeParam : normalizeString(row[idxExchange]);
+      const futCode = idxFutCode === -1 ? null : normalizeString(row[idxFutCode]);
+      const multiplier =
+        idxMultiplier === -1 ? null : normalizeNumber(row[idxMultiplier]);
+      const tradeUnit =
+        idxTradeUnit === -1 ? null : normalizeString(row[idxTradeUnit]);
+      const quoteUnit =
+        idxQuoteUnit === -1 ? null : normalizeString(row[idxQuoteUnit]);
+      const listDate =
+        idxListDate === -1 ? null : normalizeDate(row[idxListDate]);
+      const delistDate =
+        idxDelistDate === -1 ? null : normalizeDate(row[idxDelistDate]);
+
+      const providerData: Record<string, unknown> = {
+        kind: "fut_basic",
+        raw: buildRowObject(fields, row),
+        exchange,
+        futCode,
+        multiplier,
+        tradeUnit,
+        quoteUnit,
+        listDate,
+        delistDate
+      };
+
+      const tags = buildProviderTags({
+        kind: "futures",
+        exchange,
+        fut_code: futCode
+      });
+
+      profiles.push({
+        provider: "tushare",
+        kind: "futures",
+        symbol,
+        name,
+        assetClass: null,
+        market: "CN",
+        currency: "CNY",
+        tags,
+        providerData
+      } satisfies ProviderInstrumentProfile);
+    }
+  }
+
+  return profiles;
+}
+
+async function fetchSpotBasic(token: string): Promise<ProviderInstrumentProfile[]> {
+  const res = await callTushare(
+    "sge_basic",
+    token,
+    {},
+    "ts_code,ts_name,trade_type,t_unit,p_unit,min_change,price_limit,min_vol,max_vol,trade_mode"
+  );
+
+  const fields = res.fields ?? [];
+  const rows = res.items ?? [];
+  const idxTsCode = fields.indexOf("ts_code");
+  if (idxTsCode === -1) {
+    throw new Error("Tushare sge_basic 响应缺少 ts_code。");
+  }
+
+  const idxName = fields.indexOf("ts_name");
+  const idxTradeType = fields.indexOf("trade_type");
+  const idxTradeUnit = fields.indexOf("t_unit");
+  const idxPriceUnit = fields.indexOf("p_unit");
+  const idxTradeMode = fields.indexOf("trade_mode");
+
+  return rows.map((row) => {
+    const symbol = String(row[idxTsCode]);
+    const name = idxName === -1 ? null : normalizeString(row[idxName]);
+    const tradeType =
+      idxTradeType === -1 ? null : normalizeString(row[idxTradeType]);
+    const tradeUnit =
+      idxTradeUnit === -1 ? null : normalizeString(row[idxTradeUnit]);
+    const priceUnit =
+      idxPriceUnit === -1 ? null : normalizeString(row[idxPriceUnit]);
+    const tradeMode =
+      idxTradeMode === -1 ? null : normalizeString(row[idxTradeMode]);
+
+    const providerData: Record<string, unknown> = {
+      kind: "sge_basic",
+      raw: buildRowObject(fields, row),
+      tradeType,
+      tradeUnit,
+      priceUnit,
+      tradeMode
+    };
+
+    const tags = buildProviderTags({
+      kind: "spot",
+      exchange: "SGE",
+      trade_type: tradeType,
+      trade_mode: tradeMode
+    });
+
+    return {
+      provider: "tushare",
+      kind: "spot",
+      symbol,
+      name,
+      assetClass: null,
+      market: "CN",
+      currency: "CNY",
+      tags,
+      providerData
+    } satisfies ProviderInstrumentProfile;
+  });
+}
+
+async function fetchOptionalCatalog(
+  apiName: string,
+  run: () => Promise<ProviderInstrumentProfile[]>
+): Promise<ProviderInstrumentProfile[]> {
+  try {
+    return await run();
+  } catch (error) {
+    console.warn(`[mytrader] optional catalog ${apiName} unavailable, continue.`);
+    console.warn(error);
+    return [];
+  }
 }
 
 async function callTushare(
