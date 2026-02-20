@@ -20,6 +20,8 @@
 - 2026-02-20：进入 Phase B（P0 rollout）首段实现：扩展 `InstrumentKind/MarketInstrumentKind` 支持 `index/futures/spot`，并将 `tushareProvider.fetchInstrumentCatalog` 扩展为股票/ETF + 指数主档 + 期货主档 + SGE 现货主档（后 3 类按 optional catalog 处理，权限不足时降级为空集合）。
 - 2026-02-20：扩展 Universe ingest（日线）到 P0 资产集：在 `ingestUniverseTradeDate` 增加 `index_daily/fut_daily/sge_daily` 拉取并写入 DuckDB `daily_prices`；同时在 run `meta.universeCounts` 增加 `indexes/futures/spots` 计数，`symbolCount` 覆盖 stock/etf/index/futures/spot 总量。
 - 2026-02-20：为 P0 扩展数据源增加容错：新增 `fetchTusharePagedWithFallback`，当可选数据源接口不可用时记录告警并继续 run，避免影响 stock/etf 核心链路。
+- 2026-02-20：前端市场筛选补齐 P0 新增 kind：`stock/fund/index/futures/spot`，支持在搜索结果中直接筛选新增资产目录。
+- 2026-02-20：尝试执行 Electron 实网回归前置检查（读取本地 token + 调用 provider 冒烟）；结果显示当前活跃账号 `tushare_token_v1` 解析后为 `source=none`，暂时无法执行真实 API 回归。
 
 ## Pending decisions / TODO
 - P2 增强模块首批灰度名单（接口级）需要在权限探测后锁定。

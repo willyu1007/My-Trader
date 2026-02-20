@@ -6728,10 +6728,13 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                   </FormGroup>
 
                   <FormGroup label="标的类型（kind，仅搜索结果）">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
                       {([
                         { key: "stock", label: "stock" },
-                        { key: "fund", label: "fund" }
+                        { key: "fund", label: "fund" },
+                        { key: "index", label: "index" },
+                        { key: "futures", label: "futures" },
+                        { key: "spot", label: "spot" }
                       ] as const).map((item) => (
                         <label key={item.key} className="flex items-center gap-2">
                           <input

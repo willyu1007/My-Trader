@@ -167,3 +167,10 @@ where available_date > as_of_trade_date;
   - `InstrumentKind/MarketInstrumentKind` 已扩展：`stock/fund/index/futures/spot`
   - `tushareProvider.fetchInstrumentCatalog` 已纳入 `index_basic/fut_basic/sge_basic`（optional）
   - `runUniverseIngest/ingestUniverseTradeDate` 已接入 `index_daily/fut_daily/sge_daily`，run `meta.universeCounts` 包含 `indexes/futures/spots`
+- 2026-02-20：Phase B 前端筛选回归（kind）-> ✅
+  - `Dashboard` 的 kind 筛选项已扩展到 `stock/fund/index/futures/spot`
+  - `pnpm -C apps/frontend typecheck` -> ✅
+- 2026-02-20：Phase B 实网回归前置检查（Electron token + provider 冒烟）-> ⚠️阻塞
+  - 使用 Electron 临时脚本读取活跃账号 token 并准备执行 `index/futures/spot` feed 冒烟
+  - 结果：`token.configured=false`, `token.source=none`（无法获取可用 Tushare token）
+  - 结论：真实 API 的 P0 全量/增量回归暂不可执行，需先在活跃账号配置可用 token

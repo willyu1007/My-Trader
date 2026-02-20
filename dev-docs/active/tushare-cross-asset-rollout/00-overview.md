@@ -5,7 +5,7 @@
 - Last updated: 2026-02-20
 - Upstream planning task: `dev-docs/archive/tushare-cross-asset-coverage-planning/`
 - Related implementation base: `dev-docs/active/real-data-auto-fetch/`
-- Next step: 在 Phase B 继续完成 P0 资产链路（指数上下文/期货/现货）实跑回归，并补齐 P0 覆盖率与质量门禁验收。
+- Next step: 先在活跃账号配置可用 Tushare token，然后执行 Phase B 的 P0 实网回归（全量 + 增量）并补齐覆盖率/质量门禁。
 
 ## Goal
 承接 `tushare-cross-asset-coverage-planning` 的规划定稿，完成 P0/P1/P2 三个批次的分阶段实施与门禁验收，形成可持续运行的多资产数据池（Universe + Target，SSOT-first）。
