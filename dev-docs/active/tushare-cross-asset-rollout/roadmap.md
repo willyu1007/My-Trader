@@ -113,6 +113,25 @@ Tushare 多资产覆盖实施（P0/P1/P2）
 }
 ```
 
+## Post-verification target state (MUST)
+在 P0/P1/P2 全部门禁通过并完成稳定性验收后，rollout 从“灰度控制态”切换到“默认全开态”。
+
+### Final-state rules
+1. 默认开启全部批次总开关：
+- `p0Enabled=true`
+- `p1Enabled=true`
+- `p2Enabled=true`
+
+2. 已验收的 P2 子模块默认开启：
+- `p2RealtimeIndexV1=true`
+- `p2RealtimeEquityEtfV1=true`
+- `p2FuturesMicrostructureV1=true`
+
+3. 专项权限开关仍保留硬门禁：
+- `p2SpecialPermissionStkPremarketV1` 仅在权限探测实测通过后才允许置为 `true`，否则保持 `false`。
+
+4. 完成稳定化验收后，删除面向业务用户的 rollout UI/UX（不再暴露批次开关操作入口）。
+
 ### Field rules
 1. `p0Enabled/p1Enabled/p2Enabled`
 - 批次总开关，控制对应批次能力是否允许进入执行路径。
@@ -129,7 +148,8 @@ Tushare 多资产覆盖实施（P0/P1/P2）
 ## Exit criteria
 1. 通用门禁全部通过（稳定性/对账/质量/调度）
 2. P0、P1、P2 批次门禁全部通过
-3. 文档齐全可归档（overview/plan/architecture/notes/verification/pitfalls/roadmap）
+3. 完成 post-verification 收口：默认全开批次 + 删除 rollout UI/UX + 专项权限门禁仍生效
+4. 文档齐全可归档（overview/plan/architecture/notes/verification/pitfalls/roadmap）
 
 ## Current progress (2026-02-20)
 1. 承接任务包已建立（P0/P1/P2 全批次范围）。

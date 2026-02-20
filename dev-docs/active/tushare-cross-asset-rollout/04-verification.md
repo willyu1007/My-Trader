@@ -9,10 +9,11 @@
 ## Command checklist (actionable)
 1. Resolve active account DB paths
 ```bash
-ACCOUNT_INDEX="$HOME/Library/Application Support/@mytrader/backend/account-index.sqlite"
+USER_DATA="$HOME/Library/Application Support/@mytrader/backend"
+ACCOUNT_INDEX="$USER_DATA/account-index.sqlite"
 ACCOUNT_DIR="$(sqlite3 "$ACCOUNT_INDEX" "select data_dir from accounts order by coalesce(last_login_at,0) desc, created_at desc limit 1;")"
 BUSINESS_DB="$ACCOUNT_DIR/business.sqlite"
-MARKET_DB="$ACCOUNT_DIR/market-cache.sqlite"
+MARKET_DB="$USER_DATA/market-cache.sqlite"
 echo "ACCOUNT_DIR=$ACCOUNT_DIR"
 ```
 
@@ -119,6 +120,14 @@ where available_date > as_of_trade_date;
 - [ ] 批次开关/回滚开关行为符合预期
 - [ ] 错误摘要可读且不泄露 token/敏感信息
 
+## Post-verification convergence checklist (MUST)
+- [ ] 已确认 P0/P1/P2 门禁全部通过，且连续 3 个交易日无阻断错误 run
+- [ ] 将 rollout 默认值切换为全开（`p0Enabled/p1Enabled/p2Enabled=true`）
+- [ ] 已验收的 P2 子模块默认值切换为开启（`p2RealtimeIndexV1/p2RealtimeEquityEtfV1/p2FuturesMicrostructureV1=true`）
+- [ ] `p2SpecialPermissionStkPremarketV1` 仅在权限实测通过时置为 `true`，否则保持 `false`
+- [ ] 删除 Dashboard 中面向业务用户的 rollout 配置 UI/UX（含入口、文案、交互）
+- [ ] 回归验证：删除 UI 后手动拉取/定时拉取/启动补跑路径不受影响
+
 ## Runs (recorded)
 - 2026-02-20：初始化全范围承接任务文档（尚未执行代码级验证）
 - 2026-02-20：`pnpm -C /Volumes/DataDisk/Project/My-Trader/packages/shared build` -> ✅
@@ -131,3 +140,22 @@ where available_date > as_of_trade_date;
 - 2026-02-20：`pnpm -C /Volumes/DataDisk/Project/My-Trader/packages/shared build` -> ✅（新增 rollout flags 前端面板后重跑）
 - 2026-02-20：`pnpm -C /Volumes/DataDisk/Project/My-Trader/apps/frontend typecheck` -> ✅（新增 rollout flags UI 与按钮门禁后重跑）
 - 2026-02-20：`pnpm -C /Volumes/DataDisk/Project/My-Trader/apps/backend typecheck` -> ❌（阻塞不变：`@duckdb/duckdb-wasm` 类型声明缺失）
+- 2026-02-20：批次开关冒烟（仓储级，真实账号库）-> ✅
+  - 基线快照：`sqlite3 "$BUSINESS_DB" "select key,value_json from market_settings where key='rollout_flags_v1';"`
+  - 执行：通过临时编译并调用 `getMarketRolloutFlags/setMarketRolloutFlags/getMarketRolloutFlags/restore`，验证 `write_read_consistent=true`、`updated_at_forward_on_set=true`、`restore_back_to_original=true`
+  - 结果：开关读写与持久化正常，`updatedAt` 正向增长，测试后已恢复原始值
+- 2026-02-20：运行快照复核（真实库）-> ✅
+  - `sqlite3 "$BUSINESS_DB" "select key,value_json from market_settings where key='rollout_flags_v1';"`（确认恢复后的最终值）
+  - `sqlite3 "$MARKET_DB" "select date(started_at/1000,'unixepoch','localtime') day,count(*) runs,sum(case when status='failed' or coalesce(errors,0)>0 then 1 else 0 end) blocking_like_runs from ingest_runs group by day order by day desc limit 7;"`（近 7 天 run 快照）
+- 2026-02-20：构建/类型检查回归（Phase A）-> ⚠️部分通过
+  - `pnpm -C packages/shared build` -> ✅
+  - `pnpm -C apps/frontend typecheck` -> ✅
+  - `pnpm -C apps/backend typecheck` -> ❌（已知阻塞：`@duckdb/duckdb-wasm` 类型声明缺失，阻塞未变化）
+- 2026-02-20：P0 门禁冒烟（orchestrator 级，真实账号库）-> ✅
+  - 执行：`p0Enabled=false` 后分别 enqueue `source=manual` 与 `source=schedule` 的 targets 任务，并等待 orchestrator 回到 idle
+  - 观测：manual 路径报错 `当前已关闭 P0 批次开关，禁止执行数据拉取。`；schedule 路径日志 `schedule ingest skipped: P0 rollout is disabled.`
+  - 对账：`ingest_runs` 行数保持不变（before=80, afterManual=80, afterSchedule=80）
+  - 恢复：测试后已将 `rollout_flags_v1` 恢复到原值
+- 2026-02-20：P0 门禁 UI 代码路径校验（静态）-> ✅
+  - 前端触发前置阻断：`apps/frontend/src/components/Dashboard.tsx:3014`
+  - 手动拉取按钮禁用条件：`apps/frontend/src/components/Dashboard.tsx:9207`、`apps/frontend/src/components/Dashboard.tsx:9219`、`apps/frontend/src/components/Dashboard.tsx:9231`

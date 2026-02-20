@@ -14,6 +14,9 @@
 - 2026-02-20：将开关接入执行入口：`ingestOrchestrator.runJob` 在执行前读取 `rollout_flags_v1`，当 `p0Enabled=false` 时跳过非手动任务并阻断手动任务（当前链路均视作 P0 批次能力）。
 - 2026-02-20：前端「其他/数据管理」新增“批次开关（Rollout）”面板：支持读取/编辑/保存 `rollout_flags_v1`（P0/P1/P2 总开关 + P2 子模块开关），展示 `updatedAt` 与未保存提示。
 - 2026-02-20：前端触发门禁联动：当 `p0Enabled=false` 时，“执行拉取”与“手动拉取”按钮禁用；即使绕过禁用直接触发，`handleTriggerMarketIngest` 也会前置阻断并给出错误提示。
+- 2026-02-20：按评审决议补充“收口硬规则”：P0/P1/P2 全部门禁通过后，rollout 切换为默认全开态；删除面向业务用户的 rollout UI/UX；专项权限开关 `p2SpecialPermissionStkPremarketV1` 继续保留权限实测门禁。
+- 2026-02-20：完成批次开关仓储级冒烟（真实账号库）：`rollout_flags_v1` 的 get/set/get/restore 全链路通过，`updatedAt` 正常推进且最终恢复原值。
+- 2026-02-20：完成 P0 门禁 orchestrator 级冒烟（真实账号库）：`p0Enabled=false` 时 manual enqueue 被阻断报错、schedule enqueue 被跳过；两者均未新增 `ingest_runs` 记录，测试后已恢复开关原值。
 
 ## Pending decisions / TODO
 - P2 增强模块首批灰度名单（接口级）需要在权限探测后锁定。

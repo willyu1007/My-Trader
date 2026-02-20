@@ -9,5 +9,5 @@ script = ""
 name = "Run"
 icon = "run"
 command = '''
-pnpm start
+pnpm dev
 '''
