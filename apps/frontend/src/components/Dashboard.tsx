@@ -32,7 +32,6 @@ import type {
   MarketDataQuality,
   MarketIngestControlStatus,
   MarketIngestRun,
-  MarketRolloutFlags,
   MarketIngestSchedulerConfig,
   MarketTagSeriesResult,
   MarketTokenStatus,
@@ -716,14 +715,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const [marketSchedulerSaving, setMarketSchedulerSaving] = useState(false);
   const [marketSchedulerAdvancedOpen, setMarketSchedulerAdvancedOpen] =
     useState(false);
-  const [marketRolloutFlags, setMarketRolloutFlags] =
-    useState<MarketRolloutFlags | null>(null);
-  const [marketRolloutFlagsSaved, setMarketRolloutFlagsSaved] =
-    useState<MarketRolloutFlags | null>(null);
-  const [marketRolloutFlagsLoading, setMarketRolloutFlagsLoading] =
-    useState(false);
-  const [marketRolloutFlagsSaving, setMarketRolloutFlagsSaving] =
-    useState(false);
   const [marketTriggerIngestBlockedOpen, setMarketTriggerIngestBlockedOpen] =
     useState(false);
   const [marketTriggerIngestBlockedMessage, setMarketTriggerIngestBlockedMessage] =
@@ -756,16 +747,9 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return !isSameSchedulerConfig(marketSchedulerSavedConfig, marketSchedulerConfig);
   }, [marketSchedulerConfig, marketSchedulerSavedConfig]);
 
-  const marketRolloutFlagsDirty = useMemo(() => {
-    if (!marketRolloutFlags || !marketRolloutFlagsSaved) return false;
-    return !isSameRolloutFlags(marketRolloutFlagsSaved, marketRolloutFlags);
-  }, [marketRolloutFlags, marketRolloutFlagsSaved]);
-
   const marketIngestControlState = marketIngestControlStatus?.state ?? "idle";
   const marketCanTriggerIngestNow =
-    !marketIngestControlUpdating &&
-    Boolean(marketTokenStatus?.configured) &&
-    (marketRolloutFlags?.p0Enabled ?? true);
+    !marketIngestControlUpdating && Boolean(marketTokenStatus?.configured);
   const marketCanPauseIngest =
     !marketIngestControlUpdating && marketIngestControlState === "running";
   const marketCanResumeIngest =
@@ -2895,20 +2879,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     }
   }, []);
 
-  const refreshMarketRolloutFlags = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketRolloutFlagsLoading(true);
-    try {
-      const flags = await window.mytrader.market.getRolloutFlags();
-      setMarketRolloutFlags(flags);
-      setMarketRolloutFlagsSaved(flags);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketRolloutFlagsLoading(false);
-    }
-  }, []);
-
   const refreshMarketRegistry = useCallback(async () => {
     if (!window.mytrader) return;
     setMarketRegistryLoading(true);
@@ -3011,10 +2981,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const handleTriggerMarketIngest = useCallback(
     async (scope: "targets" | "universe" | "both") => {
       if (!window.mytrader) return;
-      if (marketRolloutFlags && !marketRolloutFlags.p0Enabled) {
-        setError("当前 P0 批次开关已关闭，已阻止执行拉取。");
-        return;
-      }
       setError(null);
       setNotice(null);
       setMarketIngestTriggering(true);
@@ -3035,7 +3001,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
         setMarketIngestTriggering(false);
       }
     },
-    [marketRolloutFlags, refreshMarketIngestControl, refreshMarketIngestRuns]
+    [refreshMarketIngestControl, refreshMarketIngestRuns]
   );
 
   const handleSyncInstrumentCatalog = useCallback(async () => {
@@ -3659,13 +3625,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     []
   );
 
-  const updateMarketRolloutFlags = useCallback(
-    (patch: Partial<MarketRolloutFlags>) => {
-      setMarketRolloutFlags((prev) => (prev ? { ...prev, ...patch } : prev));
-    },
-    []
-  );
-
   const handleSaveMarketSchedulerConfig = useCallback(async () => {
     if (!window.mytrader || !marketSchedulerConfig) return;
     setError(null);
@@ -3685,33 +3644,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setMarketSchedulerSaving(false);
     }
   }, [marketSchedulerConfig]);
-
-  const handleSaveMarketRolloutFlags = useCallback(async () => {
-    if (!window.mytrader || !marketRolloutFlags) return;
-    setError(null);
-    setMarketRolloutFlagsSaving(true);
-    try {
-      const saved = await window.mytrader.market.setRolloutFlags({
-        p0Enabled: marketRolloutFlags.p0Enabled,
-        p1Enabled: marketRolloutFlags.p1Enabled,
-        p2Enabled: marketRolloutFlags.p2Enabled,
-        p2RealtimeIndexV1: marketRolloutFlags.p2RealtimeIndexV1,
-        p2RealtimeEquityEtfV1: marketRolloutFlags.p2RealtimeEquityEtfV1,
-        p2FuturesMicrostructureV1: marketRolloutFlags.p2FuturesMicrostructureV1,
-        p2SpecialPermissionStkPremarketV1:
-          marketRolloutFlags.p2SpecialPermissionStkPremarketV1
-      });
-      setMarketRolloutFlags(saved);
-      setMarketRolloutFlagsSaved(saved);
-      setNotice("批次开关已保存。");
-      return true;
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      return false;
-    } finally {
-      setMarketRolloutFlagsSaving(false);
-    }
-  }, [marketRolloutFlags]);
 
   const handleRunMarketIngestNow = useCallback(() => {
     if (!marketSchedulerConfig) return;
@@ -3920,7 +3852,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       refreshMarketIngestRuns().catch(() => undefined);
       refreshMarketIngestControl().catch(() => undefined);
       refreshMarketSchedulerConfig().catch(() => undefined);
-      refreshMarketRolloutFlags().catch(() => undefined);
       if (marketRegistryEntryEnabled) {
         refreshMarketRegistry().catch(() => undefined);
       }
@@ -3944,7 +3875,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     refreshMarketIngestControl,
     refreshMarketIngestRuns,
     refreshMarketRegistry,
-    refreshMarketRolloutFlags,
     refreshMarketSchedulerConfig,
     refreshMarketTags,
     marketTagManagementQuery,
@@ -8177,165 +8107,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                       </div>
                     </section>
 
-                    <section className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <h3 className="font-bold text-slate-900 dark:text-white">
-                          批次开关（Rollout）
-                        </h3>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            icon="refresh"
-                            onClick={refreshMarketRolloutFlags}
-                            disabled={marketRolloutFlagsLoading}
-                          >
-                            刷新
-                          </Button>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            icon="save"
-                            onClick={handleSaveMarketRolloutFlags}
-                            disabled={
-                              marketRolloutFlagsSaving ||
-                              !marketRolloutFlags ||
-                              !marketRolloutFlagsDirty
-                            }
-                          >
-                            保存开关
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-3">
-                        {!marketRolloutFlags && !marketRolloutFlagsLoading && (
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            --
-                          </div>
-                        )}
-                        {marketRolloutFlagsLoading && !marketRolloutFlags && (
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            加载中...
-                          </div>
-                        )}
-                        {marketRolloutFlags && (
-                          <>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-slate-700 dark:text-slate-200">
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={marketRolloutFlags.p0Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p0Enabled: event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>P0 批次</span>
-                              </label>
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={marketRolloutFlags.p1Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p1Enabled: event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>P1 批次</span>
-                              </label>
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={marketRolloutFlags.p2Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p2Enabled: event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>P2 批次</span>
-                              </label>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 text-xs">
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-2.5 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={marketRolloutFlags.p2RealtimeIndexV1}
-                                  disabled={!marketRolloutFlags.p2Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p2RealtimeIndexV1: event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>实时指数</span>
-                              </label>
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-2.5 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={marketRolloutFlags.p2RealtimeEquityEtfV1}
-                                  disabled={!marketRolloutFlags.p2Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p2RealtimeEquityEtfV1: event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>实时股票/ETF</span>
-                              </label>
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-2.5 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={marketRolloutFlags.p2FuturesMicrostructureV1}
-                                  disabled={!marketRolloutFlags.p2Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p2FuturesMicrostructureV1: event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>期货微观结构</span>
-                              </label>
-                              <label className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-border-dark px-2.5 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={
-                                    marketRolloutFlags.p2SpecialPermissionStkPremarketV1
-                                  }
-                                  disabled={!marketRolloutFlags.p2Enabled}
-                                  onChange={(event) =>
-                                    updateMarketRolloutFlags({
-                                      p2SpecialPermissionStkPremarketV1:
-                                        event.target.checked
-                                    })
-                                  }
-                                />
-                                <span>专项权限 premarket</span>
-                              </label>
-                            </div>
-
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                              更新时间：{formatDateTime(marketRolloutFlags.updatedAt)}
-                            </div>
-                            {marketRolloutFlagsDirty && (
-                              <div className="text-xs text-amber-600 dark:text-amber-300">
-                                存在未保存开关变更
-                              </div>
-                            )}
-                            {!marketRolloutFlags.p0Enabled && (
-                              <div className="ui-tone-warning text-[11px]">
-                                当前已关闭 P0 批次，手动与调度拉取将被阻止。
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </section>
-
                     <Modal
                       open={marketSchedulerAdvancedOpen}
                       title="调度高级设置"
@@ -9205,10 +8976,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                             size="sm"
                             icon="play_arrow"
                             onClick={() => handleTriggerMarketIngest("targets")}
-                            disabled={
-                              marketIngestTriggering ||
-                              !(marketRolloutFlags?.p0Enabled ?? true)
-                            }
+                            disabled={marketIngestTriggering}
                           >
                             拉取目标池
                           </Button>
@@ -9217,10 +8985,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                             size="sm"
                             icon="play_arrow"
                             onClick={() => handleTriggerMarketIngest("universe")}
-                            disabled={
-                              marketIngestTriggering ||
-                              !(marketRolloutFlags?.p0Enabled ?? true)
-                            }
+                            disabled={marketIngestTriggering}
                           >
                             拉取全市场
                           </Button>
@@ -9229,10 +8994,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                             size="sm"
                             icon="playlist_play"
                             onClick={() => handleTriggerMarketIngest("both")}
-                            disabled={
-                              marketIngestTriggering ||
-                              !(marketRolloutFlags?.p0Enabled ?? true)
-                            }
+                            disabled={marketIngestTriggering}
                           >
                             全部拉取
                           </Button>
@@ -9522,8 +9284,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                             onClick={() => handleTriggerMarketIngest("targets")}
                             disabled={
                               marketIngestTriggering ||
-                              !marketTokenStatus?.configured ||
-                              !(marketRolloutFlags?.p0Enabled ?? true)
+                              !marketTokenStatus?.configured
                             }
                           >
                             拉取目标池
@@ -12127,22 +11888,6 @@ function isSameSchedulerConfig(
     left.scope === right.scope &&
     left.runOnStartup === right.runOnStartup &&
     left.catchUpMissed === right.catchUpMissed
-  );
-}
-
-function isSameRolloutFlags(
-  left: MarketRolloutFlags,
-  right: MarketRolloutFlags
-): boolean {
-  return (
-    left.p0Enabled === right.p0Enabled &&
-    left.p1Enabled === right.p1Enabled &&
-    left.p2Enabled === right.p2Enabled &&
-    left.p2RealtimeIndexV1 === right.p2RealtimeIndexV1 &&
-    left.p2RealtimeEquityEtfV1 === right.p2RealtimeEquityEtfV1 &&
-    left.p2FuturesMicrostructureV1 === right.p2FuturesMicrostructureV1 &&
-    left.p2SpecialPermissionStkPremarketV1 ===
-      right.p2SpecialPermissionStkPremarketV1
   );
 }
 

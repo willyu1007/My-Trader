@@ -36,11 +36,11 @@ const DEFAULT_INGEST_SCHEDULER_CONFIG: MarketIngestSchedulerConfig = {
 
 const DEFAULT_MARKET_ROLLOUT_FLAGS: Omit<MarketRolloutFlags, "updatedAt"> = {
   p0Enabled: true,
-  p1Enabled: false,
-  p2Enabled: false,
-  p2RealtimeIndexV1: false,
-  p2RealtimeEquityEtfV1: false,
-  p2FuturesMicrostructureV1: false,
+  p1Enabled: true,
+  p2Enabled: true,
+  p2RealtimeIndexV1: true,
+  p2RealtimeEquityEtfV1: true,
+  p2FuturesMicrostructureV1: true,
   p2SpecialPermissionStkPremarketV1: false
 };
 
@@ -374,6 +374,28 @@ export async function setMarketRolloutFlags(
   return next;
 }
 
+export async function convergeMarketRolloutFlagsToDefaultOpen(
+  db: SqliteDatabase
+): Promise<MarketRolloutFlags> {
+  const current = await getMarketRolloutFlags(db);
+  if (isConvergedRolloutFlags(current)) {
+    return current;
+  }
+
+  const next: MarketRolloutFlags = {
+    ...current,
+    p0Enabled: true,
+    p1Enabled: true,
+    p2Enabled: true,
+    p2RealtimeIndexV1: true,
+    p2RealtimeEquityEtfV1: true,
+    p2FuturesMicrostructureV1: true,
+    updatedAt: Date.now()
+  };
+  await writeMarketRolloutFlags(db, next);
+  return next;
+}
+
 function buildDefaultRolloutFlags(now = Date.now()): MarketRolloutFlags {
   return {
     ...DEFAULT_MARKET_ROLLOUT_FLAGS,
@@ -419,6 +441,17 @@ function normalizeMarketRolloutFlags(
         ? Math.floor(updatedAtRaw)
         : Date.now()
   };
+}
+
+function isConvergedRolloutFlags(flags: MarketRolloutFlags): boolean {
+  return (
+    flags.p0Enabled &&
+    flags.p1Enabled &&
+    flags.p2Enabled &&
+    flags.p2RealtimeIndexV1 &&
+    flags.p2RealtimeEquityEtfV1 &&
+    flags.p2FuturesMicrostructureV1
+  );
 }
 
 async function writeMarketRolloutFlags(

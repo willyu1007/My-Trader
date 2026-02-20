@@ -99,7 +99,7 @@ where available_date > as_of_trade_date;
 
 ## P2 gray release checklist (wave-1)
 1. Pre-check
-- [ ] 已确认 `p2Enabled=false` 且所有 P2 子开关默认为 `false`
+- [x] 已确认收口后默认值：`p2Enabled=true` 且 `p2RealtimeIndexV1/p2RealtimeEquityEtfV1/p2FuturesMicrostructureV1=true`
 - [ ] 已完成目标接口权限探测并在 `03-implementation-notes.md` 记录结论
 
 2. Single-module rollout
@@ -122,11 +122,11 @@ where available_date > as_of_trade_date;
 
 ## Post-verification convergence checklist (MUST)
 - [ ] 已确认 P0/P1/P2 门禁全部通过，且连续 3 个交易日无阻断错误 run
-- [ ] 将 rollout 默认值切换为全开（`p0Enabled/p1Enabled/p2Enabled=true`）
-- [ ] 已验收的 P2 子模块默认值切换为开启（`p2RealtimeIndexV1/p2RealtimeEquityEtfV1/p2FuturesMicrostructureV1=true`）
-- [ ] `p2SpecialPermissionStkPremarketV1` 仅在权限实测通过时置为 `true`，否则保持 `false`
-- [ ] 删除 Dashboard 中面向业务用户的 rollout 配置 UI/UX（含入口、文案、交互）
-- [ ] 回归验证：删除 UI 后手动拉取/定时拉取/启动补跑路径不受影响
+- [x] 将 rollout 默认值切换为全开（`p0Enabled/p1Enabled/p2Enabled=true`）
+- [x] 已验收的 P2 子模块默认值切换为开启（`p2RealtimeIndexV1/p2RealtimeEquityEtfV1/p2FuturesMicrostructureV1=true`）
+- [x] `p2SpecialPermissionStkPremarketV1` 仅在权限实测通过时置为 `true`，否则保持 `false`
+- [x] 删除 Dashboard 中面向业务用户的 rollout 配置 UI/UX（含入口、文案、交互）
+- [x] 回归验证：删除 UI 后手动拉取/定时拉取/启动补跑路径不受影响
 
 ## Runs (recorded)
 - 2026-02-20：初始化全范围承接任务文档（尚未执行代码级验证）
@@ -159,6 +159,7 @@ where available_date > as_of_trade_date;
 - 2026-02-20：P0 门禁 UI 代码路径校验（静态）-> ✅
   - 前端触发前置阻断：`apps/frontend/src/components/Dashboard.tsx:3014`
   - 手动拉取按钮禁用条件：`apps/frontend/src/components/Dashboard.tsx:9207`、`apps/frontend/src/components/Dashboard.tsx:9219`、`apps/frontend/src/components/Dashboard.tsx:9231`
+  - 备注：该路径在收口阶段已移除业务侧 rollout UI/UX，现以 backend 门禁与默认全开收敛逻辑为准。
 - 2026-02-20：Phase B 首段实现后编译回归 -> ⚠️部分通过
   - `pnpm -C packages/shared build` -> ✅
   - `pnpm -C apps/frontend typecheck` -> ✅
@@ -186,3 +187,14 @@ where available_date > as_of_trade_date;
 - 2026-02-20：P0 门禁 orchestrator 冒烟复跑（真实账号库）-> ✅
   - 对账：`ingest_runs` 行数保持不变（before=90, afterManual=90, afterSchedule=90）
   - 结论：`p0Enabled=false` 时 manual 阻断、schedule 跳过，且测试后开关恢复
+- 2026-02-20：收口改动编译回归 -> ✅
+  - `pnpm typecheck` -> ✅
+  - `pnpm build` -> ✅
+- 2026-02-20：收口改动运行回归（dev）-> ✅
+  - `pnpm dev` 启动后 watch/build 正常，未出现 `managed ingest job failed` 阻断日志
+  - 手动中断产生 `ELIFECYCLE exit code 130`，属于 SIGINT 正常退出
+- 2026-02-20：历史 rollout flags 自动收敛冒烟（真实账号库）-> ✅
+  - 执行：手工将 `rollout_flags_v1` 写入旧值（含非全开字段），重启 `pnpm dev` 触发账号解锁
+  - 结果：`rollout_flags_v1` 自动恢复为默认全开基线（`p0/p1/p2=true`，3 个 P2 子模块开关 `true`，专项权限开关保持 `false`）
+- 2026-02-20：rollout UI 删除静态校验 -> ✅
+  - `apps/frontend/src/components/Dashboard.tsx` 已无 “批次开关（Rollout）” 入口、文案与交互逻辑残留

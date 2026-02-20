@@ -24,6 +24,15 @@
 - 2026-02-20：尝试执行 Electron 实网回归前置检查（读取本地 token + 调用 provider 冒烟）；结果显示当前活跃账号 `tushare_token_v1` 解析后为 `source=none`，暂时无法执行真实 API 回归。
 - 2026-02-20：补齐 backend DuckDB 类型声明（`apps/backend/src/types/duckdb-wasm.d.ts`），消除 `@duckdb/duckdb-wasm` 缺少声明导致的 `typecheck` 阻断。
 - 2026-02-20：完成“此前改动”综合回归：`pnpm typecheck` 与 `pnpm build` 均通过；P0 门禁 orchestrator 冒烟复跑通过；P0 provider 扩展逻辑 mock 冒烟通过（含 optional spot catalog 降级路径）。
+- 2026-02-20：执行 rollout 收口实现（convergence）：
+  - 前端：删除 Dashboard「批次开关（Rollout）」面板，以及对应的本地草稿状态、保存逻辑与按钮门禁联动（业务用户不再操作批次开关）。
+  - 后端：将 `rollout_flags_v1` 默认值切换到全开基线（`p0/p1/p2=true`，`p2RealtimeIndexV1/p2RealtimeEquityEtfV1/p2FuturesMicrostructureV1=true`）。
+  - 后端：新增 `convergeMarketRolloutFlagsToDefaultOpen` 并在账号解锁后调用，自动收敛历史账号库中的旧 rollout 值；`p2SpecialPermissionStkPremarketV1` 继续保留权限硬门禁。
+- 2026-02-20：完成收口回归（代码级）：
+  - `pnpm typecheck` -> ✅
+  - `pnpm build` -> ✅
+  - `pnpm dev` 启动冒烟 -> ✅（无 `managed ingest job failed` 阻断日志）
+  - 历史 flags 收敛冒烟 -> ✅（手工写入旧值后重启，`rollout_flags_v1` 自动恢复为默认全开）
 
 ## Pending decisions / TODO
 - P2 增强模块首批灰度名单（接口级）需要在权限探测后锁定。

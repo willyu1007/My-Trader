@@ -99,15 +99,15 @@ Tushare 多资产覆盖实施（P0/P1/P2）
 - `p2_futures_microstructure_v1`
 - `p2_special_permission_stk_premarket_v1`（默认关闭，需专项权限实测通过后才允许开启）
 
-## `rollout_flags_v1` schema (proposed)
+## `rollout_flags_v1` schema (post-convergence baseline)
 ```json
 {
   "p0Enabled": true,
-  "p1Enabled": false,
-  "p2Enabled": false,
-  "p2RealtimeIndexV1": false,
-  "p2RealtimeEquityEtfV1": false,
-  "p2FuturesMicrostructureV1": false,
+  "p1Enabled": true,
+  "p2Enabled": true,
+  "p2RealtimeIndexV1": true,
+  "p2RealtimeEquityEtfV1": true,
+  "p2FuturesMicrostructureV1": true,
   "p2SpecialPermissionStkPremarketV1": false,
   "updatedAt": 0
 }
@@ -152,6 +152,7 @@ Tushare 多资产覆盖实施（P0/P1/P2）
 4. 文档齐全可归档（overview/plan/architecture/notes/verification/pitfalls/roadmap）
 
 ## Current progress (2026-02-20)
-1. 承接任务包已建立（P0/P1/P2 全批次范围）。
-2. 上游规划任务已完成，可作为实施输入。
-3. 下一步进入 Phase A 并启动 P0 首轮实施。
+1. 承接任务包已建立，且职责边界/硬门禁/灰度清单已对齐（P0/P1/P2 全批次范围）。
+2. Phase A 与 Phase B 首段已落地：rollout flags、P0 资产扩展（index/futures/spot）与容错路径已接入。
+3. 收口项已执行：`rollout_flags_v1` 默认收敛为全开，Dashboard rollout 配置 UI/UX 已移除，专项权限开关仍保留硬门禁。
+4. 下一步聚焦实网门禁：在活跃账号配置可用 token 后完成 P0 实网回归，并继续推进 P1/P2 门禁验收。

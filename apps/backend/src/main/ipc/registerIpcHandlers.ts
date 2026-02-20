@@ -112,6 +112,7 @@ import {
 } from "../services/marketService";
 import { config } from "../config";
 import {
+  convergeMarketRolloutFlagsToDefaultOpen,
   getMarketTargetsConfig,
   getMarketIngestSchedulerConfig,
   getMarketRolloutFlags,
@@ -279,6 +280,7 @@ export async function registerIpcHandlers() {
       activeBusinessDb = await openSqliteDatabase(layout.businessDbPath);
       await exec(activeBusinessDb, `pragma journal_mode = wal;`);
       await ensureBusinessSchema(activeBusinessDb);
+      await convergeMarketRolloutFlagsToDefaultOpen(activeBusinessDb);
 
       activeAccount = unlocked;
       const marketDb = requireMarketCacheDb();
