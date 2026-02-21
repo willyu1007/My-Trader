@@ -12,6 +12,22 @@ import type {
 
 const TUSHARE_URL = "https://api.tushare.pro";
 
+type ForexWhitelistEntry = {
+  symbol: string;
+  name: string;
+};
+
+const FOREX_WHITELIST: ForexWhitelistEntry[] = [
+  { symbol: "USDCNH.FXCM", name: "USD/CNH" },
+  { symbol: "EURUSD.FXCM", name: "EUR/USD" },
+  { symbol: "GBPUSD.FXCM", name: "GBP/USD" },
+  { symbol: "USDJPY.FXCM", name: "USD/JPY" },
+  { symbol: "AUDUSD.FXCM", name: "AUD/USD" },
+  { symbol: "NZDUSD.FXCM", name: "NZD/USD" },
+  { symbol: "USDCAD.FXCM", name: "USD/CAD" },
+  { symbol: "USDCHF.FXCM", name: "USD/CHF" }
+];
+
 type TushareRawResponse = {
   fields: string[];
   items: (string | number | null)[][];
@@ -59,20 +75,29 @@ export const tushareProvider: MarketProvider = {
   },
 
   async fetchInstrumentCatalog(input): Promise<ProviderInstrumentProfile[]> {
-    const [stocks, funds, indexProfiles, futuresProfiles, spotProfiles] =
+    const [
+      stocks,
+      funds,
+      indexProfiles,
+      futuresProfiles,
+      spotProfiles,
+      forexProfiles
+    ] =
       await Promise.all([
         fetchStockBasic(input.token),
         fetchFundBasic(input.token),
         fetchOptionalCatalog("index_basic", () => fetchIndexBasic(input.token)),
         fetchOptionalCatalog("fut_basic", () => fetchFuturesBasic(input.token)),
-        fetchOptionalCatalog("sge_basic", () => fetchSpotBasic(input.token))
+        fetchOptionalCatalog("sge_basic", () => fetchSpotBasic(input.token)),
+        Promise.resolve(fetchForexWhitelistProfiles())
       ]);
     return [
       ...stocks,
       ...funds,
       ...indexProfiles,
       ...futuresProfiles,
-      ...spotProfiles
+      ...spotProfiles,
+      ...forexProfiles
     ];
   },
 
@@ -644,6 +669,59 @@ function toTushareDate(value: string): string {
 function mapMarketToTushareExchange(market: string): string {
   if (market === "CN") return "SSE";
   return "SSE";
+}
+
+function fetchForexWhitelistProfiles(): ProviderInstrumentProfile[] {
+  return FOREX_WHITELIST.map((entry) => {
+    const { baseCurrency, quoteCurrency, venue } = parseForexSymbol(entry.symbol);
+    const providerData: Record<string, unknown> = {
+      kind: "fx_whitelist",
+      baseCurrency,
+      quoteCurrency,
+      venue
+    };
+    const tags = buildProviderTags({
+      kind: "forex",
+      venue,
+      base_currency: baseCurrency,
+      quote_currency: quoteCurrency
+    });
+
+    return {
+      provider: "tushare",
+      kind: "forex",
+      symbol: entry.symbol,
+      name: entry.name,
+      assetClass: null,
+      market: "FX",
+      currency: quoteCurrency ?? "USD",
+      tags,
+      providerData
+    } satisfies ProviderInstrumentProfile;
+  });
+}
+
+function parseForexSymbol(symbol: string): {
+  baseCurrency: string | null;
+  quoteCurrency: string | null;
+  venue: string | null;
+} {
+  const [pairRaw, venueRaw] = symbol.split(".", 2);
+  const pair = (pairRaw ?? "").trim().toUpperCase();
+  const venue = venueRaw ? venueRaw.trim().toUpperCase() : null;
+
+  if (pair.length < 6) {
+    return {
+      baseCurrency: null,
+      quoteCurrency: null,
+      venue
+    };
+  }
+  return {
+    baseCurrency: pair.slice(0, 3),
+    quoteCurrency: pair.slice(3, 6),
+    venue
+  };
 }
 
 function buildRowObject(

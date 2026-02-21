@@ -27,6 +27,15 @@
   - 外汇覆盖达标
   - 宏观 missing 占比与回测安全达标
 
+3.1 M3-R: P1 stability-to-recovery (Phase C extension)
+- Deliverables:
+  - 模块级恢复开关（`universeIndexDailyEnabled/universeDailyBasicEnabled/universeMoneyflowEnabled`）
+  - 模块级游标（index_daily / daily_basic / moneyflow）
+  - Wave 恢复执行框架（按接口独立分片与独立回滚）
+- Acceptance:
+  - 主链路稳定产出持续达标
+  - Wave-1/2/3 按顺序灰度恢复并通过门禁
+
 4. M4: P2 rollout (Phase D)
 - Deliverables:
   - 权限型/专题型增强模块按接口探测结果灰度开放
@@ -47,7 +56,8 @@
 1. 先做 Phase A 的 schema 与开关基线
 2. 再完成 P0（主交易相关资产）
 3. 然后推进 P1（外汇/宏观）
-4. 最后灰度上线 P2 并做全链路稳态回归
+4. 在 P1 内先完成稳定产出，再按 wave 恢复降级接口
+5. 最后灰度上线 P2 并做全链路稳态回归
 
 ## Stage gate rules (MUST)
 1. Phase A -> Phase B (P0) entry gate
@@ -62,6 +72,7 @@
 3. Phase C (P1) exit gate
 - MUST 完成外汇与宏观链路回归。
 - MUST 满足 P1 覆盖率与回测安全门禁（`available_date`）。
+- MUST 完成降级接口恢复（Wave-1/2/3）或形成保留降级的正式豁免记录。
 
 4. Phase D (P2) entry gate
 - MUST 在 P0/P1 均稳定后再启动。

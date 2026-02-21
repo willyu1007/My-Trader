@@ -38,6 +38,9 @@ const DEFAULT_MARKET_ROLLOUT_FLAGS: Omit<MarketRolloutFlags, "updatedAt"> = {
   p0Enabled: true,
   p1Enabled: true,
   p2Enabled: true,
+  universeIndexDailyEnabled: false,
+  universeDailyBasicEnabled: false,
+  universeMoneyflowEnabled: false,
   p2RealtimeIndexV1: true,
   p2RealtimeEquityEtfV1: true,
   p2FuturesMicrostructureV1: true,
@@ -352,6 +355,18 @@ export async function setMarketRolloutFlags(
       typeof input?.p1Enabled === "boolean" ? input.p1Enabled : current.p1Enabled,
     p2Enabled:
       typeof input?.p2Enabled === "boolean" ? input.p2Enabled : current.p2Enabled,
+    universeIndexDailyEnabled:
+      typeof input?.universeIndexDailyEnabled === "boolean"
+        ? input.universeIndexDailyEnabled
+        : current.universeIndexDailyEnabled,
+    universeDailyBasicEnabled:
+      typeof input?.universeDailyBasicEnabled === "boolean"
+        ? input.universeDailyBasicEnabled
+        : current.universeDailyBasicEnabled,
+    universeMoneyflowEnabled:
+      typeof input?.universeMoneyflowEnabled === "boolean"
+        ? input.universeMoneyflowEnabled
+        : current.universeMoneyflowEnabled,
     p2RealtimeIndexV1:
       typeof input?.p2RealtimeIndexV1 === "boolean"
         ? input.p2RealtimeIndexV1
@@ -387,6 +402,9 @@ export async function convergeMarketRolloutFlagsToDefaultOpen(
     p0Enabled: true,
     p1Enabled: true,
     p2Enabled: true,
+    universeIndexDailyEnabled: false,
+    universeDailyBasicEnabled: false,
+    universeMoneyflowEnabled: false,
     p2RealtimeIndexV1: true,
     p2RealtimeEquityEtfV1: true,
     p2FuturesMicrostructureV1: true,
@@ -421,6 +439,18 @@ function normalizeMarketRolloutFlags(
     p0Enabled: Boolean(input.p0Enabled ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p0Enabled),
     p1Enabled: Boolean(input.p1Enabled ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p1Enabled),
     p2Enabled: Boolean(input.p2Enabled ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p2Enabled),
+    universeIndexDailyEnabled: Boolean(
+      input.universeIndexDailyEnabled ??
+        DEFAULT_MARKET_ROLLOUT_FLAGS.universeIndexDailyEnabled
+    ),
+    universeDailyBasicEnabled: Boolean(
+      input.universeDailyBasicEnabled ??
+        DEFAULT_MARKET_ROLLOUT_FLAGS.universeDailyBasicEnabled
+    ),
+    universeMoneyflowEnabled: Boolean(
+      input.universeMoneyflowEnabled ??
+        DEFAULT_MARKET_ROLLOUT_FLAGS.universeMoneyflowEnabled
+    ),
     p2RealtimeIndexV1: Boolean(
       input.p2RealtimeIndexV1 ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p2RealtimeIndexV1
     ),

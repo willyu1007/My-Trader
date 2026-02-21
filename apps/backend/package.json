@@ -9,6 +9,7 @@
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/start.mjs",
     "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
+    "phase-r2:gate-snapshot": "node scripts/phase-r2-gate-snapshot.mjs",
     "verify:position-engine": "pnpm run build && node dist/verify-position-engine.js"
   },
   "dependencies": {

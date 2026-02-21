@@ -9,7 +9,8 @@ export type MarketInstrumentKind =
   | "fund"
   | "index"
   | "futures"
-  | "spot";
+  | "spot"
+  | "forex";
 
 export type ProviderInstrumentProfile = {
   provider: MarketProviderId;

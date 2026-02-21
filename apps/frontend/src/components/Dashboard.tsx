@@ -6664,7 +6664,8 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                         { key: "fund", label: "fund" },
                         { key: "index", label: "index" },
                         { key: "futures", label: "futures" },
-                        { key: "spot", label: "spot" }
+                        { key: "spot", label: "spot" },
+                        { key: "forex", label: "forex" }
                       ] as const).map((item) => (
                         <label key={item.key} className="flex items-center gap-2">
                           <input

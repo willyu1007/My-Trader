@@ -2,7 +2,7 @@
 
 ## Status
 - Current status: in_progress
-- Last updated: 2026-02-20
+- Last updated: 2026-02-21
 
 ## Notes (append-only)
 - 2026-02-20：创建承接任务包 `dev-docs/active/tushare-cross-asset-rollout/`，范围覆盖 P0/P1/P2 全批次。
@@ -33,7 +33,84 @@
   - `pnpm build` -> ✅
   - `pnpm dev` 启动冒烟 -> ✅（无 `managed ingest job failed` 阻断日志）
   - 历史 flags 收敛冒烟 -> ✅（手工写入旧值后重启，`rollout_flags_v1` 自动恢复为默认全开）
+- 2026-02-21：推进 Phase C（P1）实现：
+  - 扩展 Universe 目录同步：新增 `forex` kind 的白名单主档入链（`fx_daily`），并将 `p1Enabled` 门禁接入 `syncUniverseInstrumentMeta/ingestUniverseTradeDate`。
+  - 新增外汇元数据表 `fx_pair_meta`（DuckDB + market-cache.sqlite 镜像），写入 `base_ccy/quote_ccy/quote_convention/is_active`，用于白名单校验与后续 Target 消费。
+  - 新增宏观 P1 基线表：`macro_series_meta`、`macro_observations`、`macro_module_snapshot`（DuckDB），以及 `macro_series_meta`、`macro_observations_latest`、`macro_module_snapshot`（market-cache.sqlite 镜像）。
+  - 在 Universe run 末尾接入宏观快照链路：采集 CN/US 宏观序列、计算 `available_date`（`release_date` 优先，缺失时 fallback lag）、生成 4 个模块快照（`macro.cn_growth_inflation` / `macro.cn_liquidity` / `macro.us_rates` / `macro.cross_market`）。
+  - `ingest_runs.meta` 补充 `macroSummary` 与 `universeCounts.fxPairs` 统计，便于门禁验收对账。
+- 2026-02-21：执行实库运行态回归时发现阻断：
+  - 启动补跑触发 `managed ingest job failed`，错误为 DuckDB OOM（`3.1 GiB` 打满，且未设置 `temp_directory` 导致无法溢写到磁盘）。
+  - 受该阻断影响，Universe run 无法成功完成，`fx_pair_meta`/`macro_*` 表未产生产物数据（仅完成建表）。
+  - `ingest_runs` 存在历史 `status='running'` 残留记录（targets/universe 均有），表明异常退出路径未完全收敛 run 状态。
+- 2026-02-21：按阻断修复顺序完成稳定化改造：
+  - DuckDB 运行时治理：`openAnalysisDuckdb` 增加 `temp_directory`、`memory_limit=1GB`、`threads=1`、`preserve_insertion_order=false`，缓解 wasm OOM/越界风险。
+  - run 收敛治理：新增 `convergeStaleRunningIngestRuns`，在 orchestrator 启动阶段自动收敛历史 `running` run 为 `failed`，并记录统一原因。
+  - Universe 批处理降压：增加按 `mode` 的交易日分片（当前 `daily/manual/on_demand=1`，`bootstrap=2`），避免单次 run 处理过多交易日。
+  - Tushare 分页防护：`fetchTusharePaged` 新增“重复页检测”与 offset 安全上限降级返回（返回 partial，不再抛异常阻断主链路）。
+  - Universe 入库稳定性修正：`instrument_meta` 从逐行 SQL 改为批量 upsert，减少 DuckDB wasm 频繁 query 调用导致的内存/稳定性风险。
+  - Universe 高风险接口临时降级：暂停在 Universe 路径中对 `daily_basic/moneyflow/index_daily` 的全市场日级拉取（保留价格主链路 + 宏观链路），降低实网阻断概率。
+- 2026-02-21：修复后实网复测结果：
+  - 最新 universe run 成功：`status=success`，`as_of_trade_date=2026-02-13`，`processedTradeDates=1`，`pendingTradeDates=731`。
+  - P1 产物已生成：`fx_pair_meta=8`、`macro_series_meta=14`、`macro_observations_latest=13`、`macro_module_snapshot=4`。
+  - `macro_module_snapshot` 无 future-leak（`available_date > as_of_trade_date` 计数为 0）。
+- 2026-02-21：按评审要求将“稳定产出 -> 恢复到常态”的完整方案落盘到 `roadmap/01-plan/04-verification`，新增 R0/R1/R2 分阶段与 Wave 门禁。
+- 2026-02-21：开始执行恢复计划（Phase R1 + Wave-1）：
+  - 扩展 `rollout_flags_v1`：新增 `universeIndexDailyEnabled/universeDailyBasicEnabled/universeMoneyflowEnabled`。
+  - 新增模块游标框架：支持 `analysis_meta` 按 key 读写游标（主游标 + 模块游标解耦）。
+  - 新增 `index_daily` Wave-1 执行器：按 `tradeDate + symbolOffset` 分片推进，写入 `run.meta.recoverySummary`，失败不阻断主链路。
+  - 通过实网启动补跑验证：`index_daily` 模块可在主 run 成功前提下返回 `partial` 进度与 cursor。
+- 2026-02-21：推进恢复计划（Phase R2）：
+  - 在 `marketIngestRunner` 落地 Wave-2/Wave-3：新增 `daily_basic` 与 `moneyflow` 的模块游标键（`universe_daily_basic_cursor_v1`、`universe_moneyflow_cursor_v1`）与独立分片执行器。
+  - 恢复模块执行策略统一：按 `tradeDate + symbolOffset` 推进；模块失败仅体现在 `recoverySummary`，不提升主 run 到 `failed`；模块写入成功后单独推进模块 cursor。
+  - `recoverySummary` 现已完整覆盖三模块（`index_daily/daily_basic/moneyflow`）的 `enabled/status/progress/cursor/errors`。
+- 2026-02-21：完成自动化 recovery smoke（Electron 脚本）：
+  - 场景 A（全部 recovery 开关关闭）：universe run `success`，三模块均 `disabled`。
+  - 场景 B（仅 `daily_basic` 开启）：universe run `success`，`daily_basic=status=partial`，`cursor={"tradeDate":"2023-02-14","symbolOffset":30}`。
+  - 场景 C（仅 `moneyflow` 开启）：universe run `success`，`moneyflow=status=partial`，`cursor={"tradeDate":"2023-02-14","symbolOffset":30}`。
+  - 测试收尾：恢复 `rollout_flags_v1` 原值、删除 smoke 生成的 `ingest_runs`、恢复模块 cursor 快照，避免污染实库历史记录。
+- 2026-02-21：继续执行 Phase R2 soak 时发现新阻断并完成修复：
+  - 症状：`index_daily/daily_basic/moneyflow` 在连续 run 中 cursor 不推进（重复停留在相同 `symbolOffset`）。
+  - 根因：模块 cursor 存在 DuckDB `analysis_meta`，但当前运行形态下该存储在跨进程重启后不稳定，导致每次 run 等效“从 0 开始”。
+  - 修复：将 Universe 主/模块 cursor 的存储从 DuckDB `analysis_meta` 切换为 `market-cache.sqlite` 的 `market_meta`（key: `universe_*`），确保进程外持久化。
+  - 结果：Wave-1/2/3 复测中 cursor 均单调推进（`index: 40->80`，`daily_basic: 30->60`，`moneyflow: 30->60`），主 run 全部 `success`。
+- 2026-02-21：执行追加轻量 soak（`manual-soak3`）：
+  - 执行结果：Wave-1/2/3 新增一轮全部 `success`，并继续单调推进（`index: 120->160`，`daily_basic: 90->120`，`moneyflow: 90->120`）。
+  - 运行态确认：`rollout_flags_v1` 自动恢复原值（`universeIndexDailyEnabled=true`，其余两个恢复开关保持关闭），`status='running'` 残留为 0。
+  - 收尾：已删除 `manual-soak3` 运行记录并移除临时目录 `/private/tmp/mytrader-wave-soak3-1771644652`，避免污染实库历史。
+- 2026-02-21：新增连续门禁快照脚本：
+  - 新增 `apps/backend/scripts/phase-r2-gate-snapshot.mjs`（只读查询，不写库），统一输出 baseline 后的 run 稳定性、flags、cursor、质量指标、最新 success recoverySummary。
+  - `apps/backend/package.json` 增加脚本：`phase-r2:gate-snapshot`。
+  - 已基于 baseline run `0eb63ce9-e877-4424-a622-2b2ebd11c829` 执行一次，结果 `runs=3`、`blocking=0`。
+- 2026-02-21：增强连续门禁快照脚本：
+  - 新增参数 `--target-clean-days`（默认 3），自动计算 `postBaseline.cleanDayProgress`（`consecutiveCleanDays/targetCleanDays`）。
+  - 当前执行结果：`cleanDayProgress=1/3`，`reached=false`。
+- 2026-02-21：继续执行实网验证：
+  - 触发一次 `startup` 补跑（`pnpm -C apps/backend dev`），新增 `universe` run `8605949b-0f52-41e3-b25d-6c79ce611428`，结果 `success/errors=0`。
+  - 补跑后门禁快照更新为 `postBaseline.runs=4`、`blocking=0`、`cleanDayProgress=1/3`。
+  - `index_daily` 模块 cursor 继续推进（`symbolOffset 160 -> 200`），`status='running'` 残留仍为 0。
+- 2026-02-21：继续执行实网加压验证（x2）：
+  - 额外完成 2 轮 startup 补跑，新增 run `06a0bb36-f36b-42c3-8e33-5d63c4c8255c` 与 `48ba180d-ba6c-4df3-a956-47fb4791d8dc`，均 `success/errors=0`。
+  - 门禁快照更新为 `postBaseline.runs=6`、`blocking=0`、`cleanDayProgress=1/3`（交易日维度仍为 Day-1）。
+  - `index_daily` cursor 继续推进（`symbolOffset 200 -> 280`），并保持 `running=0`。
+  - 已清理本轮 `/tmp` 日志产物。
+- 2026-02-21：继续执行实网加压验证（+1）：
+  - 新增 1 轮 startup 补跑，run `dcdcbcf2-7d17-4694-b75d-9f2e99d77e12`，结果 `success/errors=0`。
+  - 门禁快照更新为 `postBaseline.runs=7`、`blocking=0`、`cleanDayProgress=1/3`。
+  - `index_daily` cursor 继续推进（`symbolOffset 280 -> 320`），`running=0`。
+  - 已清理 `/tmp/mytrader-startup-loop-3.log`。
+- 2026-02-21：继续执行实网加压验证（+1，round-4）：
+  - 新增 1 轮 startup 补跑，run `c0164b33-90a2-47ad-af62-b92982c88c5a`，结果 `success/errors=0`。
+  - 门禁快照更新为 `postBaseline.runs=8`、`blocking=0`、`cleanDayProgress=1/3`。
+  - `index_daily` cursor 继续推进（`symbolOffset 320 -> 360`），`running=0`。
+  - 已清理 `/tmp/mytrader-startup-loop-4.log`。
+- 2026-02-21：按评审建议执行历史交易日回放门禁（3 天）：
+  - 通过 Electron 临时脚本按 `now=2026-02-11/12/13` 依次触发 `runUniverseIngest`，`meta.source=historical-gate-replay`。
+  - 新增 3 条 `universe` run，均 `success/errors=0`，`as_of_trade_date` 分别为 `2026-02-11`、`2026-02-12`、`2026-02-13`。
+  - 门禁快照新增 `cleanAsOfTradeDateProgress` 口径：当前 `3/3`（`reached=true`）。
+  - 口径边界：自然日 `cleanDayProgress` 仍为 `1/3`（同一天内），历史回放口径已达 `3/3`。
 
 ## Pending decisions / TODO
 - P2 增强模块首批灰度名单（接口级）需要在权限探测后锁定。
 - P1 宏观模块默认 `fallback_lag_days` 参数是否按资产组细化到配置中心。
+- Wave-1/2/3 仍需连续 3 个交易日 soak（验证 cursor 单调推进、模块错误率与主链路稳定性门禁）。

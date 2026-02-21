@@ -252,7 +252,8 @@ export type InstrumentKind =
   | "fund"
   | "index"
   | "futures"
-  | "spot";
+  | "spot"
+  | "forex";
 
 export interface InstrumentProfileSummary {
   provider: MarketProviderId;
@@ -617,6 +618,9 @@ export interface MarketRolloutFlags {
   p0Enabled: boolean;
   p1Enabled: boolean;
   p2Enabled: boolean;
+  universeIndexDailyEnabled: boolean;
+  universeDailyBasicEnabled: boolean;
+  universeMoneyflowEnabled: boolean;
   p2RealtimeIndexV1: boolean;
   p2RealtimeEquityEtfV1: boolean;
   p2FuturesMicrostructureV1: boolean;
@@ -628,6 +632,9 @@ export interface SetMarketRolloutFlagsInput {
   p0Enabled?: boolean | null;
   p1Enabled?: boolean | null;
   p2Enabled?: boolean | null;
+  universeIndexDailyEnabled?: boolean | null;
+  universeDailyBasicEnabled?: boolean | null;
+  universeMoneyflowEnabled?: boolean | null;
   p2RealtimeIndexV1?: boolean | null;
   p2RealtimeEquityEtfV1?: boolean | null;
   p2FuturesMicrostructureV1?: boolean | null;

@@ -271,6 +271,102 @@ export async function ensureMarketCacheSchema(
   await exec(
     db,
     `
+      create table if not exists fx_pair_meta (
+        symbol text primary key not null,
+        base_ccy text,
+        quote_ccy text,
+        quote_convention text,
+        is_active integer not null,
+        updated_at integer not null
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists fx_pair_meta_active
+      on fx_pair_meta (is_active, symbol);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists macro_series_meta (
+        series_key text primary key not null,
+        region text not null,
+        topic text not null,
+        source_api text not null,
+        frequency text not null,
+        unit text,
+        is_active integer not null,
+        updated_at integer not null
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists macro_series_meta_region_topic
+      on macro_series_meta (region, topic, series_key);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists macro_observations_latest (
+        series_key text not null,
+        available_date text not null,
+        value real not null,
+        period_end text not null,
+        release_date text not null,
+        frequency text not null,
+        source text not null,
+        updated_at integer not null,
+        primary key (series_key, available_date)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists macro_observations_latest_series
+      on macro_observations_latest (series_key, available_date desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists macro_module_snapshot (
+        as_of_trade_date text not null,
+        module_id text not null,
+        status text not null,
+        coverage_ratio real not null,
+        available_date text,
+        payload_json text not null,
+        source_run_id text,
+        updated_at integer not null,
+        primary key (as_of_trade_date, module_id)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists macro_module_snapshot_module_date
+      on macro_module_snapshot (module_id, as_of_trade_date desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
       create table if not exists ingest_runs (
         id text primary key not null,
         scope text not null,

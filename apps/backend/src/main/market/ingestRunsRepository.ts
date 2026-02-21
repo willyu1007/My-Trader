@@ -159,3 +159,47 @@ export async function getLatestIngestRun(
   );
   return row ?? null;
 }
+
+export async function convergeStaleRunningIngestRuns(
+  db: SqliteDatabase,
+  input?: {
+    olderThanMs?: number;
+    reason?: string;
+  }
+): Promise<number> {
+  const now = Date.now();
+  const olderThanMs = Math.max(0, input?.olderThanMs ?? 0);
+  const cutoff = now - olderThanMs;
+  const reason =
+    input?.reason?.trim() ||
+    "Ingest run was left in running state after process restart.";
+
+  const countRow = await get<{ cnt: number }>(
+    db,
+    `
+      select count(*) as cnt
+      from ingest_runs
+      where status = 'running'
+        and started_at <= ?
+    `,
+    [cutoff]
+  );
+  const count = Number(countRow?.cnt ?? 0);
+  if (count <= 0) return 0;
+
+  await run(
+    db,
+    `
+      update ingest_runs
+      set status = 'failed',
+          finished_at = ?,
+          errors = coalesce(errors, 1),
+          error_message = coalesce(error_message, ?)
+      where status = 'running'
+        and started_at <= ?
+    `,
+    [now, reason, cutoff]
+  );
+
+  return count;
+}

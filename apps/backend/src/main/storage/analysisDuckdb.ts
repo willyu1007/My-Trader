@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { Worker as NodeWorker } from "node:worker_threads";
 
 import type {
@@ -116,6 +117,9 @@ export async function openAnalysisDuckdb(
   analysisDbPath: string
 ): Promise<AnalysisDuckdbHandle> {
   const duckdb = await getDuckdbModule();
+  const resolvedPath = path.resolve(analysisDbPath);
+  const tempDir = path.join(path.dirname(resolvedPath), "duckdb-temp");
+  fs.mkdirSync(tempDir, { recursive: true });
 
   const wasmMvp = require.resolve("@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm");
   const wasmEh = require.resolve("@duckdb/duckdb-wasm/dist/duckdb-eh.wasm");
@@ -143,9 +147,11 @@ export async function openAnalysisDuckdb(
 
   const accessMode = duckdb.DuckDBAccessMode.READ_WRITE as DuckDBAccessMode;
   await db.open({
-    path: path.resolve(analysisDbPath),
+    path: resolvedPath,
     accessMode
   });
+
+  await applyDuckdbRuntimeSettings(db, tempDir);
 
   return {
     db,
@@ -154,6 +160,37 @@ export async function openAnalysisDuckdb(
       await db.terminate();
     }
   };
+}
+
+async function applyDuckdbRuntimeSettings(
+  db: AsyncDuckDB,
+  tempDirectory: string
+): Promise<void> {
+  const conn = await db.connect();
+  try {
+    const tempDirSql = escapeDuckdbString(tempDirectory);
+    await conn.query(`set temp_directory='${tempDirSql}';`);
+
+    const optionalSettings = [
+      "set memory_limit='1GB';",
+      "set preserve_insertion_order=false;",
+      "set threads=1;"
+    ];
+    for (const sql of optionalSettings) {
+      try {
+        await conn.query(sql);
+      } catch (error) {
+        console.warn(`[mytrader] duckdb runtime setting failed: ${sql}`);
+        console.warn(error);
+      }
+    }
+  } finally {
+    await conn.close();
+  }
+}
+
+function escapeDuckdbString(value: string): string {
+  return value.replace(/'/g, "''");
 }
 
 export async function ensureAnalysisDuckdbSchema(
@@ -227,6 +264,62 @@ export async function ensureAnalysisDuckdbSchema(
         source varchar not null,
         ingested_at bigint not null,
         primary key (symbol, trade_date)
+      );
+    `);
+
+    await conn.query(`
+      create table if not exists fx_pair_meta (
+        symbol varchar not null,
+        base_ccy varchar,
+        quote_ccy varchar,
+        quote_convention varchar,
+        is_active boolean not null,
+        updated_at bigint not null,
+        primary key (symbol)
+      );
+    `);
+
+    await conn.query(`
+      create table if not exists macro_series_meta (
+        series_key varchar not null,
+        region varchar not null,
+        topic varchar not null,
+        source_api varchar not null,
+        frequency varchar not null,
+        unit varchar,
+        is_active boolean not null,
+        updated_at bigint not null,
+        primary key (series_key)
+      );
+    `);
+
+    await conn.query(`
+      create table if not exists macro_observations (
+        series_key varchar not null,
+        period_end varchar not null,
+        release_date varchar not null,
+        available_date varchar not null,
+        value double not null,
+        unit varchar,
+        frequency varchar not null,
+        revision_no integer not null,
+        source varchar not null,
+        ingested_at bigint not null,
+        primary key (series_key, period_end, release_date)
+      );
+    `);
+
+    await conn.query(`
+      create table if not exists macro_module_snapshot (
+        as_of_trade_date varchar not null,
+        module_id varchar not null,
+        status varchar not null,
+        coverage_ratio double not null,
+        available_date varchar,
+        payload_json varchar not null,
+        source_run_id varchar,
+        updated_at bigint not null,
+        primary key (as_of_trade_date, module_id)
       );
     `);
 

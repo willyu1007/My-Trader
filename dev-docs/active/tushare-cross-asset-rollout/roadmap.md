@@ -105,6 +105,9 @@ Tushare 多资产覆盖实施（P0/P1/P2）
   "p0Enabled": true,
   "p1Enabled": true,
   "p2Enabled": true,
+  "universeIndexDailyEnabled": false,
+  "universeDailyBasicEnabled": false,
+  "universeMoneyflowEnabled": false,
   "p2RealtimeIndexV1": true,
   "p2RealtimeEquityEtfV1": true,
   "p2FuturesMicrostructureV1": true,
@@ -112,6 +115,41 @@ Tushare 多资产覆盖实施（P0/P1/P2）
   "updatedAt": 0
 }
 ```
+
+## Stability-to-Recovery Plan (new baseline)
+目标：先稳定产出，再恢复临时降级接口到正常使用，且全程可回滚。
+
+### Phase R0: Stable production baseline (MUST)
+1. 主链路仅保留稳定接口（价格主链路 + FX + Macro），保证 Universe 可持续成功。
+2. 高风险接口（`index_daily` / `daily_basic` / `moneyflow`）默认不阻断主链路。
+3. DuckDB 运行参数、stale running 收敛、分片执行作为默认基线能力。
+
+### Phase R1: Recovery framework (MUST)
+1. 为恢复接口增加模块级开关：
+- `universeIndexDailyEnabled`
+- `universeDailyBasicEnabled`
+- `universeMoneyflowEnabled`
+2. 建立模块级游标（与主游标解耦）：
+- `universe_index_daily_cursor_v1`
+- `universe_daily_basic_cursor_v1`
+- `universe_moneyflow_cursor_v1`
+3. 模块失败只标记模块级结果，不得把主链路直接升级为 `failed`。
+
+### Phase R2: Wave recovery (ordered)
+1. Wave-1: `index_daily`（按 `ts_code` 分片）
+2. Wave-2: `daily_basic`（按 symbol 池分片）
+3. Wave-3: `moneyflow`（按 symbol 池分片）
+
+### Recovery gate per wave (MUST)
+1. 连续 3 个交易日无阻断失败 run。
+2. 模块自身覆盖率与质量达标（口径后续由测试定义）。
+3. `running` 残留计数为 0。
+4. 主链路指标不回退（P0/P1 核心门禁保持稳定）。
+
+### Rollback rule per wave (MUST)
+1. 任一 wave 失败，立即关闭对应模块开关。
+2. 主链路继续运行，禁止扩大回滚影响面。
+3. 修复后在同一 wave 重试，不允许跳级。
 
 ## Post-verification target state (MUST)
 在 P0/P1/P2 全部门禁通过并完成稳定性验收后，rollout 从“灰度控制态”切换到“默认全开态”。
@@ -151,8 +189,19 @@ Tushare 多资产覆盖实施（P0/P1/P2）
 3. 完成 post-verification 收口：默认全开批次 + 删除 rollout UI/UX + 专项权限门禁仍生效
 4. 文档齐全可归档（overview/plan/architecture/notes/verification/pitfalls/roadmap）
 
-## Current progress (2026-02-20)
+## Current progress (2026-02-21)
 1. 承接任务包已建立，且职责边界/硬门禁/灰度清单已对齐（P0/P1/P2 全批次范围）。
 2. Phase A 与 Phase B 首段已落地：rollout flags、P0 资产扩展（index/futures/spot）与容错路径已接入。
 3. 收口项已执行：`rollout_flags_v1` 默认收敛为全开，Dashboard rollout 配置 UI/UX 已移除，专项权限开关仍保留硬门禁。
-4. 下一步聚焦实网门禁：在活跃账号配置可用 token 后完成 P0 实网回归，并继续推进 P1/P2 门禁验收。
+4. 稳定化阻断已修复（DuckDB 运行参数 + stale running 收敛 + 分片 + 分页防护），实网已恢复可成功补跑。
+5. 恢复计划已启动：Phase R1 完成（模块开关与模块游标框架）；Phase R2 已完成 Wave-1/2/3 执行器接入，并通过自动化 smoke 验证 `index_daily/daily_basic/moneyflow` 的独立开关 + 独立 cursor + 主链路不阻断。
+6. 已修复 cursor 持久化阻断：Universe 主/模块游标存储切换到 `market-cache.sqlite.market_meta`，复测确认三模块 cursor 可单调推进。
+7. 已完成追加轻量回归（`manual-soak3`）：三模块再次单调推进且主 run 全部成功；测试 run 与临时目录已清理，当前进入“连续 3 交易日稳定性门禁”验证阶段。
+8. 已完成连续交易日门禁 Day-1 快照：以稳定修复后的基线 run 为边界，当前 `3 runs / 0 blocking`，质量与编译回归通过；待完成 Day-2/Day-3。
+9. 已落地标准化门禁快照命令（`phase-r2:gate-snapshot`）；当前日期为 `2026-02-21`（周六），Day-2/Day-3 需在后续交易日（最早 `2026-02-23`）继续执行。
+10. 门禁快照命令已增强为自动计算连续稳定进度；当前 `cleanDayProgress=1/3`，尚未达到恢复门禁退出条件。
+11. 已完成 Day-1 日内复验：新增 `startup` 成功 run 后 `postBaseline=4 runs/0 blocking`，`index_daily` cursor 持续推进（`160 -> 200`），稳定性结论不变。
+12. 已完成 Day-1 日内加压（额外 2 轮 startup 补跑）：`postBaseline=6 runs/0 blocking`，`index_daily` cursor 继续推进（`200 -> 280`），无新阻断与残留。
+13. 已完成 Day-1 追加补跑（+1）：`postBaseline=7 runs/0 blocking`，`index_daily` cursor 进一步推进（`280 -> 320`），质量与残留指标维持稳定。
+14. 已完成 Day-1 追加补跑（+1，round-4）：`postBaseline=8 runs/0 blocking`，`index_daily` cursor 继续推进（`320 -> 360`），同日稳定性进一步增强。
+15. 已完成“历史交易日回放”加速门禁：`as_of_trade_date=2026-02-11/12/13` 三次回放均成功，`cleanAsOfTradeDateProgress=3/3`；自然日口径仍为 `1/3`。

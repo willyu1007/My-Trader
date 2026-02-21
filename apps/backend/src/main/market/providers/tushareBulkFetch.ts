@@ -22,6 +22,7 @@ export async function fetchTusharePaged(
   const allItems: (string | number | null)[][] = [];
   let offset = 0;
   let responseFields: string[] = [];
+  let previousPageSignature: string | null = null;
 
   while (true) {
     const { fields: pageFields, items } = await callTushare(apiName, token, params, fields, {
@@ -31,16 +32,39 @@ export async function fetchTusharePaged(
 
     if (responseFields.length === 0) responseFields = pageFields ?? [];
     const rows = items ?? [];
+    const pageSignature = buildPageSignature(rows);
+    if (
+      rows.length > 0 &&
+      previousPageSignature !== null &&
+      pageSignature === previousPageSignature
+    ) {
+      console.warn(
+        `[mytrader] tushare ${apiName} pagination appears unsupported or repeated at offset=${offset}, stop paging early.`
+      );
+      break;
+    }
+
     allItems.push(...rows);
+    previousPageSignature = pageSignature;
 
     if (rows.length < pageSize) break;
     offset += pageSize;
     if (offset > 2_000_000) {
-      throw new Error(`Tushare ${apiName} offset exceeded safety limit.`);
+      console.warn(
+        `[mytrader] tushare ${apiName} offset exceeded safety limit (${offset}), return partial rows.`
+      );
+      break;
     }
   }
 
   return { fields: responseFields, items: allItems };
+}
+
+function buildPageSignature(rows: (string | number | null)[][]): string {
+  if (rows.length === 0) return "empty";
+  const first = JSON.stringify(rows[0]);
+  const last = JSON.stringify(rows[rows.length - 1]);
+  return `${rows.length}|${first}|${last}`;
 }
 
 async function callTushare(
@@ -91,4 +115,3 @@ export function normalizeNumber(value: string | number | null | undefined): numb
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
-

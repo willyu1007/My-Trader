@@ -11,6 +11,7 @@ import {
 import { getResolvedTushareToken } from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 import type { IngestExecutionControl } from "./marketIngestRunner";
+import { convergeStaleRunningIngestRuns } from "./ingestRunsRepository";
 import { runTargetsIngest, runUniverseIngest } from "./marketIngestRunner";
 
 type OrchestratorScope = "targets" | "universe" | "both";
@@ -64,6 +65,13 @@ export async function startIngestOrchestrator(input: {
   state.businessDb = input.businessDb;
   state.marketDb = input.marketDb;
   state.analysisDbPath = input.analysisDbPath ?? null;
+  const converged = await convergeStaleRunningIngestRuns(input.marketDb, {
+    olderThanMs: 0,
+    reason: "Ingest run was interrupted by process exit; auto-converged on startup."
+  });
+  if (converged > 0) {
+    console.warn(`[mytrader] converged stale running ingest runs: ${converged}`);
+  }
   const persisted = await getPersistedIngestControlState(input.businessDb);
   state.paused = persisted.paused;
   touchState();
@@ -263,6 +271,10 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
     analysisDbPath: state.analysisDbPath,
     token,
     mode: job.mode,
+    p1Enabled: rolloutFlags.p1Enabled,
+    universeIndexDailyEnabled: rolloutFlags.universeIndexDailyEnabled,
+    universeDailyBasicEnabled: rolloutFlags.universeDailyBasicEnabled,
+    universeMoneyflowEnabled: rolloutFlags.universeMoneyflowEnabled,
     meta: { ...(job.meta ?? {}), source: job.source, windowYears: 3 },
     control
   });
