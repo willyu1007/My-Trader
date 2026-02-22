@@ -154,3 +154,22 @@
   - `apps/frontend/src/components/dashboard/hooks/use-dashboard-market-target-pool-stats.ts`
   - 当 `pool:*` 标签成员汇总为 0 时，自动回退到 `market.previewTargets()` 作为 universe symbols 口径，避免“全量标的=0”的空板问题。
   - 分类统计仍沿用分类标签成员并与 universe symbol 集求交，保证指标语义一致。
+
+## 2026-02-22 Follow-up: 口径收敛（full-pool 默认全开）与新库 schema 断链修复
+- 触发背景：用户确认“全量池正常不需要额外配置（除子 token 外）”，并要求确认图片中的 P1 风险是否真实。
+- 已落地改动：
+  - `apps/backend/src/main/market/marketCache.ts`
+    - 恢复 `target_task_status` / `target_materialization_runs` 两张表及索引 DDL（`create table/index if not exists`）。
+    - 目的：消除新建库/新环境在目标任务状态写入时的 schema 断链风险。
+  - `scripts/verify-pr1-integration-guardrails.mjs`
+    - 门禁从“PR1 双池 + managed-ingest 强接入”口径，收敛为“closure 基线 + 可用性”口径：
+      - 保留 `main` 基线与 Dashboard 模块化断言；
+      - materialization 改为校验 IPC 手动路径 + schema 可用；
+      - 明确不再要求 `selectedBuckets/updateMarketUniversePoolBucketStates` 接入 managed ingest；
+      - 明确 futures/spot 不再作为 targets 自动抓取资产类型。
+  - `apps/frontend/src/components/dashboard/hooks/use-dashboard-market-target-pool-stats.ts`
+    - 当 `pool:*` 标签未命中时，优先回退到 `listInstrumentRegistry` 分页拉全量 symbols（而非直接回退到 `previewTargets`）。
+    - 目的：结构看板“全量标的”在无 pool 标签场景下仍可反映全量池口径（2 万+），避免被目标池口径误缩小。
+- 结果：
+  - `verify:pr1-guardrails` 恢复通过，且语义与当前 `tushare-rollout-closure` 基线一致；
+  - 新库初始化不再缺失 target-task 相关表。

@@ -130,10 +130,47 @@ export function useDashboardMarketTargetPoolStats(
       if (requestIdRef.current !== requestId) return;
 
       if (universeAllSymbols.size === 0) {
+        const firstPage = await marketApi.listInstrumentRegistry({
+          autoIngest: "all",
+          limit: 500,
+          offset: 0
+        });
+        if (requestIdRef.current !== requestId) return;
+
+        firstPage.items.forEach((item) => {
+          const symbol = item.symbol.trim().toUpperCase();
+          if (!symbol) return;
+          universeAllSymbols.add(symbol);
+        });
+
+        const pageSize = Math.max(1, Math.floor(firstPage.limit || 500));
+        const offsets: number[] = [];
+        for (let offset = firstPage.items.length; offset < firstPage.total; offset += pageSize) {
+          offsets.push(offset);
+        }
+
+        await mapWithConcurrency(offsets, 4, async (offset) => {
+          const page = await marketApi.listInstrumentRegistry({
+            autoIngest: "all",
+            limit: pageSize,
+            offset
+          });
+          if (requestIdRef.current !== requestId) return;
+          page.items.forEach((item) => {
+            const symbol = item.symbol.trim().toUpperCase();
+            if (!symbol) return;
+            universeAllSymbols.add(symbol);
+          });
+        });
+      }
+
+      if (requestIdRef.current !== requestId) return;
+
+      if (universeAllSymbols.size === 0) {
         const preview = await marketApi.previewTargets();
         if (requestIdRef.current !== requestId) return;
         preview.symbols.forEach((item) => {
-          const symbol = item.symbol.trim();
+          const symbol = item.symbol.trim().toUpperCase();
           if (!symbol) return;
           universeAllSymbols.add(symbol);
         });

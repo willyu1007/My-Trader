@@ -190,48 +190,58 @@ assertExists(
   "dashboard modular Other view"
 );
 
-// 9) Targets materialization must be integrated into managed ingest path.
+// 9) Keep analysis DB forwarding + target materialization manual path.
 assertContains(
   "apps/backend/src/main/market/ingestOrchestrator.ts",
   "analysisDbPath: state.analysisDbPath",
-  "orchestrator forwards analysisDbPath to targets ingest"
+  "orchestrator forwards analysisDbPath to universe ingest"
 );
 assertContains(
-  "apps/backend/src/main/market/marketIngestRunner.ts",
+  "apps/backend/src/main/ipc/registerIpcHandlers.ts",
   "materializeTargetsFromSsot",
-  "targets materialization integration"
+  "target materialization ipc integration"
 );
 assertContains(
-  "apps/backend/src/main/market/marketIngestRunner.ts",
-  "targetMaterialization",
-  "targets ingest metadata for materialization"
+  "apps/backend/src/main/ipc/registerIpcHandlers.ts",
+  "MARKET_TARGET_TASK_RUN_MATERIALIZATION",
+  "target materialization run channel"
+);
+assertContains(
+  "apps/backend/src/main/market/marketCache.ts",
+  "create table if not exists target_task_status",
+  "target task status schema"
+);
+assertContains(
+  "apps/backend/src/main/market/marketCache.ts",
+  "create table if not exists target_materialization_runs",
+  "target materialization run schema"
 );
 
-// 10) Dual-pool filtering must be wired into provider + universe ingest.
-assertContains(
-  "apps/backend/src/main/market/providers/tushareProvider.ts",
-  "matchUniversePoolBuckets",
-  "provider universe pool tag matcher import"
-);
-assertContains(
+// 10) Keep rollout-closure baseline for full-pool ingest semantics.
+assertNotContains(
   "apps/backend/src/main/market/providers/tushareProvider.ts",
   'assetClass: "futures"',
-  "provider futures asset class mapping"
+  "provider futures target-asset mapping"
 );
-assertContains(
+assertNotContains(
   "apps/backend/src/main/market/providers/tushareProvider.ts",
   'assetClass: "spot"',
-  "provider spot asset class mapping"
+  "provider spot target-asset mapping"
 );
 assertContains(
+  "apps/backend/src/main/storage/marketDataSourceRepository.ts",
+  '["cn_a", "etf", "metal_futures", "metal_spot"]',
+  "legacy full-pool fallback config"
+);
+assertNotContains(
   "apps/backend/src/main/market/marketIngestRunner.ts",
   "selectedBuckets",
-  "universe ingest selected bucket flow"
+  "universe ingest selected bucket filter flow"
 );
-assertContains(
+assertNotContains(
   "apps/backend/src/main/market/marketIngestRunner.ts",
   "updateMarketUniversePoolBucketStates",
-  "universe pool run-state update"
+  "universe pool run-state writeback flow"
 );
 
 if (failures.length > 0) {

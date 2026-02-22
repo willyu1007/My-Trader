@@ -411,6 +411,68 @@ export async function ensureMarketCacheSchema(
       on ingest_runs (scope, status, started_at desc);
     `
   );
+
+  await exec(
+    db,
+    `
+      create table if not exists target_task_status (
+        symbol text not null,
+        module_id text not null,
+        asset_class text,
+        as_of_trade_date text,
+        status text not null,
+        coverage_ratio real,
+        source_run_id text,
+        last_error text,
+        updated_at integer not null,
+        primary key (symbol, module_id)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists target_task_status_symbol
+      on target_task_status (symbol, updated_at desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists target_task_status_module
+      on target_task_status (module_id, status, updated_at desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists target_materialization_runs (
+        id text primary key not null,
+        as_of_trade_date text,
+        status text not null,
+        symbol_count integer not null,
+        complete_count integer not null,
+        partial_count integer not null,
+        missing_count integer not null,
+        not_applicable_count integer not null,
+        source_run_id text,
+        error_message text,
+        started_at integer not null,
+        finished_at integer
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists target_materialization_runs_started_at
+      on target_materialization_runs (started_at desc);
+    `
+  );
 }
 
 async function ensureColumn(

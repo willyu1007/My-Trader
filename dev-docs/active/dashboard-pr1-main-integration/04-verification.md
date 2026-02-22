@@ -85,3 +85,5 @@
   - `targets_config_v1.includeRegistryAutoIngest` -> `true`
 - 2026-02-22 (Target pool stats fallback fix): `pnpm -C apps/frontend exec tsc -p tsconfig.json --noEmit` -> ✅ pass
 - 2026-02-22 (Target pool stats fallback fix): `pnpm typecheck` -> ✅ pass
+- 2026-02-22 (Follow-up: closure guardrail realignment + schema fix): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-22 (Follow-up: closure guardrail realignment + schema fix): `pnpm typecheck` -> ✅ pass
