@@ -1,0 +1,148 @@
+{
+  "generatedAt": "2026-02-22T03:09:16.223Z",
+  "userData": "/Users/yurui/Library/Application Support/@mytrader/backend",
+  "accountDir": "/Volumes/DataDisk/Data/Finance/mytrader-account-b8ead1c1-0878-466c-a612-52fa172b318b",
+  "marketDb": "/Users/yurui/Library/Application Support/@mytrader/backend/market-cache.sqlite",
+  "businessDb": "/Volumes/DataDisk/Data/Finance/mytrader-account-b8ead1c1-0878-466c-a612-52fa172b318b/business.sqlite",
+  "baseline": {
+    "runId": null,
+    "startedAtMs": null
+  },
+  "postBaseline": {
+    "runs": 81,
+    "blockingLikeRuns": 65,
+    "byDay": [
+      {
+        "day": "2026-02-09",
+        "runs": 8,
+        "blockingLikeRuns": 8
+      },
+      {
+        "day": "2026-02-10",
+        "runs": 7,
+        "blockingLikeRuns": 7
+      },
+      {
+        "day": "2026-02-11",
+        "runs": 4,
+        "blockingLikeRuns": 4
+      },
+      {
+        "day": "2026-02-19",
+        "runs": 5,
+        "blockingLikeRuns": 5
+      },
+      {
+        "day": "2026-02-20",
+        "runs": 16,
+        "blockingLikeRuns": 16
+      },
+      {
+        "day": "2026-02-21",
+        "runs": 28,
+        "blockingLikeRuns": 17
+      },
+      {
+        "day": "2026-02-22",
+        "runs": 6,
+        "blockingLikeRuns": 1
+      }
+    ],
+    "cleanDayProgress": {
+      "targetCleanDays": 3,
+      "consecutiveCleanDays": 0,
+      "reached": false
+    },
+    "byAsOfTradeDate": [
+      {
+        "asOfTradeDate": "2026-02-11",
+        "runs": 1,
+        "blockingLikeRuns": 0
+      },
+      {
+        "asOfTradeDate": "2026-02-12",
+        "runs": 1,
+        "blockingLikeRuns": 0
+      },
+      {
+        "asOfTradeDate": "2026-02-13",
+        "runs": 14,
+        "blockingLikeRuns": 0
+      }
+    ],
+    "cleanAsOfTradeDateProgress": {
+      "targetCleanAsOfDays": 3,
+      "consecutiveCleanAsOfDays": 3,
+      "reached": true
+    }
+  },
+  "runtime": {
+    "runningCount": 0,
+    "flags": {
+      "p0Enabled": true,
+      "p1Enabled": true,
+      "p2Enabled": true,
+      "universeIndexDailyEnabled": true,
+      "universeDailyBasicEnabled": false,
+      "universeMoneyflowEnabled": false,
+      "p2RealtimeIndexV1": true,
+      "p2RealtimeEquityEtfV1": true,
+      "p2FuturesMicrostructureV1": true,
+      "p2SpecialPermissionStkPremarketV1": false,
+      "updatedAt": 1771644793523
+    },
+    "cursors": {
+      "universe_daily_basic_cursor_v1": "{\"tradeDate\":\"2023-02-14\",\"symbolOffset\":120}",
+      "universe_index_daily_cursor_v1": "{\"tradeDate\":\"2023-02-14\",\"symbolOffset\":680}",
+      "universe_last_trade_date": "2023-03-20",
+      "universe_moneyflow_cursor_v1": "{\"tradeDate\":\"2023-02-14\",\"symbolOffset\":120}"
+    }
+  },
+  "quality": {
+    "totalRows": 128813,
+    "nullRows": 0,
+    "nullPct": 0,
+    "pkConflicts": 0,
+    "macroFutureLeakCount": 0
+  },
+  "latestSuccess": {
+    "id": "6032bcf2-51bc-4474-a262-2f109e4745b0",
+    "startedLocal": "2026-02-22 09:53:27",
+    "asOfTradeDate": "2026-02-13",
+    "recoverySummary": [
+      {
+        "module": "index_daily",
+        "enabled": true,
+        "status": "partial",
+        "processedTradeDate": "2023-02-14",
+        "processedSymbols": 40,
+        "pendingTradeDates": 732,
+        "pendingSymbolsInDate": 7320,
+        "errors": 0,
+        "cursor": "{\"tradeDate\":\"2023-02-14\",\"symbolOffset\":680}"
+      },
+      {
+        "module": "daily_basic",
+        "enabled": false,
+        "status": "disabled",
+        "processedTradeDate": null,
+        "processedSymbols": 0,
+        "pendingTradeDates": 0,
+        "pendingSymbolsInDate": 0,
+        "errors": 0,
+        "cursor": null
+      },
+      {
+        "module": "moneyflow",
+        "enabled": false,
+        "status": "disabled",
+        "processedTradeDate": null,
+        "processedSymbols": 0,
+        "pendingTradeDates": 0,
+        "pendingSymbolsInDate": 0,
+        "errors": 0,
+        "cursor": null
+      }
+    ]
+  }
+}

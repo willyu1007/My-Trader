@@ -1,5 +1,4 @@
 import type {
-  AssetClass,
   MarketTargetsConfig,
   PreviewTargetsDiffResult,
   PreviewTargetsDraftInput,
@@ -18,7 +17,10 @@ import { listInstrumentSymbolsByUserTag } from "../storage/instrumentTagReposito
 import { listWatchlistItems } from "../storage/watchlistRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 import { listInstrumentSymbolsByTag } from "./instrumentCatalogRepository";
-import { getInstrumentsBySymbols, listAutoIngestItems } from "./marketRepository";
+import {
+  getInstrumentsBySymbols,
+  listAutoIngestSymbols
+} from "./marketRepository";
 
 export type ResolvedTargetSymbol = {
   symbol: string;
@@ -117,9 +119,9 @@ async function previewTargetsByConfig(input: {
   }
 
   if (config.includeRegistryAutoIngest) {
-    const items = await listAutoIngestItems(marketDb);
-    items.forEach((item) => {
-      const symbol = item.symbol.trim();
+    const symbols = await listAutoIngestSymbols(marketDb);
+    symbols.forEach((rawSymbol) => {
+      const symbol = rawSymbol.trim();
       if (!symbol) return;
       addReason(reasonsBySymbol, symbol, "registry:auto_ingest");
     });
@@ -210,14 +212,15 @@ export async function resolveAutoIngestItems(input: {
   const preview = await previewTargets(input);
   const symbols = preview.symbols.map((item) => item.symbol);
   const metadata = await getInstrumentsBySymbols(input.marketDb, symbols);
+  const items: TushareIngestItem[] = [];
 
-  return symbols
-    .map((symbol) => {
-      const meta = metadata.get(symbol);
-      const assetClass = (meta?.assetClass ?? "stock") as AssetClass;
-      return { symbol, assetClass } satisfies TushareIngestItem;
-    })
-    .filter((item) => item.assetClass !== "cash");
+  for (const symbol of symbols) {
+    const assetClass = metadata.get(symbol)?.assetClass;
+    if (assetClass !== "stock" && assetClass !== "etf") continue;
+    items.push({ symbol, assetClass });
+  }
+
+  return items;
 }
 
 async function resolveHoldingsSymbols(input: {

@@ -88,6 +88,30 @@ const api: MyTraderApi = {
     setToken: (input) => ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_SET, input),
     testToken: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_TEST, input ?? null),
+    getDataSourceCatalog: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_DATA_SOURCE_GET_CATALOG),
+    getDataSourceConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_DATA_SOURCE_GET_CONFIG),
+    setDataSourceConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_DATA_SOURCE_SET_CONFIG, input),
+    getTokenMatrixStatus: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_GET_MATRIX_STATUS),
+    setMainToken: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_SET_MAIN, input),
+    setDomainToken: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_SET_DOMAIN, input),
+    clearDomainToken: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_CLEAR_DOMAIN, input),
+    testDomainConnectivity: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_DOMAIN_CONNECTIVITY, input),
+    testModuleConnectivity: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_MODULE_CONNECTIVITY, input),
+    listConnectivityTests: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_LIST_CONNECTIVITY_TESTS),
+    runIngestPreflight: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_PREFLIGHT_RUN, input ?? null),
+    validateDataSourceReadiness: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_VALIDATE_SOURCE_READINESS, input ?? null),
     openProviderHomepage: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_PROVIDER_OPEN, input),
     listIngestRuns: (input) =>
@@ -108,6 +132,25 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_GET),
     setIngestSchedulerConfig: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_SET, input),
+    getUniversePoolConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_CONFIG),
+    setUniversePoolConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_SET_CONFIG, input),
+    getUniversePoolOverview: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_OVERVIEW),
+    getTargetTaskMatrixConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_GET_CONFIG),
+    setTargetTaskMatrixConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_SET_CONFIG, input),
+    previewTargetTaskCoverage: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_PREVIEW_COVERAGE),
+    listTargetTaskStatus: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGET_TASK_LIST_STATUS, input ?? null),
+    runTargetMaterialization: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_TARGET_TASK_RUN_MATERIALIZATION,
+        input ?? null
+      ),
     getRolloutFlags: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_ROLLOUT_FLAGS_GET),
     setRolloutFlags: (input) =>

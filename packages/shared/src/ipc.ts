@@ -25,7 +25,7 @@ export interface UnlockAccountInput {
   devBypass?: boolean;
 }
 
-export type AssetClass = "stock" | "etf" | "cash";
+export type AssetClass = "stock" | "etf" | "futures" | "spot" | "cash";
 
 export interface Portfolio {
   id: PortfolioId;
@@ -566,6 +566,157 @@ export interface MarketTokenStatus {
   configured: boolean;
 }
 
+export type DataDomainId =
+  | "stock"
+  | "etf"
+  | "index"
+  | "public_fund"
+  | "futures"
+  | "spot"
+  | "options"
+  | "bond"
+  | "fx"
+  | "hk_stock"
+  | "us_stock"
+  | "industry_economy"
+  | "macro";
+
+export type DataSourceProviderStatus = "active" | "planned";
+
+export interface DataSourceProviderInfo {
+  id: string;
+  label: string;
+  status: DataSourceProviderStatus;
+  homepage: string | null;
+}
+
+export interface DataSourceModuleCatalogItem {
+  id: string;
+  label: string;
+  implemented: boolean;
+  syncCapable: boolean;
+  defaultEnabled: boolean;
+  providerIds: string[];
+}
+
+export interface DataSourceDomainCatalogItem {
+  id: DataDomainId;
+  label: string;
+  modules: DataSourceModuleCatalogItem[];
+}
+
+export interface MarketDataSourceCatalog {
+  providers: DataSourceProviderInfo[];
+  domains: DataSourceDomainCatalogItem[];
+  updatedAt: number;
+}
+
+export type DataSourceTokenMode = "inherit_main" | "override";
+
+export interface DataSourceModuleConfig {
+  enabled: boolean;
+}
+
+export interface DataSourceDomainConfig {
+  enabled: boolean;
+  provider: string;
+  tokenMode: DataSourceTokenMode;
+  modules: Record<string, DataSourceModuleConfig>;
+}
+
+export interface MarketDataSourceConfigV2 {
+  version: 2;
+  mainProvider: string;
+  domains: Record<DataDomainId, DataSourceDomainConfig>;
+}
+
+export type DomainTokenSource =
+  | "domain_override"
+  | "main"
+  | "env_fallback"
+  | "none";
+
+export interface DomainTokenStatus {
+  source: DomainTokenSource;
+  configured: boolean;
+}
+
+export interface MarketTokenMatrixStatus {
+  mainConfigured: boolean;
+  domains: Record<DataDomainId, DomainTokenStatus>;
+}
+
+export type ConnectivityTestScope = "domain" | "module";
+export type ConnectivityTestStatus = "untested" | "pass" | "fail" | "unsupported";
+
+export interface ConnectivityTestRecord {
+  scope: ConnectivityTestScope;
+  domainId: DataDomainId;
+  moduleId: string | null;
+  status: ConnectivityTestStatus;
+  testedAt: number | null;
+  message: string | null;
+  stale: boolean;
+}
+
+export interface SetMarketMainTokenInput {
+  token: string | null;
+}
+
+export interface SetMarketDomainTokenInput {
+  domainId: DataDomainId;
+  token: string | null;
+}
+
+export interface ClearMarketDomainTokenInput {
+  domainId: DataDomainId;
+}
+
+export interface TestMarketDomainConnectivityInput {
+  domainId: DataDomainId;
+}
+
+export interface TestMarketModuleConnectivityInput {
+  domainId: DataDomainId;
+  moduleId: string;
+}
+
+export interface ValidateDataSourceReadinessInput {
+  scope?: "targets" | "universe" | "both" | null;
+}
+
+export interface RunIngestPreflightInput {
+  scope?: "targets" | "universe" | "both" | null;
+}
+
+export type DataSourceReadinessIssueLevel = "error" | "warning";
+
+export interface DataSourceReadinessIssue {
+  level: DataSourceReadinessIssueLevel;
+  code: string;
+  message: string;
+  domainId?: DataDomainId | null;
+  moduleId?: string | null;
+}
+
+export interface DataSourceReadinessResult {
+  ready: boolean;
+  selectedDomains: DataDomainId[];
+  selectedModules: { domainId: DataDomainId; moduleId: string }[];
+  issues: DataSourceReadinessIssue[];
+  updatedAt: number;
+}
+
+export interface IngestPreflightResult {
+  scope: "targets" | "universe" | "both";
+  selectedDomains: DataDomainId[];
+  selectedModules: Array<{ domainId: DataDomainId; moduleId: string }>;
+  refreshedDomainTests: ConnectivityTestRecord[];
+  refreshedModuleTests: ConnectivityTestRecord[];
+  readiness: DataSourceReadinessResult;
+  updatedAt: number;
+}
+
 export interface SetMarketTokenInput {
   token: string | null;
 }
@@ -612,6 +763,100 @@ export interface MarketIngestSchedulerConfig {
   scope: "targets" | "universe" | "both";
   runOnStartup: boolean;
   catchUpMissed: boolean;
+}
+
+export type UniversePoolBucketId = "cn_a" | "etf" | "metal_futures" | "metal_spot";
+
+export interface MarketUniversePoolConfig {
+  enabledBuckets: UniversePoolBucketId[];
+}
+
+export interface MarketUniversePoolBucketStatus {
+  bucket: UniversePoolBucketId;
+  enabled: boolean;
+  lastAsOfTradeDate: string | null;
+  lastRunAt: number | null;
+}
+
+export interface MarketUniversePoolOverview {
+  config: MarketUniversePoolConfig;
+  buckets: MarketUniversePoolBucketStatus[];
+  updatedAt: number;
+}
+
+export type TargetTaskModuleId =
+  | "core.daily_prices"
+  | "core.instrument_meta"
+  | "core.daily_basics"
+  | "core.daily_moneyflows"
+  | "core.futures_settle"
+  | "core.futures_oi"
+  | "core.spot_price_avg"
+  | "core.spot_settle"
+  | "task.exposure"
+  | "task.momentum"
+  | "task.liquidity";
+
+export type TargetTaskStatus =
+  | "complete"
+  | "partial"
+  | "missing"
+  | "not_applicable";
+
+export interface MarketTargetTaskMatrixConfig {
+  version: 1;
+  defaultLookbackDays: number;
+  enabledModules: TargetTaskModuleId[];
+}
+
+export interface MarketTargetTaskStatusRow {
+  symbol: string;
+  moduleId: TargetTaskModuleId;
+  assetClass: AssetClass | null;
+  asOfTradeDate: string | null;
+  status: TargetTaskStatus;
+  coverageRatio: number | null;
+  sourceRunId: string | null;
+  lastError: string | null;
+  updatedAt: number;
+}
+
+export interface ListTargetTaskStatusInput {
+  symbol?: string | null;
+  moduleId?: TargetTaskModuleId | null;
+  status?: TargetTaskStatus | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListTargetTaskStatusResult {
+  items: MarketTargetTaskStatusRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PreviewTargetTaskCoverageResult {
+  asOfTradeDate: string | null;
+  totals: {
+    symbols: number;
+    modules: number;
+    complete: number;
+    partial: number;
+    missing: number;
+    notApplicable: number;
+  };
+  byAssetClass: Array<{
+    assetClass: AssetClass | "unknown";
+    complete: number;
+    partial: number;
+    missing: number;
+    notApplicable: number;
+  }>;
+}
+
+export interface RunTargetMaterializationInput {
+  symbols?: string[] | null;
 }
 
 export interface MarketRolloutFlags {
@@ -785,6 +1030,28 @@ export interface MyTraderApi {
     getTokenStatus(): Promise<MarketTokenStatus>;
     setToken(input: SetMarketTokenInput): Promise<MarketTokenStatus>;
     testToken(input?: TestMarketTokenInput): Promise<void>;
+    getDataSourceCatalog(): Promise<MarketDataSourceCatalog>;
+    getDataSourceConfig(): Promise<MarketDataSourceConfigV2>;
+    setDataSourceConfig(
+      input: MarketDataSourceConfigV2
+    ): Promise<MarketDataSourceConfigV2>;
+    getTokenMatrixStatus(): Promise<MarketTokenMatrixStatus>;
+    setMainToken(input: SetMarketMainTokenInput): Promise<MarketTokenMatrixStatus>;
+    setDomainToken(
+      input: SetMarketDomainTokenInput
+    ): Promise<MarketTokenMatrixStatus>;
+    clearDomainToken(
+      input: ClearMarketDomainTokenInput
+    ): Promise<MarketTokenMatrixStatus>;
+    testDomainConnectivity(input: TestMarketDomainConnectivityInput): Promise<ConnectivityTestRecord>;
+    testModuleConnectivity(input: TestMarketModuleConnectivityInput): Promise<ConnectivityTestRecord>;
+    listConnectivityTests(): Promise<ConnectivityTestRecord[]>;
+    runIngestPreflight(
+      input?: RunIngestPreflightInput
+    ): Promise<IngestPreflightResult>;
+    validateDataSourceReadiness(
+      input?: ValidateDataSourceReadinessInput
+    ): Promise<DataSourceReadinessResult>;
     openProviderHomepage(input: OpenMarketProviderInput): Promise<void>;
     listIngestRuns(input?: ListIngestRunsInput): Promise<MarketIngestRun[]>;
     getIngestRunDetail(input: GetIngestRunDetailInput): Promise<MarketIngestRun | null>;
@@ -797,6 +1064,18 @@ export interface MyTraderApi {
     setIngestSchedulerConfig(
       input: MarketIngestSchedulerConfig
     ): Promise<MarketIngestSchedulerConfig>;
+    getUniversePoolConfig(): Promise<MarketUniversePoolConfig>;
+    setUniversePoolConfig(input: MarketUniversePoolConfig): Promise<MarketUniversePoolConfig>;
+    getUniversePoolOverview(): Promise<MarketUniversePoolOverview>;
+    getTargetTaskMatrixConfig(): Promise<MarketTargetTaskMatrixConfig>;
+    setTargetTaskMatrixConfig(
+      input: MarketTargetTaskMatrixConfig
+    ): Promise<MarketTargetTaskMatrixConfig>;
+    previewTargetTaskCoverage(): Promise<PreviewTargetTaskCoverageResult>;
+    listTargetTaskStatus(
+      input?: ListTargetTaskStatusInput
+    ): Promise<ListTargetTaskStatusResult>;
+    runTargetMaterialization(input?: RunTargetMaterializationInput): Promise<void>;
     getRolloutFlags(): Promise<MarketRolloutFlags>;
     setRolloutFlags(input: SetMarketRolloutFlagsInput): Promise<MarketRolloutFlags>;
     listTempTargets(): Promise<TempTargetSymbol[]>;
@@ -862,6 +1141,18 @@ export const IPC_CHANNELS = {
   MARKET_TOKEN_GET_STATUS: "market:token:getStatus",
   MARKET_TOKEN_SET: "market:token:set",
   MARKET_TOKEN_TEST: "market:token:test",
+  MARKET_DATA_SOURCE_GET_CATALOG: "market:dataSource:getCatalog",
+  MARKET_DATA_SOURCE_GET_CONFIG: "market:dataSource:getConfig",
+  MARKET_DATA_SOURCE_SET_CONFIG: "market:dataSource:setConfig",
+  MARKET_TOKEN_GET_MATRIX_STATUS: "market:token:getMatrixStatus",
+  MARKET_TOKEN_SET_MAIN: "market:token:setMain",
+  MARKET_TOKEN_SET_DOMAIN: "market:token:setDomain",
+  MARKET_TOKEN_CLEAR_DOMAIN: "market:token:clearDomain",
+  MARKET_TEST_DOMAIN_CONNECTIVITY: "market:dataSource:testDomainConnectivity",
+  MARKET_TEST_MODULE_CONNECTIVITY: "market:dataSource:testModuleConnectivity",
+  MARKET_LIST_CONNECTIVITY_TESTS: "market:dataSource:listConnectivityTests",
+  MARKET_INGEST_PREFLIGHT_RUN: "market:ingest:preflightRun",
+  MARKET_VALIDATE_SOURCE_READINESS: "market:dataSource:validateReadiness",
   MARKET_PROVIDER_OPEN: "market:provider:open",
   MARKET_INGEST_RUNS_LIST: "market:ingestRuns:list",
   MARKET_INGEST_RUN_GET: "market:ingestRuns:get",
@@ -872,6 +1163,14 @@ export const IPC_CHANNELS = {
   MARKET_INGEST_CONTROL_CANCEL: "market:ingest:cancel",
   MARKET_INGEST_SCHEDULER_GET: "market:ingestScheduler:get",
   MARKET_INGEST_SCHEDULER_SET: "market:ingestScheduler:set",
+  MARKET_UNIVERSE_POOL_GET_CONFIG: "market:universePool:getConfig",
+  MARKET_UNIVERSE_POOL_SET_CONFIG: "market:universePool:setConfig",
+  MARKET_UNIVERSE_POOL_GET_OVERVIEW: "market:universePool:getOverview",
+  MARKET_TARGET_TASK_MATRIX_GET_CONFIG: "market:targetTaskMatrix:getConfig",
+  MARKET_TARGET_TASK_MATRIX_SET_CONFIG: "market:targetTaskMatrix:setConfig",
+  MARKET_TARGET_TASK_PREVIEW_COVERAGE: "market:targetTask:previewCoverage",
+  MARKET_TARGET_TASK_LIST_STATUS: "market:targetTask:listStatus",
+  MARKET_TARGET_TASK_RUN_MATERIALIZATION: "market:targetTask:runMaterialization",
   MARKET_ROLLOUT_FLAGS_GET: "market:rolloutFlags:get",
   MARKET_ROLLOUT_FLAGS_SET: "market:rolloutFlags:set",
   MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",

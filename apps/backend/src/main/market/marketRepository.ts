@@ -226,8 +226,7 @@ export async function listAutoIngestItems(
       select symbol, asset_class
       from instruments
       where auto_ingest = 1
-        and asset_class is not null
-        and asset_class != 'cash'
+        and asset_class in ('stock', 'etf')
       order by symbol asc
     `
   );
@@ -236,6 +235,21 @@ export async function listAutoIngestItems(
     symbol: row.symbol,
     assetClass: row.asset_class as AssetClass
   }));
+}
+
+export async function listAutoIngestSymbols(
+  db: SqliteDatabase
+): Promise<string[]> {
+  const rows = await all<{ symbol: string }>(
+    db,
+    `
+      select symbol
+      from instruments
+      where auto_ingest = 1
+      order by symbol asc
+    `
+  );
+  return rows.map((row) => row.symbol);
 }
 
 export async function setInstrumentAutoIngest(

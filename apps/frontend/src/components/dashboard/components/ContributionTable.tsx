@@ -1,0 +1,1 @@
+export { ContributionTable } from "../shared";

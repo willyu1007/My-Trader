@@ -3,6 +3,7 @@ import type { AssetClass } from "@mytrader/shared";
 import type { PriceInput } from "./marketRepository";
 
 const TUSHARE_URL = "https://api.tushare.pro";
+const TUSHARE_HTTP_TIMEOUT_MS = 20_000;
 
 interface TushareResponse {
   code: number;
@@ -78,11 +79,25 @@ async function callTushare(
     fields: "ts_code,trade_date,open,high,low,close,vol"
   };
 
-  const res = await fetch(TUSHARE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TUSHARE_HTTP_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(TUSHARE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`Tushare 请求超时（>${TUSHARE_HTTP_TIMEOUT_MS}ms）。`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     throw new Error(`Tushare 请求失败，状态码 ${res.status}。`);
@@ -94,6 +109,14 @@ async function callTushare(
   }
 
   return json;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" ||
+      error.message.toLowerCase().includes("aborted"))
+  );
 }
 
 function toTushareDate(value: string): string {

@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -12,9 +12,15 @@ export function createMainWindow() {
   }
 
   const isDev = Boolean(config.devServerUrl);
+  const preferredWidth = 1440;
+  const preferredHeight = Math.round(760 * 1.2);
+  const { workAreaSize } = screen.getPrimaryDisplay();
+  const width = Math.min(preferredWidth, Math.floor(workAreaSize.width * 0.96));
+  const height = Math.min(preferredHeight, Math.floor(workAreaSize.height * 0.96));
+
   const mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width,
+    height,
     show: !isDev,
     webPreferences: {
       contextIsolation: true,

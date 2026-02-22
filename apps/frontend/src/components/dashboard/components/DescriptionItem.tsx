@@ -1,0 +1,1 @@
+export { DescriptionItem } from "../shared";

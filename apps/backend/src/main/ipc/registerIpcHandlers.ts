@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from "@mytrader/shared";
 import type {
   AccountSummary,
   BatchSetInstrumentAutoIngestInput,
+  ClearMarketDomainTokenInput,
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
@@ -17,6 +18,7 @@ import type {
   GetTagMembersInput,
   GetTagSeriesInput,
   ListInstrumentRegistryInput,
+  ListTargetTaskStatusInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
   CreatePositionInput,
@@ -24,20 +26,29 @@ import type {
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
   ListTagsInput,
+  MarketTargetTaskMatrixConfig,
+  RunIngestPreflightInput,
+  RunTargetMaterializationInput,
   SetMarketRolloutFlagsInput,
   MarketIngestSchedulerConfig,
   MarketTargetsConfig,
+  MarketUniversePoolConfig,
   PreviewTargetsDraftInput,
   PortfolioPerformanceRangeInput,
   SearchInstrumentsInput,
+  SetMarketDomainTokenInput,
+  SetMarketMainTokenInput,
   SetInstrumentAutoIngestInput,
+  TestMarketDomainConnectivityInput,
+  TestMarketModuleConnectivityInput,
   TushareIngestInput,
   UpsertWatchlistItemInput,
   UpdateLedgerEntryInput,
   UpdatePortfolioInput,
   UpdatePositionInput,
   UpdateRiskLimitInput,
-  UnlockAccountInput
+  UnlockAccountInput,
+  ValidateDataSourceReadinessInput
 } from "@mytrader/shared";
 import { ensureBusinessSchema } from "../storage/businessSchema";
 import { AccountIndexDb } from "../storage/accountIndexDb";
@@ -91,7 +102,11 @@ import { ensureAccountDataLayout } from "../storage/paths";
 import { close, exec, openSqliteDatabase } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 import {
+  clearDomainToken,
+  getMarketTokenMatrixStatus,
   getResolvedTushareToken,
+  setDomainToken,
+  setMainToken,
   setTushareToken
 } from "../storage/marketTokenRepository";
 import { getPortfolioSnapshot } from "../services/portfolioService";
@@ -113,12 +128,15 @@ import {
 import { config } from "../config";
 import {
   convergeMarketRolloutFlagsToDefaultOpen,
+  getMarketTargetTaskMatrixConfig,
   getMarketTargetsConfig,
   getMarketIngestSchedulerConfig,
+  getMarketUniversePoolOverview,
   getMarketRolloutFlags,
   listTempTargetSymbols,
   removeTempTargetSymbol,
   setMarketIngestSchedulerConfig,
+  setMarketTargetTaskMatrixConfig,
   setMarketRolloutFlags,
   setMarketTargetsConfig,
   touchTempTargetSymbol
@@ -134,8 +152,27 @@ import {
   upsertWatchlistItem
 } from "../storage/watchlistRepository";
 import { previewTargets, previewTargetsDraft } from "../market/targetsService";
-import { getIngestRunById, listIngestRuns } from "../market/ingestRunsRepository";
+import {
+  getIngestRunById,
+  getLatestIngestRun,
+  listIngestRuns
+} from "../market/ingestRunsRepository";
 import { getMarketProvider } from "../market/providers";
+import { validateDataSourceReadiness } from "../market/dataSourceReadinessService";
+import { runIngestPreflight } from "../market/ingestPreflightService";
+import {
+  listConnectivityTests,
+  testDomainConnectivity,
+  testModuleConnectivity
+} from "../market/connectivityTestService";
+import {
+  getMarketDataSourceCatalog,
+  getMarketDataSourceConfig,
+  getLegacyUniversePoolConfigFromDataSource,
+  markConnectivityTestsStale,
+  setLegacyUniversePoolConfigToDataSource,
+  setMarketDataSourceConfig
+} from "../storage/marketDataSourceRepository";
 import {
   cancelManagedIngest,
   enqueueManagedIngest,
@@ -145,6 +182,11 @@ import {
   startIngestOrchestrator,
   stopIngestOrchestrator
 } from "../market/ingestOrchestrator";
+import {
+  listTargetTaskStatusRows,
+  previewTargetTaskCoverage
+} from "../market/targetTaskRepository";
+import { materializeTargetsFromSsot } from "../market/targetMaterializationService";
 
 let accountIndexDb: AccountIndexDb | null = null;
 let activeAccount: AccountSummary | null = null;
@@ -159,6 +201,11 @@ function requireActiveBusinessDb(): SqliteDatabase {
 function requireMarketCacheDb(): SqliteDatabase {
   if (!marketCacheDb) throw new Error("行情缓存未初始化。");
   return marketCacheDb;
+}
+
+function requireAnalysisDbPath(): string {
+  if (!activeAccount) throw new Error("当前账号未解锁。");
+  return path.join(activeAccount.dataDir, "analysis.duckdb");
 }
 
 export async function registerIpcHandlers() {
@@ -842,6 +889,7 @@ export async function registerIpcHandlers() {
     const businessDb = requireActiveBusinessDb();
     const token = typeof input?.token === "string" ? input.token : null;
     await setTushareToken(businessDb, token);
+    await markConnectivityTestsStale(businessDb);
     const resolved = await getResolvedTushareToken(businessDb);
     return { source: resolved.source, configured: Boolean(resolved.token) };
   });
@@ -859,14 +907,130 @@ export async function registerIpcHandlers() {
     await provider.testToken(token);
   });
 
+  ipcMain.handle(IPC_CHANNELS.MARKET_DATA_SOURCE_GET_CATALOG, async () => {
+    return await getMarketDataSourceCatalog();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_DATA_SOURCE_GET_CONFIG, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketDataSourceConfig(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_DATA_SOURCE_SET_CONFIG,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      const saved = await setMarketDataSourceConfig(businessDb, input);
+      await markConnectivityTestsStale(businessDb);
+      return saved;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TOKEN_GET_MATRIX_STATUS, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketTokenMatrixStatus(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TOKEN_SET_MAIN,
+    async (_event, input: SetMarketMainTokenInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const token = typeof input?.token === "string" ? input.token : null;
+      await setMainToken(businessDb, token);
+      await markConnectivityTestsStale(businessDb);
+      return await getMarketTokenMatrixStatus(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TOKEN_SET_DOMAIN,
+    async (_event, input: SetMarketDomainTokenInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const domainId = input?.domainId;
+      if (!domainId) throw new Error("domainId 不能为空。");
+      const token = typeof input?.token === "string" ? input.token : null;
+      await setDomainToken(businessDb, domainId, token);
+      await markConnectivityTestsStale(businessDb, { domainId });
+      return await getMarketTokenMatrixStatus(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TOKEN_CLEAR_DOMAIN,
+    async (_event, input: ClearMarketDomainTokenInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const domainId = input?.domainId;
+      if (!domainId) throw new Error("domainId 不能为空。");
+      await clearDomainToken(businessDb, domainId);
+      await markConnectivityTestsStale(businessDb, { domainId });
+      return await getMarketTokenMatrixStatus(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TEST_DOMAIN_CONNECTIVITY,
+    async (_event, input: TestMarketDomainConnectivityInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const domainId = input?.domainId;
+      if (!domainId) throw new Error("domainId 不能为空。");
+      return await testDomainConnectivity({
+        businessDb,
+        domainId
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TEST_MODULE_CONNECTIVITY,
+    async (_event, input: TestMarketModuleConnectivityInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const domainId = input?.domainId;
+      const moduleId =
+        typeof input?.moduleId === "string" ? input.moduleId.trim() : "";
+      if (!domainId) throw new Error("domainId 不能为空。");
+      if (!moduleId) throw new Error("moduleId 不能为空。");
+      return await testModuleConnectivity({
+        businessDb,
+        domainId,
+        moduleId
+      });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_LIST_CONNECTIVITY_TESTS, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await listConnectivityTests(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INGEST_PREFLIGHT_RUN,
+    async (_event, input: RunIngestPreflightInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await runIngestPreflight({
+        businessDb,
+        scope: input?.scope ?? "both"
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_VALIDATE_SOURCE_READINESS,
+    async (_event, input: ValidateDataSourceReadinessInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await validateDataSourceReadiness({
+        businessDb,
+        scope: input?.scope ?? "both"
+      });
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.MARKET_PROVIDER_OPEN, async (_event, input) => {
     const provider =
       typeof input?.provider === "string" ? input.provider.trim() : "";
     if (!provider) throw new Error("provider is required.");
-    const urlMap: Record<string, string> = {
-      tushare: "https://tushare.pro"
-    };
-    const url = urlMap[provider];
+    const catalog = await getMarketDataSourceCatalog();
+    const providerInfo = catalog.providers.find((item) => item.id === provider);
+    const url = providerInfo?.homepage ?? null;
     if (!url) throw new Error(`unknown provider: ${provider}`);
     await shell.openExternal(url);
   });
@@ -960,6 +1124,84 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const saved = await setMarketIngestSchedulerConfig(businessDb, input);
       return saved;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_CONFIG, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getLegacyUniversePoolConfigFromDataSource(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_UNIVERSE_POOL_SET_CONFIG,
+    async (_event, input: MarketUniversePoolConfig) => {
+      const businessDb = requireActiveBusinessDb();
+      const saved = await setLegacyUniversePoolConfigToDataSource(businessDb, input);
+      await markConnectivityTestsStale(businessDb);
+      return saved;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_OVERVIEW, async () => {
+    const businessDb = requireActiveBusinessDb();
+    const [overview, config] = await Promise.all([
+      getMarketUniversePoolOverview(businessDb),
+      getLegacyUniversePoolConfigFromDataSource(businessDb)
+    ]);
+    const enabled = new Set(config.enabledBuckets);
+    return {
+      ...overview,
+      config,
+      buckets: overview.buckets.map((bucket) => ({
+        ...bucket,
+        enabled: enabled.has(bucket.bucket)
+      }))
+    };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_GET_CONFIG, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketTargetTaskMatrixConfig(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGET_TASK_MATRIX_SET_CONFIG,
+    async (_event, input: MarketTargetTaskMatrixConfig) => {
+      const businessDb = requireActiveBusinessDb();
+      return await setMarketTargetTaskMatrixConfig(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TARGET_TASK_PREVIEW_COVERAGE, async () => {
+    const marketDb = requireMarketCacheDb();
+    return await previewTargetTaskCoverage(marketDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGET_TASK_LIST_STATUS,
+    async (_event, input: ListTargetTaskStatusInput | null | undefined) => {
+      const marketDb = requireMarketCacheDb();
+      return await listTargetTaskStatusRows(marketDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGET_TASK_RUN_MATERIALIZATION,
+    async (_event, input: RunTargetMaterializationInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const analysisDbPath = requireAnalysisDbPath();
+      const latestUniverseRun = await getLatestIngestRun(marketDb, "universe");
+      const asOfTradeDate =
+        latestUniverseRun?.as_of_trade_date ?? new Date().toISOString().slice(0, 10);
+      await materializeTargetsFromSsot({
+        businessDb,
+        marketDb,
+        analysisDbPath,
+        asOfTradeDate,
+        sourceRunId: latestUniverseRun?.id ?? null,
+        symbols: input?.symbols ?? null
+      });
     }
   );
 

@@ -37,6 +37,13 @@ function toUserErrorMessage(error: unknown) {
 }
 
 export function App() {
+  const loginAccountFieldId = "auth-login-account";
+  const loginPasswordFieldId = "auth-login-password";
+  const createLabelFieldId = "auth-create-label";
+  const createPasswordFieldId = "auth-create-password";
+  const createPasswordConfirmFieldId = "auth-create-password-confirm";
+  const createDataRootDirFieldId = "auth-create-data-root-dir";
+
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [activePortfolioName, setActivePortfolioName] = useState<string | null>(null);
@@ -251,6 +258,15 @@ export function App() {
     }
   }, [refreshAccounts, state]);
 
+  const handleActivePortfolioChange = useCallback(
+    (portfolio: { id: string | null; name: string | null }) => {
+      setActivePortfolioName((prev) =>
+        prev === portfolio.name ? prev : portfolio.name
+      );
+    },
+    []
+  );
+
   const themeOptions: { value: ThemeMode; label: string; icon: string }[] = [
     { value: "system", label: "跟随系统", icon: "desktop_windows" },
     { value: "light", label: "浅色", icon: "light_mode" },
@@ -303,7 +319,7 @@ export function App() {
             <Dashboard
               account={state.account}
               onLock={handleLock}
-              onActivePortfolioChange={(portfolio) => setActivePortfolioName(portfolio.name)}
+              onActivePortfolioChange={handleActivePortfolioChange}
             />
           </div>
         ) : (
@@ -324,7 +340,10 @@ export function App() {
                         </span>
                       </div>
                       <form className="grid grid-cols-1 md:grid-cols-[90px_1fr] gap-y-4 gap-x-4 items-center">
-                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <label
+                          htmlFor={loginAccountFieldId}
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
                           账号
                           <span className="block text-[10px] text-slate-400 font-normal">
                             用于登录
@@ -338,6 +357,9 @@ export function App() {
                           </span>
                           <select
                             className="ui-auth-select w-full pl-9 pr-8 py-2 appearance-none transition-shadow text-sm"
+                            id={loginAccountFieldId}
+                            name="loginAccount"
+                            autoComplete="username"
                             value={loginAccount}
                             onChange={(e) => setLoginAccount(e.target.value)}
                           >
@@ -361,8 +383,21 @@ export function App() {
                             </span>
                           </span>
                         </div>
+                        <input
+                          type="text"
+                          tabIndex={-1}
+                          aria-hidden="true"
+                          className="sr-only"
+                          name="username"
+                          autoComplete="username"
+                          value={loginAccount}
+                          readOnly
+                        />
 
-                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <label
+                          htmlFor={loginPasswordFieldId}
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
                           密码
                           <span className="block text-[10px] text-slate-400 font-normal">
                             登录密码
@@ -374,6 +409,9 @@ export function App() {
                           </span>
                           <input
                             className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
+                            id={loginPasswordFieldId}
+                            name="unlockPassword"
+                            autoComplete="current-password"
                             placeholder="******"
                             type="password"
                             value={unlockPassword}
@@ -414,7 +452,10 @@ export function App() {
                         </span>
                       </div>
                       <form className="grid grid-cols-1 md:grid-cols-[90px_1fr] gap-y-4 gap-x-4 items-center">
-                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <label
+                          htmlFor={createLabelFieldId}
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
                           名称
                           <span className="block text-[10px] text-slate-400 font-normal">
                             账号名称
@@ -426,6 +467,9 @@ export function App() {
                           </span>
                           <input
                             className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
+                            id={createLabelFieldId}
+                            name="createLabel"
+                            autoComplete="username"
                             placeholder="例如：个人"
                             type="text"
                             value={createLabel}
@@ -433,7 +477,10 @@ export function App() {
                           />
                         </div>
 
-                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <label
+                          htmlFor={createPasswordFieldId}
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
                           密码
                           <span className="block text-[10px] text-slate-400 font-normal">
                             设置密码
@@ -445,6 +492,9 @@ export function App() {
                           </span>
                           <input
                             className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
+                            id={createPasswordFieldId}
+                            name="createPassword"
+                            autoComplete="new-password"
                             placeholder="设置密码"
                             type="password"
                             value={createPassword}
@@ -452,7 +502,10 @@ export function App() {
                           />
                         </div>
 
-                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <label
+                          htmlFor={createPasswordConfirmFieldId}
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
                           确认密码
                           <span className="block text-[10px] text-slate-400 font-normal">
                             再次确认
@@ -466,6 +519,9 @@ export function App() {
                           </span>
                           <input
                             className="ui-auth-input w-full pl-9 pr-3 py-2 placeholder-slate-400 transition-shadow text-sm"
+                            id={createPasswordConfirmFieldId}
+                            name="createPasswordConfirm"
+                            autoComplete="new-password"
                             placeholder="再次输入密码"
                             type="password"
                             value={createPasswordConfirm}
@@ -473,7 +529,10 @@ export function App() {
                           />
                         </div>
 
-                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <label
+                          htmlFor={createDataRootDirFieldId}
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
                           数据目录
                           <span className="block text-[10px] text-slate-400 font-normal">
                             数据存放
@@ -485,7 +544,10 @@ export function App() {
                               <span className="material-icons-outlined text-lg">folder</span>
                             </span>
                             <input
-                            className="ui-auth-input w-full pl-9 pr-3 py-2 cursor-not-allowed text-xs text-slate-500 dark:text-slate-400"
+                              className="ui-auth-input w-full pl-9 pr-3 py-2 cursor-not-allowed text-xs text-slate-500 dark:text-slate-400"
+                              id={createDataRootDirFieldId}
+                              name="createDataRootDir"
+                              autoComplete="off"
                               readOnly
                               type="text"
                               value={createDataRootDir || "默认：应用数据目录"}

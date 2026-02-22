@@ -1,0 +1,1 @@
+export { MarketVolumeMiniChart } from "../shared";

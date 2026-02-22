@@ -104,6 +104,17 @@ export async function ensureMarketCacheSchema(
     `
   );
 
+  // Keep targets ingest baseline aligned with rollout-closure:
+  // futures/spot remain in universe metadata but are not auto-target assets.
+  await exec(
+    db,
+    `
+      update instruments
+      set asset_class = null
+      where asset_class in ('futures', 'spot');
+    `
+  );
+
   await exec(
     db,
     `

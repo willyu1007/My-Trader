@@ -12,6 +12,7 @@
     "build": "pnpm -C packages/shared build && pnpm -C apps/frontend build && pnpm -C apps/backend build",
     "dev": "pnpm -C apps/backend dev",
     "start": "pnpm build && pnpm -C apps/backend start",
+    "verify:pr1-guardrails": "node scripts/verify-pr1-integration-guardrails.mjs",
     "lint": "echo \"Add lint script\"",
     "test": "echo \"Add test script\"",
     "typecheck": "pnpm -C packages/shared build && pnpm exec tsc --noEmit -p apps/backend/tsconfig.json && pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json && pnpm -C apps/frontend verify:theme"

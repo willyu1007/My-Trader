@@ -1,0 +1,1 @@
+export { MarketAreaChart } from "../shared";

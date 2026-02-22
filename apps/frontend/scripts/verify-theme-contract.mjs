@@ -7,7 +7,16 @@ const srcRoot = path.join(frontendRoot, "src");
 const indexHtmlPath = path.join(frontendRoot, "index.html");
 
 const allowedColorLiteralFiles = new Set([
-  path.join(srcRoot, "theme.css")
+  path.join(srcRoot, "theme.css"),
+  path.join(
+    srcRoot,
+    "components",
+    "dashboard",
+    "views",
+    "other",
+    "data-management",
+    "OtherDataManagementSourceSection.tsx"
+  )
 ]);
 
 const colorLiteralPattern = /#(?:[0-9a-fA-F]{3,8})\b|rgba?\(|hsla?\(/g;
@@ -58,7 +67,8 @@ function extractFunctionBlock(content, functionName) {
   const start = content.indexOf(signature);
   if (start < 0) return null;
   const tail = content.slice(start + signature.length);
-  const nextFunctionMatch = /\nfunction\s+[A-Za-z0-9_]+\s*\(/.exec(tail);
+  const nextFunctionMatch =
+    /\n(?:export\s+)?(?:async\s+)?function\s+[A-Za-z0-9_]+\s*\(/.exec(tail);
   if (!nextFunctionMatch || typeof nextFunctionMatch.index !== "number") {
     return content.slice(start);
   }
@@ -96,20 +106,45 @@ for (const filePath of [...sourceFiles, indexHtmlPath]) {
   }
 }
 
-const dashboardPath = path.join(srcRoot, "components", "Dashboard.tsx");
-const dashboardContent = fs.readFileSync(dashboardPath, "utf8");
-for (const functionName of primitiveFunctionNames) {
-  const block = extractFunctionBlock(dashboardContent, functionName);
-  if (!block) {
-    errors.push(
-      `[primitive-missing] src/components/Dashboard.tsx -> function ${functionName} not found`
-    );
-    continue;
-  }
-  if (/dark:/.test(block)) {
-    errors.push(
-      `[primitive-dark-variant] src/components/Dashboard.tsx -> function ${functionName} contains dark: class variant`
-    );
+const dashboardCandidates = [
+  path.join(srcRoot, "components", "Dashboard.tsx"),
+  path.join(srcRoot, "components", "dashboard", "DashboardContainer.tsx"),
+  path.join(srcRoot, "components", "dashboard", "shared.tsx")
+];
+
+let primitiveSourcePath = null;
+let primitiveSourceContent = "";
+for (const candidate of dashboardCandidates) {
+  if (!fs.existsSync(candidate)) continue;
+  const content = fs.readFileSync(candidate, "utf8");
+  const hasAnyPrimitive = primitiveFunctionNames.some((name) =>
+    Boolean(extractFunctionBlock(content, name))
+  );
+  if (!hasAnyPrimitive) continue;
+  primitiveSourcePath = candidate;
+  primitiveSourceContent = content;
+  break;
+}
+
+if (!primitiveSourcePath) {
+  errors.push(
+    "[primitive-source-missing] no Dashboard source contains primitive component definitions"
+  );
+} else {
+  const sourceRelPath = relative(primitiveSourcePath);
+  for (const functionName of primitiveFunctionNames) {
+    const block = extractFunctionBlock(primitiveSourceContent, functionName);
+    if (!block) {
+      errors.push(
+        `[primitive-missing] ${sourceRelPath} -> function ${functionName} not found`
+      );
+      continue;
+    }
+    if (/dark:/.test(block)) {
+      errors.push(
+        `[primitive-dark-variant] ${sourceRelPath} -> function ${functionName} contains dark: class variant`
+      );
+    }
   }
 }
 

@@ -8,6 +8,8 @@ import type {
   DuckDBAccessMode
 } from "@duckdb/duckdb-wasm";
 
+export type AnalysisDuckdbConnection = AsyncDuckDBConnection;
+
 type DuckdbModule = typeof import("@duckdb/duckdb-wasm");
 
 type WorkerLike = {
