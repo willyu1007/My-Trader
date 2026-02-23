@@ -56,6 +56,13 @@ type CoverageAssetView = {
   repairRate: number;
 };
 
+type CoverageMatrixRowKey =
+  | "complete"
+  | "partial"
+  | "missing"
+  | "notApplicable"
+  | "repair";
+
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || "未知错误。";
   if (typeof error === "string") return error;
@@ -93,6 +100,24 @@ function toRate(numerator: number, denominator: number): number {
 
 function formatRate(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
+}
+
+function resolveCompletenessBand(rate: number): {
+  textClass: string;
+} {
+  if (rate < 0.2) {
+    return { textClass: "text-rose-600 dark:text-rose-400" };
+  }
+  if (rate < 0.4) {
+    return { textClass: "text-orange-600 dark:text-orange-400" };
+  }
+  if (rate < 0.6) {
+    return { textClass: "text-amber-600 dark:text-amber-400" };
+  }
+  if (rate < 0.8) {
+    return { textClass: "text-lime-600 dark:text-lime-400" };
+  }
+  return { textClass: "text-emerald-600 dark:text-emerald-400" };
 }
 
 function getDateLagDays(dateText: string | null): number | null {
@@ -309,18 +334,33 @@ export function OtherDataManagementTargetTaskPanel(
   }, [assetCoverageViews]);
 
   const displayAssetCoverageViews = useMemo(() => {
-    return assetCoverageViews.filter((item) => item.total > 0);
+    const order = new Map<string, number>([
+      ["stock", 0],
+      ["etf", 1],
+      ["futures", 2],
+      ["spot", 3]
+    ]);
+    return assetCoverageViews
+      .filter((item) => item.total > 0)
+      .sort((a, b) => {
+        const aOrder = order.get(a.assetClass) ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = order.get(b.assetClass) ?? Number.MAX_SAFE_INTEGER;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return a.assetLabel.localeCompare(b.assetLabel, "zh-CN");
+      });
   }, [assetCoverageViews]);
 
   const coverageMatrixRows = useMemo(() => {
     if (!coverageSummary) return [];
 
     const buildRow = (
+      rowKey: CoverageMatrixRowKey,
       label: string,
       overallCount: number,
       overallRate: number | null,
       pick: (asset: CoverageAssetView) => { count: number; rate: number | null }
     ) => ({
+      rowKey,
       label,
       overallCount,
       overallRate,
@@ -331,23 +371,29 @@ export function OtherDataManagementTargetTaskPanel(
     });
 
     return [
-      buildRow("完整", coverageSummary.complete, coverageSummary.completeRate, (asset) => ({
+      buildRow("complete", "完整", coverageSummary.complete, coverageSummary.completeRate, (asset) => ({
         count: asset.complete,
         rate: asset.completeRate
       })),
-      buildRow("部分缺失", coverageSummary.partial, coverageSummary.partialRate, (asset) => ({
+      buildRow("partial", "部分缺失", coverageSummary.partial, coverageSummary.partialRate, (asset) => ({
         count: asset.partial,
         rate: asset.partialRate
       })),
-      buildRow("缺失", coverageSummary.missing, coverageSummary.missingRate, (asset) => ({
+      buildRow("missing", "缺失", coverageSummary.missing, coverageSummary.missingRate, (asset) => ({
         count: asset.missing,
         rate: asset.missingRate
       })),
-      buildRow("不适用", coverageSummary.notApplicable, coverageSummary.notApplicableRate, (asset) => ({
-        count: asset.notApplicable,
-        rate: asset.notApplicableRate
-      })),
-      buildRow("待回补", coverageSummary.repair, coverageSummary.repairRate, (asset) => ({
+      buildRow(
+        "notApplicable",
+        "不适用",
+        coverageSummary.notApplicable,
+        coverageSummary.notApplicableRate,
+        (asset) => ({
+          count: asset.notApplicable,
+          rate: asset.notApplicableRate
+        })
+      ),
+      buildRow("repair", "待回补", coverageSummary.repair, coverageSummary.repairRate, (asset) => ({
         count: asset.repair,
         rate: asset.repairRate
       }))
@@ -489,8 +535,9 @@ export function OtherDataManagementTargetTaskPanel(
                 </span>
               </div>
             </div>
+            <div className="w-full border-t border-slate-200/70 dark:border-border-dark/70" />
 
-            <div className="rounded-md border border-slate-200/70 p-2.5 dark:border-border-dark/70">
+            <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                   资产覆盖状态矩阵
@@ -506,16 +553,18 @@ export function OtherDataManagementTargetTaskPanel(
                 </div>
               </div>
               {displayAssetCoverageViews.length > 0 ? (
-                <div className="mt-2 overflow-x-auto rounded-md border border-slate-200/70 dark:border-border-dark/70">
-                  <table className="min-w-[860px] w-full text-xs">
-                    <thead className="bg-slate-50/60 dark:bg-background-dark/50">
+                <div className="max-h-[360px] overflow-auto">
+                  <table className="min-w-[860px] w-full border-collapse text-xs">
+                    <thead className="sticky top-0 z-20 bg-white dark:bg-background-dark">
                       <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
-                        <th className="px-2.5 py-1.5 text-left font-semibold">统计维度</th>
-                        <th className="px-2.5 py-1.5 text-right font-semibold">整体</th>
+                        <th className="sticky left-0 z-30 w-20 min-w-[80px] bg-white px-1.5 py-1.5 text-left font-semibold dark:bg-background-dark">
+                          覆盖程度
+                        </th>
+                        <th className="px-1.5 py-1.5 text-right font-semibold">整体</th>
                         {displayAssetCoverageViews.map((asset) => (
                           <th
                             key={`coverage-matrix-header-${asset.assetClass}`}
-                            className="px-2.5 py-1.5 text-right font-semibold"
+                            className="px-1.5 py-1.5 text-right font-semibold"
                           >
                             {asset.assetLabel}
                           </th>
@@ -523,37 +572,51 @@ export function OtherDataManagementTargetTaskPanel(
                       </tr>
                     </thead>
                     <tbody>
-                      {coverageMatrixRows.map((row) => (
-                        <tr
-                          key={`coverage-matrix-row-${row.label}`}
-                          className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
-                        >
-                          <td className="px-2.5 py-1.5 font-semibold text-slate-700 dark:text-slate-200">
-                            {row.label}
-                          </td>
-                          <td className="px-2.5 py-1.5 text-right">
-                            <div className="font-mono text-slate-700 dark:text-slate-200">
-                              {row.overallCount.toLocaleString()}
-                            </div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                              {row.overallRate === null ? "--" : formatRate(row.overallRate)}
-                            </div>
-                          </td>
-                          {row.assets.map((cell) => (
-                            <td
-                              key={`coverage-matrix-cell-${row.label}-${cell.assetClass}`}
-                              className="px-2.5 py-1.5 text-right"
-                            >
+                      {coverageMatrixRows.map((row) => {
+                        const overallCompleteTone =
+                          row.rowKey === "complete" && row.overallRate !== null
+                            ? resolveCompletenessBand(row.overallRate).textClass
+                            : "text-slate-500 dark:text-slate-400";
+                        return (
+                          <tr
+                            key={`coverage-matrix-row-${row.rowKey}`}
+                            className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
+                          >
+                            <td className="sticky left-0 z-10 w-20 min-w-[80px] bg-white px-1.5 py-1.5 dark:bg-background-dark">
+                              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                                {row.label}
+                              </span>
+                            </td>
+                            <td className="px-1.5 py-1.5 text-right">
                               <div className="font-mono text-slate-700 dark:text-slate-200">
-                                {cell.count.toLocaleString()}
+                                {row.overallCount.toLocaleString()}
                               </div>
-                              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                                {cell.rate === null ? "--" : formatRate(cell.rate)}
+                              <div className={`text-[10px] ${overallCompleteTone}`}>
+                                {row.overallRate === null ? "--" : formatRate(row.overallRate)}
                               </div>
                             </td>
-                          ))}
-                        </tr>
-                      ))}
+                            {row.assets.map((cell) => {
+                              const cellCompleteTone =
+                                row.rowKey === "complete" && cell.rate !== null
+                                  ? resolveCompletenessBand(cell.rate).textClass
+                                  : "text-slate-500 dark:text-slate-400";
+                              return (
+                                <td
+                                  key={`coverage-matrix-cell-${row.rowKey}-${cell.assetClass}`}
+                                  className="px-1.5 py-1.5 text-right"
+                                >
+                                  <div className="font-mono text-slate-700 dark:text-slate-200">
+                                    {cell.count.toLocaleString()}
+                                  </div>
+                                  <div className={`text-[10px] ${cellCompleteTone}`}>
+                                    {cell.rate === null ? "--" : formatRate(cell.rate)}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

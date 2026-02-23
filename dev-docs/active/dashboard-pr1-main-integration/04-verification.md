@@ -120,3 +120,10 @@
 - 2026-02-23 (Follow-up #9: top status strip single-line + borderless): `pnpm verify:pr1-guardrails` -> ✅ pass
 - 2026-02-23 (Follow-up #10: top status metrics right-aligned): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up #10: top status metrics right-aligned): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #11: matrix v1.3 de-card + five-band health strip): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #11: matrix v1.3 de-card + five-band health strip): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #11: matrix v1.3 de-card + five-band health strip): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #12: matrix minimal labels + narrower columns): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #12: matrix minimal labels + narrower columns): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #13: divider + complete-rate color + fixed asset column order): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #13: divider + complete-rate color + fixed asset column order): `pnpm verify:pr1-guardrails` -> ✅ pass

@@ -318,3 +318,46 @@
   - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
     - 单行容器改为 `flex + min-w-full + w-max`；
     - 统计文案块新增 `ml-auto text-right`，在可用宽度内右侧对齐，同时保留窄屏横向滚动能力。
+
+## 2026-02-23 Follow-up #11: 状态矩阵 V1.3（去卡片化 + 五档健康短条）
+- 触发背景：
+  - 用户反馈矩阵仍有“卡片感过重、框线偏多、首列过宽、颜色表达弱、需支持横向滚动扩展”问题。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 矩阵区域去卡片化：
+      - 去掉矩阵内层圆角边框容器，改为纯表格视图（仅保留表头/行分隔线）。
+    - 滚动与布局：
+      - 表格容器调整为 `max-h + overflow-auto`，同时支持纵向/横向滚动；
+      - 首列（维度列）收窄为 `w-24/min-w-[96px]`，并设置 `sticky left`；
+      - 表头设置 `sticky top`，便于滚动浏览更多列与行。
+    - 语义表达增强：
+      - 行维度（完整/部分缺失/缺失/不适用/待回补）增加语义色点与文本色；
+      - 列维度（整体 + 各资产）在表头增加“完整率短条”，采用 5 档颜色：
+        - 红（<20%）
+        - 橙（20%-40%）
+        - 黄（40%-60%）
+        - 淡绿（60%-80%）
+        - 绿（>=80%）
+
+## 2026-02-23 Follow-up #12: 维度列极简化（去圆点/去颜色 + 再压缩列宽）
+- 触发背景：
+  - 用户要求“保持简洁，不需要圆点和颜色，列宽还可以减小”。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 维度列去除语义色圆点与彩色文字，统一为中性文本；
+    - 首列宽度继续收窄：`min-w 96 -> 80`；
+    - 表格整体横向占用同步收紧：`min-w 980 -> 860`，并减小 cell padding。
+
+## 2026-02-23 Follow-up #13: 分割线 + 完整度着色迁移 + 资产列顺序固定
+- 触发背景：
+  - 用户要求：
+    - “健康状态”与“资产覆盖状态矩阵”之间增加全宽分割线；
+    - 去掉资产列标题下方短条，改为给“完整”百分比着色；
+    - 列头文案改为“覆盖程度”，资产列顺序固定为“整体、股票、ETF、期货、现货”。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 在顶部状态条与矩阵之间新增全宽分割线；
+    - 移除“整体/资产”列表头短条；
+    - 将色彩表达迁移到“完整”行百分比（整体与各资产列）；
+    - 覆盖程度列标题由“维度”改为“覆盖程度”；
+    - 资产列顺序收敛为固定顺序：`stock -> etf -> futures -> spot`（仅显示有数据列）。
