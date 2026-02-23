@@ -54,7 +54,7 @@ export function OtherDataManagementSourceSection(
   const [expandedDomains, setExpandedDomains] = useState<Record<string, boolean>>({});
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [directoryPanelExpanded, setDirectoryPanelExpanded] = useState(true);
+  const [directoryPanelExpanded, setDirectoryPanelExpanded] = useState(false);
 
   const [mainTokenDraft, setMainTokenDraft] = useState("");
   const [domainTokenDraft, setDomainTokenDraft] = useState("");

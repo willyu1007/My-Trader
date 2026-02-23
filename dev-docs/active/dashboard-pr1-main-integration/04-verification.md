@@ -87,3 +87,8 @@
 - 2026-02-22 (Target pool stats fallback fix): `pnpm typecheck` -> ✅ pass
 - 2026-02-22 (Follow-up: closure guardrail realignment + schema fix): `pnpm verify:pr1-guardrails` -> ✅ pass
 - 2026-02-22 (Follow-up: closure guardrail realignment + schema fix): `pnpm typecheck` -> ✅ pass
+- 2026-02-23 (Follow-up: SW L2 + concept chain): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up: SW L2 + concept chain): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up: SW L2 + concept chain + UI default collapse): `pnpm typecheck` -> ✅ pass
+- 2026-02-23 (Follow-up: bulk fetch timeout hardening): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up: bulk fetch timeout hardening): `pnpm verify:pr1-guardrails` -> ✅ pass

@@ -2,6 +2,7 @@ import type { AssetClass } from "@mytrader/shared";
 
 import type { PriceInput } from "../marketRepository";
 import { fetchTushareDailyPrices } from "../tushareClient";
+import { fetchTusharePaged } from "./tushareBulkFetch";
 import type {
   MarketProvider,
   ProviderDailyBasic,
@@ -40,6 +41,40 @@ type TushareEnvelope = {
   data?: TushareRawResponse;
 };
 
+type SwIndustryLevel = "l1" | "l2";
+
+type SwIndustryNode = {
+  code: string;
+  name: string;
+  level: SwIndustryLevel;
+  parentCode: string | null;
+};
+
+type StockSwClassification = {
+  l1Code: string | null;
+  l1Name: string | null;
+  l2Code: string | null;
+  l2Name: string | null;
+};
+
+type SwIndexMemberRow = {
+  indexCode: string;
+  symbol: string;
+  outDate: string | null;
+  isNew: string | null;
+};
+
+type ConceptMemberRow = {
+  conceptCode: string | null;
+  conceptName: string | null;
+  symbol: string;
+  outDate: string | null;
+};
+
+const SW_CLASSIFY_SOURCES = ["SW2021", "SW"];
+const SW_MEMBER_FALLBACK_CONCURRENCY = 6;
+const CONCEPT_DETAIL_FALLBACK_CONCURRENCY = 6;
+
 export const tushareProvider: MarketProvider = {
   id: "tushare",
 
@@ -77,12 +112,14 @@ export const tushareProvider: MarketProvider = {
 
   async fetchInstrumentCatalog(input): Promise<ProviderInstrumentProfile[]> {
     const [
-      stocks,
+      stocksRaw,
       funds,
       indexProfiles,
       futuresProfiles,
       spotProfiles,
-      forexProfiles
+      forexProfiles,
+      swClassificationBySymbol,
+      conceptsBySymbol
     ] =
       await Promise.all([
         fetchStockBasic(input.token),
@@ -90,8 +127,17 @@ export const tushareProvider: MarketProvider = {
         fetchOptionalCatalog("index_basic", () => fetchIndexBasic(input.token)),
         fetchOptionalCatalog("fut_basic", () => fetchFuturesBasic(input.token)),
         fetchOptionalCatalog("sge_basic", () => fetchSpotBasic(input.token)),
-        Promise.resolve(fetchForexWhitelistProfiles())
+        Promise.resolve(fetchForexWhitelistProfiles()),
+        fetchOptionalSwClassificationBySymbol(input.token),
+        fetchOptionalConceptNamesBySymbol(input.token)
       ]);
+
+    const stocks = enrichStockProfilesWithClassification(
+      stocksRaw,
+      swClassificationBySymbol,
+      conceptsBySymbol
+    );
+
     return [
       ...stocks,
       ...funds,
@@ -304,6 +350,463 @@ async function fetchStockBasic(token: string): Promise<ProviderInstrumentProfile
       market: "CN",
       currency: "CNY",
       tags,
+      providerData
+    } satisfies ProviderInstrumentProfile;
+  });
+}
+
+async function fetchOptionalSwClassificationBySymbol(
+  token: string
+): Promise<Map<string, StockSwClassification>> {
+  try {
+    return await fetchSwClassificationBySymbol(token);
+  } catch (error) {
+    console.warn(
+      "[mytrader] optional sw industry classification unavailable, continue."
+    );
+    console.warn(error);
+    return new Map();
+  }
+}
+
+async function fetchSwClassificationBySymbol(
+  token: string
+): Promise<Map<string, StockSwClassification>> {
+  const nodes = await fetchSwIndustryNodes(token);
+  if (nodes.size === 0) return new Map();
+
+  const members = await fetchSwMembersWithFallback(token, nodes);
+  if (members.length === 0) return new Map();
+
+  return buildSwClassificationBySymbol(nodes, members);
+}
+
+async function fetchSwIndustryNodes(token: string): Promise<Map<string, SwIndustryNode>> {
+  const paramsList: Array<Record<string, string | undefined>> = SW_CLASSIFY_SOURCES.map(
+    (src) => ({ src })
+  );
+  paramsList.push({});
+
+  let lastError: unknown = null;
+  for (const params of paramsList) {
+    try {
+      const res = await fetchTusharePaged(
+        "index_classify",
+        token,
+        params,
+        "index_code,industry_name,level,parent_code,src"
+      );
+      const parsed = parseSwIndustryNodes(res);
+      if (parsed.size > 0) return parsed;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) throw lastError;
+  return new Map();
+}
+
+function parseSwIndustryNodes(
+  response: TushareRawResponse
+): Map<string, SwIndustryNode> {
+  const fields = response.fields ?? [];
+  const rows = response.items ?? [];
+  const idxCode = fields.indexOf("index_code");
+  const idxName = fields.indexOf("industry_name");
+  const idxLevel = fields.indexOf("level");
+  const idxParentCode = fields.indexOf("parent_code");
+
+  if (idxCode === -1 || idxName === -1 || idxLevel === -1) {
+    return new Map();
+  }
+
+  const result = new Map<string, SwIndustryNode>();
+  rows.forEach((row) => {
+    const code = normalizeString(row[idxCode]);
+    const name = normalizeString(row[idxName]);
+    const level = normalizeSwIndustryLevel(row[idxLevel]);
+    if (!code || !name || !level) return;
+    const parentCode =
+      idxParentCode === -1 ? null : normalizeString(row[idxParentCode]);
+
+    result.set(code, {
+      code,
+      name,
+      level,
+      parentCode
+    });
+  });
+
+  return result;
+}
+
+function normalizeSwIndustryLevel(
+  value: string | number | null | undefined
+): SwIndustryLevel | null {
+  const raw = normalizeString(value)?.toUpperCase().replace(/\s+/g, "");
+  if (!raw) return null;
+  if (raw === "L1" || raw === "1" || raw === "SWL1") return "l1";
+  if (raw === "L2" || raw === "2" || raw === "SWL2") return "l2";
+  return null;
+}
+
+async function fetchSwMembersWithFallback(
+  token: string,
+  nodes: Map<string, SwIndustryNode>
+): Promise<SwIndexMemberRow[]> {
+  const allApiRows = await fetchSwMembersFromIndexMemberAll(token);
+  if (allApiRows.length > 0) return allApiRows;
+
+  const l2Codes = Array.from(nodes.values())
+    .filter((item) => item.level === "l2")
+    .map((item) => item.code);
+  if (l2Codes.length === 0) return [];
+
+  let failedCount = 0;
+  const rowsByCode = await mapWithConcurrency(
+    l2Codes,
+    SW_MEMBER_FALLBACK_CONCURRENCY,
+    async (indexCode) => {
+      try {
+        const res = await fetchTusharePaged(
+          "index_member",
+          token,
+          { index_code: indexCode, is_new: "Y" },
+          "index_code,con_code,out_date,is_new"
+        );
+        return parseSwIndexMemberRows(res);
+      } catch {
+        failedCount += 1;
+        return [];
+      }
+    }
+  );
+  if (failedCount > 0) {
+    console.warn(
+      `[mytrader] optional sw industry fallback partial failures: ${failedCount}/${l2Codes.length}.`
+    );
+  }
+  return rowsByCode.flat();
+}
+
+async function fetchSwMembersFromIndexMemberAll(
+  token: string
+): Promise<SwIndexMemberRow[]> {
+  const paramsList: Array<Record<string, string | undefined>> = SW_CLASSIFY_SOURCES.map(
+    (src) => ({ src, is_new: "Y" })
+  );
+  paramsList.push({ is_new: "Y" });
+
+  for (const params of paramsList) {
+    try {
+      const res = await fetchTusharePaged(
+        "index_member_all",
+        token,
+        params,
+        "index_code,con_code,out_date,is_new"
+      );
+      const rows = parseSwIndexMemberRows(res);
+      if (rows.length > 0) return rows;
+    } catch {
+      // Fallback to per-index requests below.
+    }
+  }
+
+  return [];
+}
+
+function parseSwIndexMemberRows(response: TushareRawResponse): SwIndexMemberRow[] {
+  const fields = response.fields ?? [];
+  const rows = response.items ?? [];
+  const idxIndexCode = fields.indexOf("index_code");
+  const idxConCode = fields.indexOf("con_code");
+  const idxOutDate = fields.indexOf("out_date");
+  const idxIsNew = fields.indexOf("is_new");
+
+  if (idxIndexCode === -1 || idxConCode === -1) return [];
+
+  return rows
+    .map((row) => {
+      const indexCode = normalizeString(row[idxIndexCode]);
+      const symbol = normalizeSymbol(row[idxConCode]);
+      if (!indexCode || !symbol) return null;
+      const outDate = idxOutDate === -1 ? null : normalizeDate(row[idxOutDate]);
+      const isNew = idxIsNew === -1 ? null : normalizeString(row[idxIsNew]);
+      return {
+        indexCode,
+        symbol,
+        outDate,
+        isNew
+      } satisfies SwIndexMemberRow;
+    })
+    .filter((row): row is SwIndexMemberRow => Boolean(row));
+}
+
+function buildSwClassificationBySymbol(
+  nodes: Map<string, SwIndustryNode>,
+  members: SwIndexMemberRow[]
+): Map<string, StockSwClassification> {
+  const l1ByCode = new Map<string, SwIndustryNode>();
+  nodes.forEach((node) => {
+    if (node.level === "l1") {
+      l1ByCode.set(node.code, node);
+    }
+  });
+
+  const activeMembers = members
+    .filter((item) => isSwMemberActive(item))
+    .sort((a, b) => {
+      if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol);
+      return a.indexCode.localeCompare(b.indexCode);
+    });
+
+  const result = new Map<string, StockSwClassification>();
+  activeMembers.forEach((item) => {
+    const node = nodes.get(item.indexCode);
+    if (!node) return;
+
+    const l2Node = node.level === "l2" ? node : null;
+    const l1Node =
+      node.level === "l1"
+        ? node
+        : node.parentCode
+          ? l1ByCode.get(node.parentCode) ?? null
+          : null;
+    const next: StockSwClassification = {
+      l1Code: l1Node?.code ?? null,
+      l1Name: l1Node?.name ?? null,
+      l2Code: l2Node?.code ?? null,
+      l2Name: l2Node?.name ?? null
+    };
+    if (!next.l1Name && !next.l2Name) return;
+
+    const current = result.get(item.symbol);
+    if (!current || shouldReplaceSwClassification(current, next)) {
+      result.set(item.symbol, next);
+    }
+  });
+
+  return result;
+}
+
+function isSwMemberActive(row: SwIndexMemberRow): boolean {
+  const isNew = row.isNew?.trim().toUpperCase();
+  if (isNew === "Y") return true;
+  if (isNew === "N") return false;
+  if (!row.outDate) return true;
+  return row.outDate >= todayDate();
+}
+
+function shouldReplaceSwClassification(
+  current: StockSwClassification,
+  next: StockSwClassification
+): boolean {
+  if (!current.l2Code && next.l2Code) return true;
+  if (
+    current.l2Code &&
+    next.l2Code &&
+    current.l2Code !== next.l2Code &&
+    next.l2Code.localeCompare(current.l2Code) < 0
+  ) {
+    return true;
+  }
+  if (!current.l1Code && next.l1Code) return true;
+  return false;
+}
+
+async function fetchOptionalConceptNamesBySymbol(
+  token: string
+): Promise<Map<string, string[]>> {
+  try {
+    return await fetchConceptNamesBySymbol(token);
+  } catch (error) {
+    console.warn("[mytrader] optional concept classification unavailable, continue.");
+    console.warn(error);
+    return new Map();
+  }
+}
+
+async function fetchConceptNamesBySymbol(token: string): Promise<Map<string, string[]>> {
+  const conceptNameByCode = await fetchConceptNameByCode(token);
+  const detailRows = await fetchConceptDetailRows(
+    token,
+    Array.from(conceptNameByCode.keys())
+  );
+  if (detailRows.length === 0) return new Map();
+
+  const bySymbol = new Map<string, Set<string>>();
+  detailRows.forEach((row) => {
+    if (!isConceptMemberActive(row)) return;
+    const conceptName =
+      row.conceptName ??
+      (row.conceptCode ? conceptNameByCode.get(row.conceptCode) ?? null : null);
+    if (!conceptName) return;
+    const set = bySymbol.get(row.symbol) ?? new Set<string>();
+    set.add(conceptName);
+    bySymbol.set(row.symbol, set);
+  });
+
+  const result = new Map<string, string[]>();
+  bySymbol.forEach((set, symbol) => {
+    const concepts = Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+    if (concepts.length > 0) {
+      result.set(symbol, concepts);
+    }
+  });
+  return result;
+}
+
+async function fetchConceptNameByCode(token: string): Promise<Map<string, string>> {
+  try {
+    const res = await fetchTusharePaged("concept", token, {}, "code,name,src");
+    const fields = res.fields ?? [];
+    const rows = res.items ?? [];
+    const idxCode = fields.indexOf("code");
+    const idxName = fields.indexOf("name");
+    if (idxCode === -1 || idxName === -1) return new Map();
+
+    const result = new Map<string, string>();
+    rows.forEach((row) => {
+      const code = normalizeString(row[idxCode]);
+      const name = normalizeString(row[idxName]);
+      if (!code || !name) return;
+      result.set(code, name);
+    });
+    return result;
+  } catch {
+    return new Map();
+  }
+}
+
+async function fetchConceptDetailRows(
+  token: string,
+  conceptCodes: string[]
+): Promise<ConceptMemberRow[]> {
+  let allRows: ConceptMemberRow[] | null = null;
+  let fullFetchError: unknown = null;
+  try {
+    const res = await fetchTusharePaged(
+      "concept_detail",
+      token,
+      {},
+      "id,concept_name,ts_code,out_date"
+    );
+    allRows = parseConceptMemberRows(res);
+    if (allRows.length > 0) return allRows;
+  } catch (error) {
+    fullFetchError = error;
+  }
+
+  if (fullFetchError) throw fullFetchError;
+  if (conceptCodes.length === 0) return [];
+
+  let failedCount = 0;
+  const rowsByCode = await mapWithConcurrency(
+    conceptCodes,
+    CONCEPT_DETAIL_FALLBACK_CONCURRENCY,
+    async (conceptCode) => {
+      try {
+        const res = await fetchTusharePaged(
+          "concept_detail",
+          token,
+          { id: conceptCode },
+          "id,concept_name,ts_code,out_date"
+        );
+        return parseConceptMemberRows(res);
+      } catch {
+        failedCount += 1;
+        return [];
+      }
+    }
+  );
+  if (failedCount > 0) {
+    console.warn(
+      `[mytrader] optional concept detail fallback partial failures: ${failedCount}/${conceptCodes.length}.`
+    );
+  }
+
+  return rowsByCode.flat();
+}
+
+function parseConceptMemberRows(response: TushareRawResponse): ConceptMemberRow[] {
+  const fields = response.fields ?? [];
+  const rows = response.items ?? [];
+  const idxConceptCode = fields.indexOf("id");
+  const idxConceptName = fields.indexOf("concept_name");
+  const idxSymbol = fields.indexOf("ts_code");
+  const idxOutDate = fields.indexOf("out_date");
+  if (idxSymbol === -1) return [];
+
+  return rows
+    .map((row) => {
+      const symbol = normalizeSymbol(row[idxSymbol]);
+      if (!symbol) return null;
+      const conceptCode =
+        idxConceptCode === -1 ? null : normalizeString(row[idxConceptCode]);
+      const conceptName =
+        idxConceptName === -1 ? null : normalizeString(row[idxConceptName]);
+      const outDate = idxOutDate === -1 ? null : normalizeDate(row[idxOutDate]);
+      return {
+        conceptCode,
+        conceptName,
+        symbol,
+        outDate
+      } satisfies ConceptMemberRow;
+    })
+    .filter((row): row is ConceptMemberRow => Boolean(row));
+}
+
+function isConceptMemberActive(row: ConceptMemberRow): boolean {
+  if (!row.outDate) return true;
+  return row.outDate >= todayDate();
+}
+
+function enrichStockProfilesWithClassification(
+  profiles: ProviderInstrumentProfile[],
+  swClassificationBySymbol: Map<string, StockSwClassification>,
+  conceptsBySymbol: Map<string, string[]>
+): ProviderInstrumentProfile[] {
+  if (profiles.length === 0) return profiles;
+
+  return profiles.map((profile) => {
+    const symbol = profile.symbol.trim().toUpperCase();
+    const swIndustry = swClassificationBySymbol.get(symbol);
+    const concepts = conceptsBySymbol.get(symbol) ?? [];
+    if (!swIndustry && concepts.length === 0) {
+      return profile;
+    }
+
+    const tags = new Set(profile.tags.map((item) => item.trim()).filter(Boolean));
+    if (swIndustry?.l1Name) {
+      tags.add(`ind:sw:l1:${swIndustry.l1Name}`);
+    }
+    if (swIndustry?.l2Name) {
+      tags.add(`ind:sw:l2:${swIndustry.l2Name}`);
+    }
+    concepts.forEach((concept) => {
+      tags.add(`concept:${concept}`);
+      tags.add(`theme:ths:${concept}`);
+    });
+
+    const providerData = {
+      ...(profile.providerData ?? {})
+    } as Record<string, unknown>;
+    if (swIndustry) {
+      providerData.swIndustry = {
+        l1Code: swIndustry.l1Code,
+        l1Name: swIndustry.l1Name,
+        l2Code: swIndustry.l2Code,
+        l2Name: swIndustry.l2Name
+      };
+    }
+    if (concepts.length > 0) {
+      providerData.concepts = concepts;
+    }
+
+    return {
+      ...profile,
+      tags: Array.from(tags.values()).sort((a, b) => a.localeCompare(b)),
       providerData
     } satisfies ProviderInstrumentProfile;
   });
@@ -679,6 +1182,11 @@ function normalizeString(value: string | number | null | undefined): string | nu
   return raw ? raw : null;
 }
 
+function normalizeSymbol(value: string | number | null | undefined): string | null {
+  const normalized = normalizeString(value);
+  return normalized ? normalized.toUpperCase() : null;
+}
+
 function normalizeNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const raw = typeof value === "number" ? value : Number(String(value));
@@ -688,6 +1196,10 @@ function normalizeNumber(value: string | number | null | undefined): number | nu
 
 function toTushareDate(value: string): string {
   return value.replace(/-/g, "");
+}
+
+function todayDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function mapMarketToTushareExchange(market: string): string {
@@ -767,4 +1279,29 @@ function buildProviderTags(input: Record<string, string | null>): string[] {
     tags.push(`${key}:${value}`);
   });
   return tags;
+}
+
+async function mapWithConcurrency<TItem, TResult>(
+  items: TItem[],
+  concurrency: number,
+  mapper: (item: TItem, index: number) => Promise<TResult>
+): Promise<TResult[]> {
+  if (items.length === 0) return [];
+  const safeConcurrency = Math.max(1, Math.floor(concurrency));
+  const results: TResult[] = new Array(items.length);
+  let cursor = 0;
+
+  const workers = Array.from({ length: Math.min(safeConcurrency, items.length) }).map(
+    async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) return;
+        results[index] = await mapper(items[index], index);
+      }
+    }
+  );
+
+  await Promise.all(workers);
+  return results;
 }

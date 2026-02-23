@@ -173,3 +173,24 @@
 - 结果：
   - `verify:pr1-guardrails` 恢复通过，且语义与当前 `tushare-rollout-closure` 基线一致；
   - 新库初始化不再缺失 target-task 相关表。
+
+## 2026-02-23 Follow-up: 分类链路补齐（SW L2 + 概念）与全量目录默认收起
+- 触发背景：
+  - 用户反馈“结构看板二级行业/概念为 0”，并要求补齐链路；
+  - 用户同时要求“全量数据池目录默认收起”。
+- 已落地改动：
+  - `apps/backend/src/main/market/providers/tushareProvider.ts`
+    - `fetchInstrumentCatalog` 新增股票分类增强链路，保持“可选能力、失败不阻断主流程”：
+      - 申万行业链路：`index_classify` + `index_member_all`（失败时回退 `index_member`）；
+      - 概念链路：`concept` + `concept_detail`（全量失败时回退按概念编码拉取）；
+    - 股票 profile 标签增强：
+      - 新增 `ind:sw:l1:<name>` / `ind:sw:l2:<name>`；
+      - 新增 `concept:<name>`，并兼容写入 `theme:ths:<name>`；
+      - `providerData` 增补 `swIndustry` 与 `concepts` 字段，便于后续排查与审计。
+  - `apps/backend/src/main/market/providers/tushareBulkFetch.ts`
+    - 为分页 TuShare 调用补齐 20s HTTP 超时（AbortController），避免分类链路引入长时间挂起风险。
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementSourceSection.tsx`
+    - `directoryPanelExpanded` 默认值调整为 `false`，即“全量数据池目录默认收起”。
+- 当前状态：
+  - 代码链路已补齐并通过类型/门禁验证；
+  - 运行态要看到二级行业/概念统计恢复，仍需触发一次 universe catalog 同步以回填新标签。

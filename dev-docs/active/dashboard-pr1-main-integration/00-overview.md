@@ -2,7 +2,7 @@
 
 ## Status
 - State: in_progress（2026-02-22 reopen）
-- Next step: 收口“全量池以 `tushare-rollout-closure` 为基线”的代码与运行态对齐，并完成回归确认。
+- Next step: 触发一次 universe catalog 同步，回填 `ind:sw:l2` / `concept` 标签并确认结构看板统计恢复。
 
 ## Goal
 在不回退 `main` rollout 收口与稳定修复成果的前提下，把 `codex/dashboard-modularization-pr1` 的功能与重构成果分批并入主干。
