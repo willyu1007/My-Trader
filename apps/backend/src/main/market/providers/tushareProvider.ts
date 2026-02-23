@@ -747,7 +747,6 @@ async function fetchConceptDetailRows(
   conceptCodes: string[]
 ): Promise<ConceptMemberRow[]> {
   let allRows: ConceptMemberRow[] | null = null;
-  let fullFetchError: unknown = null;
   try {
     const res = await fetchTusharePaged(
       "concept_detail",
@@ -758,10 +757,10 @@ async function fetchConceptDetailRows(
     allRows = parseConceptMemberRows(res);
     if (allRows.length > 0) return allRows;
   } catch (error) {
-    fullFetchError = error;
+    console.warn("[mytrader] concept_detail full pull unavailable, fallback by id.");
+    console.warn(error);
   }
 
-  if (fullFetchError) throw fullFetchError;
   if (conceptCodes.length === 0) return [];
 
   let failedCount = 0;
@@ -1007,10 +1006,12 @@ function enrichStockProfilesWithClassification(
   conceptsBySymbol: Map<string, string[]>
 ): ProviderInstrumentProfile[] {
   if (profiles.length === 0) return profiles;
+  const swL2Fallback = buildSwL2Fallback(swClassificationBySymbol);
 
   return profiles.map((profile) => {
     const symbol = profile.symbol.trim().toUpperCase();
-    const swIndustry = swClassificationBySymbol.get(symbol);
+    const swIndustryRaw = swClassificationBySymbol.get(symbol);
+    const swIndustry = fillMissingSwL1(swIndustryRaw, swL2Fallback);
     const concepts = conceptsBySymbol.get(symbol) ?? [];
     if (!swIndustry && concepts.length === 0) {
       return profile;
@@ -1049,6 +1050,65 @@ function enrichStockProfilesWithClassification(
       providerData
     } satisfies ProviderInstrumentProfile;
   });
+}
+
+function buildSwL2Fallback(
+  swClassificationBySymbol: Map<string, StockSwClassification>
+): {
+  byL2Code: Map<string, { l1Code: string | null; l1Name: string | null }>;
+  byL2Name: Map<string, { l1Code: string | null; l1Name: string | null }>;
+  l1NameByCode: Map<string, string>;
+} {
+  const byL2Code = new Map<string, { l1Code: string | null; l1Name: string | null }>();
+  const byL2Name = new Map<string, { l1Code: string | null; l1Name: string | null }>();
+  const l1NameByCode = new Map<string, string>();
+
+  swClassificationBySymbol.forEach((row) => {
+    if (row.l1Code && row.l1Name) {
+      l1NameByCode.set(row.l1Code, row.l1Name);
+    }
+    const payload = {
+      l1Code: row.l1Code,
+      l1Name: row.l1Name
+    };
+    if (row.l2Code && (row.l1Code || row.l1Name)) {
+      byL2Code.set(row.l2Code, payload);
+    }
+    if (row.l2Name && (row.l1Code || row.l1Name)) {
+      byL2Name.set(row.l2Name, payload);
+    }
+  });
+
+  return { byL2Code, byL2Name, l1NameByCode };
+}
+
+function fillMissingSwL1(
+  row: StockSwClassification | undefined,
+  fallback: {
+    byL2Code: Map<string, { l1Code: string | null; l1Name: string | null }>;
+    byL2Name: Map<string, { l1Code: string | null; l1Name: string | null }>;
+    l1NameByCode: Map<string, string>;
+  }
+): StockSwClassification | null {
+  if (!row) return null;
+  if (row.l1Code && row.l1Name) return row;
+
+  const byCode = row.l2Code ? fallback.byL2Code.get(row.l2Code) ?? null : null;
+  const byName = row.l2Name ? fallback.byL2Name.get(row.l2Name) ?? null : null;
+  const inferred = byCode ?? byName;
+  if (!inferred) return row;
+
+  const nextL1Code = row.l1Code ?? inferred.l1Code ?? null;
+  const nextL1Name =
+    row.l1Name ??
+    inferred.l1Name ??
+    (nextL1Code ? fallback.l1NameByCode.get(nextL1Code) ?? null : null);
+
+  return {
+    ...row,
+    l1Code: nextL1Code,
+    l1Name: nextL1Name
+  };
 }
 
 async function fetchFundBasic(token: string): Promise<ProviderInstrumentProfile[]> {
