@@ -24,6 +24,7 @@ export type OtherDataManagementTargetPoolDiffPaneProps = Pick<
   | "marketTargetPoolStatsScope"
   | "marketTargetsDiffPreview"
   | "marketTargetsPreview"
+  | "refreshMarketTargetPoolStats"
   | "refreshMarketTargetsDiff"
   | "setMarketCurrentTargetsModalOpen"
   | "setMarketTargetPoolDetailMetric"
@@ -40,29 +41,38 @@ export function OtherDataManagementTargetPoolDiffPane(
           <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
             标的结构看板
           </div>
-          <div className="inline-flex items-center rounded-md bg-slate-100/80 dark:bg-background-dark/70 p-1">
+          <div className="inline-flex items-center gap-2">
             <button
               type="button"
-              onClick={() => props.setMarketTargetPoolStatsScope("universe")}
-              className={`h-7 px-3 rounded-[5px] text-xs transition-colors ${
-                props.marketTargetPoolStatsScope === "universe"
-                  ? "bg-primary/20 text-slate-900 dark:text-slate-100"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              }`}
+              onClick={() => void props.refreshMarketTargetPoolStats()}
+              className="h-7 px-2.5 rounded-[5px] text-xs border border-slate-200/80 dark:border-border-dark/70 text-slate-600 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-background-dark/80 transition-colors"
             >
-              全量标的
+              刷新统计
             </button>
-            <button
-              type="button"
-              onClick={() => props.setMarketTargetPoolStatsScope("focus")}
-              className={`h-7 px-3 rounded-[5px] text-xs transition-colors ${
-                props.marketTargetPoolStatsScope === "focus"
-                  ? "bg-primary/20 text-slate-900 dark:text-slate-100"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              }`}
-            >
-              强相关标的
-            </button>
+            <div className="inline-flex items-center rounded-md bg-slate-100/80 dark:bg-background-dark/70 p-1">
+              <button
+                type="button"
+                onClick={() => props.setMarketTargetPoolStatsScope("universe")}
+                className={`h-7 px-3 rounded-[5px] text-xs transition-colors ${
+                  props.marketTargetPoolStatsScope === "universe"
+                    ? "bg-primary/20 text-slate-900 dark:text-slate-100"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
+                全量标的
+              </button>
+              <button
+                type="button"
+                onClick={() => props.setMarketTargetPoolStatsScope("focus")}
+                className={`h-7 px-3 rounded-[5px] text-xs transition-colors ${
+                  props.marketTargetPoolStatsScope === "focus"
+                    ? "bg-primary/20 text-slate-900 dark:text-slate-100"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
+                强相关标的
+              </button>
+            </div>
           </div>
         </div>
 

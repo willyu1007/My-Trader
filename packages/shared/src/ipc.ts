@@ -765,6 +765,37 @@ export interface MarketIngestSchedulerConfig {
   catchUpMissed: boolean;
 }
 
+export type SqliteFlushTrigger =
+  | "scheduled"
+  | "transaction_commit"
+  | "close"
+  | "manual";
+
+export interface MarketRuntimePerfFlushRecord {
+  filePath: string;
+  trigger: SqliteFlushTrigger;
+  bytes: number;
+  durationMs: number;
+  timestamp: number;
+}
+
+export interface MarketRuntimePerfStats {
+  collectedAt: number;
+  processUptimeMs: number;
+  processRssBytes: number;
+  processHeapUsedBytes: number;
+  sqlite: {
+    flushDebounceMs: number;
+    dirtyDbCount: number;
+    scheduledFlushCount: number;
+    completedFlushCount: number;
+    totalFlushBytes: number;
+    totalFlushDurationMs: number;
+    lastFlushError: string | null;
+    recentFlushes: MarketRuntimePerfFlushRecord[];
+  };
+}
+
 export type UniversePoolBucketId = "cn_a" | "etf" | "metal_futures" | "metal_spot";
 
 export interface MarketUniversePoolConfig {
@@ -856,6 +887,121 @@ export interface PreviewTargetTaskCoverageResult {
 }
 
 export interface RunTargetMaterializationInput {
+  symbols?: string[] | null;
+}
+
+export type CompletenessScopeId = "target_pool" | "source_pool";
+
+export type CompletenessBucketId =
+  | "stock"
+  | "etf"
+  | "futures"
+  | "spot"
+  | "index"
+  | "fx"
+  | "macro"
+  | "global";
+
+export type CompletenessEntityType =
+  | "instrument"
+  | "fx_pair"
+  | "macro_module"
+  | "global";
+
+export type CompletenessStatus =
+  | "complete"
+  | "partial"
+  | "missing"
+  | "not_applicable"
+  | "not_started";
+
+export interface MarketCompletenessCheckDescriptor {
+  id: string;
+  scopeId: CompletenessScopeId;
+  bucketId: CompletenessBucketId;
+  label: string;
+  domainId?: DataDomainId | null;
+  moduleId?: string | null;
+  editable: boolean;
+  sortOrder: number;
+  legacyTargetModuleId?: TargetTaskModuleId | null;
+}
+
+export interface MarketCompletenessConfig {
+  version: 1;
+  defaultLookbackDays: number;
+  targetEnabledCheckIds: string[];
+  checks: MarketCompletenessCheckDescriptor[];
+  updatedAt: number;
+}
+
+export interface SetMarketCompletenessConfigInput {
+  defaultLookbackDays?: number | null;
+  targetEnabledCheckIds?: string[] | null;
+}
+
+export interface MarketCompletenessStatusRow {
+  scopeId: CompletenessScopeId;
+  checkId: string;
+  entityType: CompletenessEntityType;
+  entityId: string;
+  bucketId: CompletenessBucketId;
+  domainId: DataDomainId | null;
+  moduleId: string | null;
+  assetClass: AssetClass | "unknown" | null;
+  asOfTradeDate: string | null;
+  status: CompletenessStatus;
+  coverageRatio: number | null;
+  sourceRunId: string | null;
+  detail: Record<string, unknown> | null;
+  updatedAt: number;
+}
+
+export interface ListCompletenessStatusInput {
+  scopeId?: CompletenessScopeId | null;
+  checkId?: string | null;
+  status?: CompletenessStatus | null;
+  entityType?: CompletenessEntityType | null;
+  bucketId?: CompletenessBucketId | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListCompletenessStatusResult {
+  items: MarketCompletenessStatusRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PreviewCompletenessCoverageInput {
+  scopeId?: CompletenessScopeId | null;
+}
+
+export interface PreviewCompletenessCoverageResult {
+  scopeId: CompletenessScopeId;
+  asOfTradeDate: string | null;
+  totals: {
+    entities: number;
+    checks: number;
+    complete: number;
+    partial: number;
+    missing: number;
+    notApplicable: number;
+    notStarted: number;
+  };
+  byBucket: Array<{
+    bucketId: CompletenessBucketId;
+    complete: number;
+    partial: number;
+    missing: number;
+    notApplicable: number;
+    notStarted: number;
+  }>;
+}
+
+export interface RunCompletenessMaterializationInput {
+  scopeId?: CompletenessScopeId | null;
   symbols?: string[] | null;
 }
 
@@ -1064,6 +1210,7 @@ export interface MyTraderApi {
     setIngestSchedulerConfig(
       input: MarketIngestSchedulerConfig
     ): Promise<MarketIngestSchedulerConfig>;
+    getRuntimePerfStats(): Promise<MarketRuntimePerfStats>;
     getUniversePoolConfig(): Promise<MarketUniversePoolConfig>;
     setUniversePoolConfig(input: MarketUniversePoolConfig): Promise<MarketUniversePoolConfig>;
     getUniversePoolOverview(): Promise<MarketUniversePoolOverview>;
@@ -1076,6 +1223,19 @@ export interface MyTraderApi {
       input?: ListTargetTaskStatusInput
     ): Promise<ListTargetTaskStatusResult>;
     runTargetMaterialization(input?: RunTargetMaterializationInput): Promise<void>;
+    getCompletenessConfig(): Promise<MarketCompletenessConfig>;
+    setCompletenessConfig(
+      input: SetMarketCompletenessConfigInput
+    ): Promise<MarketCompletenessConfig>;
+    previewCompletenessCoverage(
+      input?: PreviewCompletenessCoverageInput
+    ): Promise<PreviewCompletenessCoverageResult>;
+    listCompletenessStatus(
+      input?: ListCompletenessStatusInput
+    ): Promise<ListCompletenessStatusResult>;
+    runCompletenessMaterialization(
+      input?: RunCompletenessMaterializationInput
+    ): Promise<void>;
     getRolloutFlags(): Promise<MarketRolloutFlags>;
     setRolloutFlags(input: SetMarketRolloutFlagsInput): Promise<MarketRolloutFlags>;
     listTempTargets(): Promise<TempTargetSymbol[]>;
@@ -1163,6 +1323,7 @@ export const IPC_CHANNELS = {
   MARKET_INGEST_CONTROL_CANCEL: "market:ingest:cancel",
   MARKET_INGEST_SCHEDULER_GET: "market:ingestScheduler:get",
   MARKET_INGEST_SCHEDULER_SET: "market:ingestScheduler:set",
+  MARKET_RUNTIME_PERF_STATS_GET: "market:runtimePerf:getStats",
   MARKET_UNIVERSE_POOL_GET_CONFIG: "market:universePool:getConfig",
   MARKET_UNIVERSE_POOL_SET_CONFIG: "market:universePool:setConfig",
   MARKET_UNIVERSE_POOL_GET_OVERVIEW: "market:universePool:getOverview",
@@ -1171,6 +1332,11 @@ export const IPC_CHANNELS = {
   MARKET_TARGET_TASK_PREVIEW_COVERAGE: "market:targetTask:previewCoverage",
   MARKET_TARGET_TASK_LIST_STATUS: "market:targetTask:listStatus",
   MARKET_TARGET_TASK_RUN_MATERIALIZATION: "market:targetTask:runMaterialization",
+  MARKET_COMPLETENESS_GET_CONFIG: "market:completeness:getConfig",
+  MARKET_COMPLETENESS_SET_CONFIG: "market:completeness:setConfig",
+  MARKET_COMPLETENESS_PREVIEW_COVERAGE: "market:completeness:previewCoverage",
+  MARKET_COMPLETENESS_LIST_STATUS: "market:completeness:listStatus",
+  MARKET_COMPLETENESS_RUN_MATERIALIZATION: "market:completeness:runMaterialization",
   MARKET_ROLLOUT_FLAGS_GET: "market:rolloutFlags:get",
   MARKET_ROLLOUT_FLAGS_SET: "market:rolloutFlags:set",
   MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",

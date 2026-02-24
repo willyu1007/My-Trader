@@ -5,6 +5,7 @@
   - `pnpm -C packages/shared build`
   - `pnpm -C apps/backend typecheck`
   - `pnpm -C apps/frontend typecheck`
+  - `pnpm -C apps/backend run verify:completeness-v2`
   - `pnpm typecheck`
   - `pnpm build`
 
@@ -127,3 +128,81 @@
 - 2026-02-23 (Follow-up #12: matrix minimal labels + narrower columns): `pnpm verify:pr1-guardrails` -> ✅ pass
 - 2026-02-23 (Follow-up #13: divider + complete-rate color + fixed asset column order): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up #13: divider + complete-rate color + fixed asset column order): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Completeness v2: backend verify script): `pnpm -C apps/backend run verify:completeness-v2` -> ✅ pass
+- 2026-02-23 (Completeness v2: guardrails compatibility): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Completeness v2: workspace typecheck): `pnpm typecheck` -> ✅ pass
+- 2026-02-23 (Completeness v2: workspace build): `pnpm build` -> ✅ pass
+
+## Completeness V2 Reconciliation SQL
+- Migration backfill idempotency:
+```sql
+select value
+from market_meta
+where key = 'completeness_v2_backfill_v1';
+
+select count(*) as status_rows
+from completeness_status_v2
+where scope_id = 'target_pool';
+
+select count(*) as run_rows
+from completeness_runs_v2
+where scope_id = 'target_pool';
+```
+- Legacy compatibility cross-check:
+```sql
+select count(*) as legacy_rows
+from target_task_status
+where module_id = 'core.daily_prices';
+
+select count(*) as v2_rows
+from completeness_status_v2
+where scope_id = 'target_pool'
+  and check_id = 'target.core.daily_prices';
+```
+- Source pool `not_started` smoke:
+```sql
+select check_id, status, count(*) as rows
+from completeness_status_v2
+where scope_id = 'source_pool'
+  and check_id in ('source.index.daily', 'source.fx.daily', 'source.macro.snapshot')
+group by check_id, status
+order by check_id, status;
+```
+
+## Completeness V2 Key Results
+- `verify:completeness-v2` 覆盖三类断言并全部通过：
+  - backfill 幂等（重复 `ensureMarketCacheSchema` 不重复迁移）。
+  - legacy `target-task` API 与 completeness adapter 在 stock/etf 样本一致。
+  - `source_pool` 在 index/fx/macro 启用但无数据时返回 `not_started/not_applicable`。
+- guardrails 已兼容 target materialization adapter 路径（`runCompletenessMaterialization`）。
+
+## 2026-02-24 Performance/Stability Closure Runs
+- Build/typecheck gates:
+  - `pnpm -C apps/backend run typecheck` -> ✅ pass
+  - `pnpm -C apps/backend run build` -> ✅ pass
+  - `pnpm -C apps/frontend run typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend run build` -> ✅ pass
+- Task-package gates:
+  - `pnpm verify:pr1-guardrails` -> ✅ pass
+  - `pnpm -C apps/backend run verify:completeness-v2` -> ✅ pass
+  - `pnpm typecheck` -> ✅ pass
+  - `pnpm build` -> ✅ pass
+- Static assertion checks (关键策略落点)：
+  - `DEFAULT_INGEST_SCHEDULER_CONFIG.runOnStartup=false` / `catchUpMissed=false` -> ✅
+  - `autoIngest` 无 startup `runOnce` -> ✅
+  - `app.before-quit` 存在统一 shutdown 流程 -> ✅
+  - `DashboardContainerLayout` 仅 `other/data-management` 使用 `scroll-auto` -> ✅
+  - 数据状态轮询 `15s` + `document.hidden` pause -> ✅
+  - market-cache 自愈 rotate + 重建 + notice -> ✅
+
+## 2026-02-24 Manual Smoke Checklist Update
+- 已在代码层完成以下闭环点：
+  - 启动路径避免默认自动拉取；
+  - 数据管理页禁止进入即批量重查；
+  - 退出路径统一 stop/close；
+  - 缓存损坏时自动备份重建。
+- 需在带 GUI 的本机会话执行并记录（CLI 环境不可量化渲染帧率）：
+  - 冷启动可操作时间（目标 < 3s）。
+  - `other/data-management` 与 `data-status` 往返切换 10 次的主线程峰值卡顿。
+  - 完备性面板连续滚轮 20s 掉帧观察。
+  - 退出耗时（目标 < 2s）与无挂起进程。

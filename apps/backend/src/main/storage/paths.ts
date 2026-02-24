@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ensureBusinessSchema } from "./businessSchema";
-import { close, exec, openSqliteDatabase } from "./sqlite";
+import { close, execVolatile, openSqliteDatabase } from "./sqlite";
 
 export interface AccountDataLayout {
   businessDbPath: string;
@@ -18,7 +18,8 @@ export async function ensureAccountDataLayout(
   const analysisDbPath = path.join(accountDir, "analysis.duckdb");
 
   const businessDb = await openSqliteDatabase(businessDbPath);
-  await exec(businessDb, `pragma journal_mode = wal;`);
+  await execVolatile(businessDb, `pragma journal_mode = delete;`);
+  await execVolatile(businessDb, `pragma temp_store = memory;`);
   await ensureBusinessSchema(businessDb);
   await close(businessDb);
 

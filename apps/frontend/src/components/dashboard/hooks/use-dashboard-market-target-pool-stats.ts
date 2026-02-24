@@ -6,7 +6,6 @@ import {
   buildCategoryDetailsFromCategoryMap,
   buildCategoryDetailsFromTagSummaries,
   buildTargetPoolStructureStats,
-  collectClassificationFromTags,
   dedupeTagSummaries,
   filterUniqueTagSummariesByPrefix,
   mapWithConcurrency,
@@ -37,6 +36,19 @@ interface TargetPoolStructureStats {
   error: string | null;
 }
 
+const MAX_INDUSTRY_L1_TAGS = 24;
+const MAX_INDUSTRY_L2_TAGS = 48;
+const MAX_CONCEPT_TAGS = 72;
+const TAG_MEMBER_LIMIT = 8000;
+const TAG_LIST_LIMIT = 1200;
+const TAG_MEMBER_CACHE_TTL_MS = 90_000;
+const REQUEST_SIGNATURE_TTL_MS = 45_000;
+
+interface CachedTagMembers {
+  symbols: string[];
+  cachedAt: number;
+}
+
 export interface UseDashboardMarketTargetPoolStatsOptions {
   marketFocusTargetSymbols: string[];
   marketUniversePoolEnabledBuckets: string[] | null | undefined;
@@ -51,13 +63,42 @@ export function useDashboardMarketTargetPoolStats(
   options: UseDashboardMarketTargetPoolStatsOptions
 ) {
   const requestIdRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const queuedRef = useRef(false);
+  const tagMembersCacheRef = useRef<Map<string, CachedTagMembers>>(new Map());
+  const lastSignatureRef = useRef<string | null>(null);
+  const lastCompletedAtRef = useRef(0);
+  const lastResultRef = useRef<
+    Record<"universe" | "focus", TargetPoolStructureStats> | null
+  >(null);
 
-  return useCallback(async () => {
+  return useCallback(async function refreshTargetPoolStats() {
     if (!window.mytrader) return;
     const marketApi = window.mytrader.market;
-    const enabledBuckets = options.marketUniversePoolEnabledBuckets?.length
-      ? options.marketUniversePoolEnabledBuckets
-      : options.universePoolBucketOrder;
+    const enabledBuckets = normalizeBucketIds(
+      options.marketUniversePoolEnabledBuckets?.length
+        ? options.marketUniversePoolEnabledBuckets
+        : options.universePoolBucketOrder
+    );
+    const focusAllSymbolsList = normalizeSymbolList(options.marketFocusTargetSymbols);
+    const signature = buildRequestSignature(enabledBuckets, focusAllSymbolsList);
+    const now = Date.now();
+
+    if (
+      lastSignatureRef.current === signature &&
+      lastResultRef.current &&
+      now - lastCompletedAtRef.current < REQUEST_SIGNATURE_TTL_MS
+    ) {
+      options.setMarketTargetPoolStatsByScope(lastResultRef.current);
+      return;
+    }
+
+    if (inFlightRef.current) {
+      queuedRef.current = true;
+      return;
+    }
+    inFlightRef.current = true;
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
@@ -67,46 +108,39 @@ export function useDashboardMarketTargetPoolStats(
     }));
 
     try {
-      const [industryL1Raw, industryL2Raw, industryLegacyRaw, themeConceptRaw, conceptRaw] =
-        await Promise.all([
-          marketApi.listTags({ query: "ind:sw:l1:", limit: 500 }),
-          marketApi.listTags({ query: "ind:sw:l2:", limit: 500 }),
-          marketApi.listTags({ query: "industry:", limit: 500 }),
-          marketApi.listTags({ query: "theme:", limit: 500 }),
-          marketApi.listTags({ query: "concept:", limit: 500 })
-        ]);
+      const allTags = await marketApi.listTags({ limit: TAG_LIST_LIMIT });
 
       if (requestIdRef.current !== requestId) return;
 
       const providerIndustryL1Tags = filterUniqueTagSummariesByPrefix(
-        industryL1Raw,
+        allTags,
         "ind:sw:l1:",
         "provider"
-      );
+      ).slice(0, MAX_INDUSTRY_L1_TAGS);
       const providerIndustryLegacyTags = filterUniqueTagSummariesByPrefix(
-        industryLegacyRaw,
+        allTags,
         "industry:",
         "provider"
-      );
+      ).slice(0, MAX_INDUSTRY_L1_TAGS);
       const providerIndustryL2Tags = filterUniqueTagSummariesByPrefix(
-        industryL2Raw,
+        allTags,
         "ind:sw:l2:",
         "provider"
-      );
+      ).slice(0, MAX_INDUSTRY_L2_TAGS);
       const providerThemeTags = filterUniqueTagSummariesByPrefix(
-        themeConceptRaw,
+        allTags,
         "theme:",
         "provider"
-      );
+      ).slice(0, MAX_CONCEPT_TAGS);
       const providerConceptRawTags = filterUniqueTagSummariesByPrefix(
-        conceptRaw,
+        allTags,
         "concept:",
         "provider"
-      );
+      ).slice(0, MAX_CONCEPT_TAGS);
       const providerConceptTags = dedupeTagSummaries([
         ...providerThemeTags,
         ...providerConceptRawTags
-      ]);
+      ]).slice(0, MAX_CONCEPT_TAGS);
 
       const industryL1TagsForUniverse =
         providerIndustryL1Tags.length > 0
@@ -115,66 +149,34 @@ export function useDashboardMarketTargetPoolStats(
       const universeMembersByTag = new Map<string, string[]>();
       const universeAllSymbols = new Set<string>();
       const enabledPoolTags = enabledBuckets.map((bucket) => `pool:${bucket}`);
-
-      await mapWithConcurrency(enabledPoolTags, 4, async (tag) => {
+      const readTagMembers = async (tag: string): Promise<string[]> => {
+        const normalizedTag = tag.trim();
+        if (!normalizedTag) return [];
+        const cached = tagMembersCacheRef.current.get(normalizedTag);
+        const ts = Date.now();
+        if (cached && ts - cached.cachedAt <= TAG_MEMBER_CACHE_TTL_MS) {
+          return cached.symbols;
+        }
         const members = await marketApi.getTagMembers({
-          tag,
-          limit: 50000
+          tag: normalizedTag,
+          limit: TAG_MEMBER_LIMIT
         });
-        if (requestIdRef.current !== requestId) return;
         const normalized = normalizeSymbolList(members);
+        tagMembersCacheRef.current.set(normalizedTag, {
+          symbols: normalized,
+          cachedAt: ts
+        });
+        return normalized;
+      };
+
+      await mapWithConcurrency(enabledPoolTags, 3, async (tag) => {
+        const normalized = await readTagMembers(tag);
+        if (requestIdRef.current !== requestId) return;
         universeMembersByTag.set(tag, normalized);
         normalized.forEach((symbol) => universeAllSymbols.add(symbol));
       });
 
       if (requestIdRef.current !== requestId) return;
-
-      if (universeAllSymbols.size === 0) {
-        const firstPage = await marketApi.listInstrumentRegistry({
-          autoIngest: "all",
-          limit: 500,
-          offset: 0
-        });
-        if (requestIdRef.current !== requestId) return;
-
-        firstPage.items.forEach((item) => {
-          const symbol = item.symbol.trim().toUpperCase();
-          if (!symbol) return;
-          universeAllSymbols.add(symbol);
-        });
-
-        const pageSize = Math.max(1, Math.floor(firstPage.limit || 500));
-        const offsets: number[] = [];
-        for (let offset = firstPage.items.length; offset < firstPage.total; offset += pageSize) {
-          offsets.push(offset);
-        }
-
-        await mapWithConcurrency(offsets, 4, async (offset) => {
-          const page = await marketApi.listInstrumentRegistry({
-            autoIngest: "all",
-            limit: pageSize,
-            offset
-          });
-          if (requestIdRef.current !== requestId) return;
-          page.items.forEach((item) => {
-            const symbol = item.symbol.trim().toUpperCase();
-            if (!symbol) return;
-            universeAllSymbols.add(symbol);
-          });
-        });
-      }
-
-      if (requestIdRef.current !== requestId) return;
-
-      if (universeAllSymbols.size === 0) {
-        const preview = await marketApi.previewTargets();
-        if (requestIdRef.current !== requestId) return;
-        preview.symbols.forEach((item) => {
-          const symbol = item.symbol.trim().toUpperCase();
-          if (!symbol) return;
-          universeAllSymbols.add(symbol);
-        });
-      }
 
       const universeAllSymbolsList = Array.from(universeAllSymbols).sort((a, b) =>
         a.localeCompare(b)
@@ -192,17 +194,15 @@ export function useDashboardMarketTargetPoolStats(
       );
 
       const universeClassifiedSymbols = new Set<string>();
-      await mapWithConcurrency(universeClassificationTags, 6, async (tag) => {
-        const members = await marketApi.getTagMembers({
-          tag,
-          limit: 50000
-        });
+      await mapWithConcurrency(universeClassificationTags, 2, async (tag) => {
+        const normalized = await readTagMembers(tag);
         if (requestIdRef.current !== requestId) return;
-        const normalized = normalizeSymbolList(members).filter((symbol) =>
-          universeAllSymbolSet.has(symbol)
-        );
         universeMembersByTag.set(tag, normalized);
-        normalized.forEach((symbol) => universeClassifiedSymbols.add(symbol));
+        normalized.forEach((symbol) => {
+          if (universeAllSymbolSet.has(symbol)) {
+            universeClassifiedSymbols.add(symbol);
+          }
+        });
       });
 
       if (requestIdRef.current !== requestId) return;
@@ -242,38 +242,30 @@ export function useDashboardMarketTargetPoolStats(
         symbolNames: {}
       });
 
+      const focusAllSymbolSet = new Set(focusAllSymbolsList);
       const focusIndustryL1Map = new Map<string, Set<string>>();
       const focusIndustryL2Map = new Map<string, Set<string>>();
       const focusConceptMap = new Map<string, Set<string>>();
       const focusClassifiedSymbols = new Set<string>();
-      const focusSymbolNames: Record<string, string | null> = {};
-      let focusClassifiedCount = 0;
 
-      await mapWithConcurrency(options.marketFocusTargetSymbols, 8, async (symbol) => {
-        const profile = await marketApi.getInstrumentProfile(symbol);
-        if (requestIdRef.current !== requestId) return;
-        focusSymbolNames[symbol] = profile?.name ?? null;
-        const tagStats = collectClassificationFromTags(profile?.tags ?? []);
-        if (tagStats.hasClassification) {
-          focusClassifiedCount += 1;
-          focusClassifiedSymbols.add(symbol);
+      const collectFocusCategory = (
+        tags: Array<{ tag: string }>,
+        target: Map<string, Set<string>>
+      ) => {
+        for (const tagInfo of tags) {
+          const symbols = universeMembersByTag.get(tagInfo.tag) ?? [];
+          for (const symbol of symbols) {
+            if (!focusAllSymbolSet.has(symbol)) continue;
+            addSymbolToCategoryMap(target, tagInfo.tag, symbol);
+            focusClassifiedSymbols.add(symbol);
+          }
         }
-        tagStats.industryL1.forEach((tag) =>
-          addSymbolToCategoryMap(focusIndustryL1Map, tag, symbol)
-        );
-        tagStats.industryL2.forEach((tag) =>
-          addSymbolToCategoryMap(focusIndustryL2Map, tag, symbol)
-        );
-        tagStats.concepts.forEach((tag) =>
-          addSymbolToCategoryMap(focusConceptMap, tag, symbol)
-        );
-      });
+      };
 
-      if (requestIdRef.current !== requestId) return;
+      collectFocusCategory(industryL1TagsForUniverse, focusIndustryL1Map);
+      collectFocusCategory(providerIndustryL2Tags, focusIndustryL2Map);
+      collectFocusCategory(providerConceptTags, focusConceptMap);
 
-      const focusAllSymbolsList = [...options.marketFocusTargetSymbols].sort((a, b) =>
-        a.localeCompare(b)
-      );
       const focusClassifiedSymbolsList = Array.from(focusClassifiedSymbols).sort((a, b) =>
         a.localeCompare(b)
       );
@@ -286,20 +278,24 @@ export function useDashboardMarketTargetPoolStats(
         industryL1Count: focusIndustryL1Map.size,
         industryL2Count: focusIndustryL2Map.size,
         conceptCount: focusConceptMap.size,
-        classifiedCount: focusClassifiedCount,
+        classifiedCount: focusClassifiedSymbolsList.length,
         allSymbols: focusAllSymbolsList,
         classifiedSymbols: focusClassifiedSymbolsList,
         industryL1Details: buildCategoryDetailsFromCategoryMap(focusIndustryL1Map),
         industryL2Details: buildCategoryDetailsFromCategoryMap(focusIndustryL2Map),
         conceptDetails: buildCategoryDetailsFromCategoryMap(focusConceptMap),
         unclassifiedSymbols: focusUnclassifiedSymbolsList,
-        symbolNames: focusSymbolNames
+        symbolNames: {}
       });
 
-      options.setMarketTargetPoolStatsByScope({
+      const nextStats = {
         universe: { ...universeStats, loading: false, error: null },
         focus: { ...focusStats, loading: false, error: null }
-      });
+      } satisfies Record<"universe" | "focus", TargetPoolStructureStats>;
+      lastSignatureRef.current = signature;
+      lastCompletedAtRef.current = Date.now();
+      lastResultRef.current = nextStats;
+      options.setMarketTargetPoolStatsByScope(nextStats);
     } catch (err) {
       if (requestIdRef.current !== requestId) return;
       const message = options.toUserErrorMessage(err);
@@ -307,6 +303,12 @@ export function useDashboardMarketTargetPoolStats(
         universe: { ...prev.universe, loading: false, error: message },
         focus: { ...prev.focus, loading: false, error: message }
       }));
+    } finally {
+      inFlightRef.current = false;
+      if (queuedRef.current) {
+        queuedRef.current = false;
+        void refreshTargetPoolStats();
+      }
     }
   }, [
     options.marketFocusTargetSymbols,
@@ -315,4 +317,36 @@ export function useDashboardMarketTargetPoolStats(
     options.toUserErrorMessage,
     options.universePoolBucketOrder
   ]);
+}
+
+function normalizeBucketIds(bucketIds: string[]): string[] {
+  return Array.from(
+    new Set(
+      bucketIds
+        .map((bucket) => bucket.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function buildRequestSignature(
+  enabledBuckets: string[],
+  focusSymbols: string[]
+): string {
+  const bucketPart = enabledBuckets.join(",");
+  const symbolPart = buildSymbolFingerprint(focusSymbols);
+  return `${bucketPart}@@${symbolPart}`;
+}
+
+function buildSymbolFingerprint(symbols: string[]): string {
+  let hash = 0x811c9dc5;
+  for (const symbol of symbols) {
+    for (let index = 0; index < symbol.length; index += 1) {
+      hash ^= symbol.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    hash ^= 0x7c;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${symbols.length}:${(hash >>> 0).toString(16)}`;
 }

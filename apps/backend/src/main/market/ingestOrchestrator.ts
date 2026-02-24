@@ -8,11 +8,13 @@ import {
   getPersistedIngestControlState,
   setPersistedIngestControlState
 } from "../storage/marketSettingsRepository";
+import { getMarketDataSourceConfig } from "../storage/marketDataSourceRepository";
 import { getResolvedTushareToken } from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 import type { IngestExecutionControl } from "./marketIngestRunner";
 import { convergeStaleRunningIngestRuns } from "./ingestRunsRepository";
 import { runTargetsIngest, runUniverseIngest } from "./marketIngestRunner";
+import { resolveMarketExecutionPlan } from "./executionPlanResolver";
 
 type OrchestratorScope = "targets" | "universe" | "both";
 type JobScope = Exclude<OrchestratorScope, "both">;
@@ -226,7 +228,14 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
   if (sessionId !== state.sessionId) return;
   const businessDb = requireBusinessDb();
   const marketDb = requireMarketDb();
-  const rolloutFlags = await getMarketRolloutFlags(businessDb);
+  const [rolloutFlags, dataSourceConfig] = await Promise.all([
+    getMarketRolloutFlags(businessDb),
+    getMarketDataSourceConfig(businessDb)
+  ]);
+  const executionPlan = resolveMarketExecutionPlan({
+    dataSourceConfig,
+    rolloutFlags
+  });
   if (!rolloutFlags.p0Enabled) {
     if (job.source === "manual") {
       throw new Error("当前已关闭 P0 批次开关，禁止执行数据拉取。");
@@ -257,7 +266,8 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
       token,
       mode: job.mode,
       meta: { ...(job.meta ?? {}), source: job.source },
-      control
+      control,
+      executionPlan
     });
     return;
   }
@@ -276,7 +286,8 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
     universeDailyBasicEnabled: rolloutFlags.universeDailyBasicEnabled,
     universeMoneyflowEnabled: rolloutFlags.universeMoneyflowEnabled,
     meta: { ...(job.meta ?? {}), source: job.source, windowYears: 3 },
-    control
+    control,
+    executionPlan
   });
 }
 

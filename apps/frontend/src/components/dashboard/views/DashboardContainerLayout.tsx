@@ -263,6 +263,11 @@ export function DashboardContainerLayout({
   handleTargetsEditorResizePointerDown,
   handleTargetsEditorResizeKeyDown
 }: DashboardContainerLayoutProps) {
+  const mainScrollBehaviorClass =
+    activeView === "other" && otherTab === "data-management"
+      ? "scroll-auto"
+      : "scroll-smooth";
+
   return (
     <div className="flex h-full bg-white/90 dark:bg-background-dark/80 backdrop-blur-xl overflow-hidden">
       <SidebarNav
@@ -310,7 +315,7 @@ export function DashboardContainerLayout({
         )}
 
         <div
-          className={`flex-1 p-0 scroll-smooth ${
+          className={`flex-1 p-0 ${mainScrollBehaviorClass} ${
             activeView === "market" ? "overflow-hidden" : "overflow-y-auto"
           }`}
         >

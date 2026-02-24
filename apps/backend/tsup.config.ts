@@ -4,7 +4,8 @@ export default defineConfig({
   entry: {
     main: "src/main/index.ts",
     preload: "src/preload/index.ts",
-    "verify-position-engine": "src/main/verifyPositionEngine.ts"
+    "verify-position-engine": "src/main/verifyPositionEngine.ts",
+    "verify-completeness-v2": "src/main/verifyCompletenessV2.ts"
   },
   format: ["cjs"],
   target: "es2022",

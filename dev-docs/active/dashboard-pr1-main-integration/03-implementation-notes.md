@@ -2,7 +2,7 @@
 
 ## Status
 - Current status: `in-progress`
-- Last updated: 2026-02-22
+- Last updated: 2026-02-24
 
 ## What changed
 - 新建任务包并完成宏观 roadmap 与分批合并策略。
@@ -361,3 +361,95 @@
     - 将色彩表达迁移到“完整”行百分比（整体与各资产列）；
     - 覆盖程度列标题由“维度”改为“覆盖程度”；
     - 资产列顺序收敛为固定顺序：`stock -> etf -> futures -> spot`（仅显示有数据列）。
+
+## 2026-02-23 Follow-up #14: Completeness V2（注册表驱动 + 双轨兼容）落地
+- 触发背景：
+  - 用户要求将“目标池数据完备性”从 `target-task` 硬编码模型升级为注册表驱动，并纳入 `P0/P1/P2` 资产范围；同时保持当前 targets 执行口径稳定（stock/etf 优先）。
+- 已落地改动：
+  - shared/preload/IPC：
+    - `packages/shared/src/ipc.ts` 新增 completeness v2 类型与 channels（并保留 legacy target-task API）。
+    - `apps/backend/src/preload/index.ts` 暴露 completeness v2 API。
+    - `apps/backend/src/main/ipc/registerIpcHandlers.ts` 新增 completeness handlers，legacy handlers 转调 completeness adapter。
+  - backend completeness 核心：
+    - 新增目录：`apps/backend/src/main/market/completeness/`
+      - `datasetRegistry.ts`
+      - `checkRegistry.ts`
+      - `entityResolver.ts`
+      - `statusEvaluator.ts`
+      - `completenessRepository.ts`
+      - `completenessService.ts`
+      - `legacyTargetModule.ts`
+    - 新增执行计划解析：`apps/backend/src/main/market/executionPlanResolver.ts`（`DataSourceConfig ∩ RolloutFlags`）。
+    - 新增 step 观测仓储：`apps/backend/src/main/market/ingestStepRunsRepository.ts`。
+  - schema + 迁移：
+    - `apps/backend/src/main/market/marketCache.ts` 新增：
+      - `completeness_status_v2`
+      - `completeness_runs_v2`
+      - `ingest_step_runs_v1`
+    - 增加幂等 backfill（`target_task_status -> completeness_status_v2`，`target_materialization_runs -> completeness_runs_v2`）与 marker：`market_meta.completeness_v2_backfill_v1`。
+  - 兼容层：
+    - `apps/backend/src/main/storage/marketSettingsRepository.ts`
+      - 新增 `completeness_config_v2`；
+      - legacy target-task matrix 配置读写转为 completeness 配置适配。
+    - `apps/backend/src/main/market/targetTaskRepository.ts`
+      - target-task 状态与物化 run 双写至 completeness v2 表。
+  - orchestrator/runner：
+    - `apps/backend/src/main/market/ingestOrchestrator.ts` 接入 execution plan resolver，并向 targets/universe 传递执行计划。
+    - `apps/backend/src/main/market/marketIngestRunner.ts` 新增 `extract/normalize/upsert/evaluate` step 记录，写入 `ingest_step_runs_v1`。
+  - Source Center 对齐：
+    - `apps/backend/src/main/market/dataSourceCatalog.ts` 将 `index.daily`、`fx.daily`、`macro.snapshot` 与执行模块对齐为可配置 sync-capable 模块。
+    - `apps/backend/src/main/market/completeness/completenessService.ts` 按 Source Center 配置过滤 source checks；source 无数据时统一为 `not_started`。
+  - frontend：
+    - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+      - 升级为 completeness 面板；
+      - 双区块展示（`target_pool` / `source_pool`）；
+      - target 可编辑、source 只读。
+  - 验证工具链：
+    - 新增 `apps/backend/src/main/verifyCompletenessV2.ts`
+    - `apps/backend/package.json` 新增 `verify:completeness-v2`
+    - `apps/backend/tsup.config.ts` 新增 `verify-completeness-v2` 构建入口
+    - `scripts/verify-pr1-integration-guardrails.mjs` 兼容 completeness adapter 路径（target materialization IPC 校验支持 `runCompletenessMaterialization`）。
+
+## 2026-02-24 Follow-up #15: 启动/切换/滚轮/退出卡顿闭环修复
+- 触发背景：
+  - 用户反馈启动、切页、滚轮（数据管理页最明显）与退出均存在明显卡顿，并伴随 `disk I/O error` 弹窗。
+- 已落地改动：
+  - Phase A（持久化止血）：
+    - `apps/backend/src/main/storage/sqlite.ts`
+      - `exec/run` 改为 `dirty + debounce flush(250ms)`，不再每次非事务写都全量落盘；
+      - 增加事务感知（事务内不 flush，`commit` 后单次 flush）；
+      - 引入原子落盘（`*.tmp` + `rename`）；
+      - `close` 前有脏写才 flush；
+      - 增加嵌套事务 savepoint 支持，避免 schema/回填路径事务嵌套冲突；
+      - 新增只读诊断统计导出：`getSqliteRuntimePerfStats()`。
+  - Phase B（schema 初始化降载）：
+    - `apps/backend/src/main/market/marketCache.ts`
+      - `ensureMarketCacheSchema` 改为单事务执行；
+      - 将 `instruments.asset_class in ('futures','spot') -> null` 改为一次性 marker 迁移（`market_meta.targets_asset_class_baseline_v1`），避免每次启动重写。
+    - `apps/backend/src/main/storage/businessSchema.ts`
+      - `ensureBusinessSchema` 改为单事务执行，减少启动期多次独立写盘。
+  - Phase C（启动任务/退出任务收敛）：
+    - `apps/backend/src/main/storage/marketSettingsRepository.ts`
+      - `DEFAULT_INGEST_SCHEDULER_CONFIG` 调整为 `runOnStartup=false`、`catchUpMissed=false`；
+      - 新增一次性收敛：`convergeMarketIngestSchedulerStartupDisabled`（写入 `app_meta.ingest_scheduler_startup_disabled_converged_v1`）。
+    - `apps/backend/src/main/market/autoIngest.ts`
+      - 去掉启动即 `runOnce("startup")`，仅保留 interval/trigger。
+    - `apps/backend/src/main/ipc/registerIpcHandlers.ts`
+      - 账号解锁时执行 startup-scheduler 收敛；
+      - 新增 `shutdownBackendRuntime()` 统一停机清理（orchestrator/auto/scheduler + DB close）；
+      - market-cache 启动健康检查增强：读写错误触发自动 rotate 备份并重建。
+    - `apps/backend/src/main/index.ts`
+      - 新增 `before-quit`：带 2s 超时的统一 shutdown，降低退出挂起概率。
+  - Phase D（数据管理页交互性能）：
+    - `apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx`
+      - 仅 `other/data-management` 关闭平滑滚动（`scroll-auto`），其余页面保持 `scroll-smooth`。
+    - `apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts`
+      - 数据管理页进入时移除批量自动重查询；
+      - 状态轮询由 `8s` 调整为 `15s`，并在 `document.hidden=true` 时暂停，恢复可见时再刷新。
+  - Phase E（缓存损坏自愈闭环）：
+    - `apps/backend/src/main/ipc/registerIpcHandlers.ts`
+      - 检测到 `disk I/O/malformed/not a database` 时自动备份 `market-cache.sqlite{,-shm,-wal}` 为 `.corrupt-<ts>.bak` 并重建；
+      - 首次自愈后弹出一次用户可见提示（说明备份与重拉口径）。
+  - 可选诊断 API（已落地）：
+    - `packages/shared/src/ipc.ts` / `apps/backend/src/preload/index.ts` / `apps/backend/src/main/ipc/registerIpcHandlers.ts`
+      - 新增 `market.getRuntimePerfStats()`（`MARKET_RUNTIME_PERF_STATS_GET`），用于回归定位 flush 与进程内存指标。

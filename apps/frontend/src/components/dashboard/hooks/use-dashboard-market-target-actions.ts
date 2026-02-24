@@ -273,18 +273,33 @@ export function useDashboardMarketTargetActions(
     options.toUserErrorMessage
   ]);
 
-  const handleResetTargetsDraft = useCallback(() => {
+  const handleResetTargetsDraft = useCallback(async () => {
     if (!options.marketTargetsSavedConfig) return;
-    options.setMarketTargetsConfig(options.marketTargetsSavedConfig);
+    const saved = options.marketTargetsSavedConfig;
+    options.setMarketTargetsConfig(saved);
     options.setMarketTargetsSymbolDraft("");
     options.setMarketManualSymbolPreview({ ...EMPTY_MANUAL_SYMBOL_PREVIEW });
     options.setNotice("已重置为最近一次已保存配置。");
+    if (!window.mytrader) return;
+    try {
+      const diff = await window.mytrader.market.previewTargetsDraft({
+        config: saved
+      });
+      options.setMarketTargetsDiffPreview(diff);
+      options.setMarketTargetsPreview(diff.draft);
+    } catch (err) {
+      options.setError(options.toUserErrorMessage(err));
+    }
   }, [
     options.marketTargetsSavedConfig,
+    options.setError,
     options.setMarketManualSymbolPreview,
     options.setMarketTargetsConfig,
+    options.setMarketTargetsDiffPreview,
+    options.setMarketTargetsPreview,
     options.setMarketTargetsSymbolDraft,
-    options.setNotice
+    options.setNotice,
+    options.toUserErrorMessage
   ]);
 
   const handleToggleTempTargetSelection = useCallback(

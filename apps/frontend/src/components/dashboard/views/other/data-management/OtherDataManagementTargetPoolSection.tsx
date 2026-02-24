@@ -23,6 +23,7 @@ export type OtherDataManagementTargetPoolSectionProps = Pick<
   | "marketTargetsLoading"
   | "marketTargetsPreview"
   | "marketTargetsSaving"
+  | "refreshMarketTargetPoolStats"
   | "refreshMarketTargets"
   | "refreshMarketTargetsDiff"
   | "targetsEditorGridRef"
@@ -58,6 +59,7 @@ export function OtherDataManagementTargetPoolSection(
     marketFilteredRemovedSymbols: props.marketFilteredRemovedSymbols,
     marketTargetPoolMetricCards: props.marketTargetPoolMetricCards,
     marketTargetPoolStatsScope: props.marketTargetPoolStatsScope,
+    refreshMarketTargetPoolStats: props.refreshMarketTargetPoolStats,
     marketTargetsDiffPreview: props.marketTargetsDiffPreview,
     marketTargetsPreview: props.marketTargetsPreview,
     refreshMarketTargetsDiff: props.refreshMarketTargetsDiff,

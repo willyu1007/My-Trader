@@ -22,6 +22,8 @@ import {
   toTushareDate
 } from "./providers/tushareBulkFetch";
 import { resolveAutoIngestItems } from "./targetsService";
+import type { MarketExecutionPlan } from "./executionPlanResolver";
+import { upsertIngestStepRun } from "./ingestStepRunsRepository";
 import {
   getLatestOpenTradeDate,
   listOpenTradeDatesBetween,
@@ -345,6 +347,7 @@ export async function runTargetsIngest(input: {
   meta?: Record<string, unknown> | null;
   now?: Date;
   control?: IngestExecutionControl;
+  executionPlan?: MarketExecutionPlan;
 }): Promise<void> {
   await ingestLock.runExclusive(async () => {
     const runId = await createIngestRun(input.marketDb, {
@@ -379,12 +382,14 @@ export async function runTargetsIngest(input: {
 
       const totals: IngestTotals = { inserted: 0, updated: 0, errors: 0 };
       await ingestTargetsRange(
+        runId,
         input.marketDb,
         token,
         items,
         asOfTradeDate,
         totals,
-        input.control
+        input.control,
+        input.executionPlan
       );
 
       await finishIngestRun(input.marketDb, {
@@ -447,6 +452,7 @@ export async function runUniverseIngest(input: {
   meta?: Record<string, unknown> | null;
   now?: Date;
   control?: IngestExecutionControl;
+  executionPlan?: MarketExecutionPlan;
 }): Promise<void> {
   await ingestLock.runExclusive(async () => {
     const runId = await createIngestRun(input.marketDb, {
@@ -468,10 +474,28 @@ export async function runUniverseIngest(input: {
 
       const now = input.now ?? new Date();
       const p1Enabled = input.p1Enabled ?? true;
+      const modulePlan = input.executionPlan?.allowedModules;
+      const stockDailyEnabled = modulePlan
+        ? modulePlan.has("stock.market.daily")
+        : true;
+      const etfDailyEnabled = modulePlan ? modulePlan.has("etf.daily_quote") : true;
+      const futuresDailyEnabled = modulePlan
+        ? modulePlan.has("futures.daily")
+        : p1Enabled;
+      const spotDailyEnabled = modulePlan ? modulePlan.has("spot.sge_daily") : p1Enabled;
+      const fxDailyEnabled = modulePlan ? modulePlan.has("fx.daily") : p1Enabled;
+      const macroEnabled = modulePlan ? modulePlan.has("macro.snapshot") : p1Enabled;
+      const indexDailyEnabledByPlan = modulePlan
+        ? modulePlan.has("index.daily")
+        : Boolean(input.universeIndexDailyEnabled ?? false);
+      const moneyflowEnabledByPlan = modulePlan
+        ? modulePlan.has("stock.moneyflow")
+        : Boolean(input.universeMoneyflowEnabled ?? false);
       const recoveryModules: UniverseRecoveryModules = {
-        indexDailyEnabled: Boolean(input.universeIndexDailyEnabled ?? false),
-        dailyBasicEnabled: Boolean(input.universeDailyBasicEnabled ?? false),
-        moneyflowEnabled: Boolean(input.universeMoneyflowEnabled ?? false)
+        indexDailyEnabled: indexDailyEnabledByPlan,
+        dailyBasicEnabled:
+          stockDailyEnabled && Boolean(input.universeDailyBasicEnabled ?? false),
+        moneyflowEnabled: moneyflowEnabledByPlan
       };
       const today = formatDate(now);
       await ensureTradingCalendar(input.marketDb, token, "CN", today);
@@ -500,9 +524,19 @@ export async function runUniverseIngest(input: {
         input.marketDb,
         handle,
         token,
-        p1Enabled,
+        fxDailyEnabled,
         input.control
       );
+
+      const effectiveFuturesSymbols = futuresDailyEnabled
+        ? futuresSymbols
+        : new Set<string>();
+      const effectiveStockSymbols = stockDailyEnabled
+        ? stockSymbols
+        : new Set<string>();
+      const effectiveEtfSymbols = etfDailyEnabled ? etfSymbols : new Set<string>();
+      const effectiveSpotSymbols = spotDailyEnabled ? spotSymbols : new Set<string>();
+      const effectiveForexSymbols = fxDailyEnabled ? forexSymbols : new Set<string>();
 
       const windowStart = formatDate(addDays(parseDate(asOfTradeDate) ?? now, -365 * 3));
       const startDate = await getUniverseCursorDate(input.marketDb, windowStart);
@@ -522,16 +556,18 @@ export async function runUniverseIngest(input: {
       for (const tradeDate of tradeDates) {
         await checkpointOrThrow(input.control);
         await ingestUniverseTradeDate(
+          runId,
           handle,
+          input.marketDb,
           token,
           tradeDate,
-          stockSymbols,
-          etfSymbols,
+          effectiveStockSymbols,
+          effectiveEtfSymbols,
           indexSymbols,
-          futuresSymbols,
-          spotSymbols,
-          forexSymbols,
-          p1Enabled,
+          effectiveFuturesSymbols,
+          effectiveSpotSymbols,
+          effectiveForexSymbols,
+          fxDailyEnabled,
           totals
         );
         lastDone = tradeDate;
@@ -547,19 +583,20 @@ export async function runUniverseIngest(input: {
         windowStart,
         mode: input.mode,
         recoveryModules,
-        stockSymbols,
+        stockSymbols: effectiveStockSymbols,
         indexSymbols,
         totals,
         control: input.control
       });
 
-      const macroSummary = p1Enabled
+      const macroSummary = macroEnabled
         ? await ingestMacroUniverseSnapshot(
             handle,
             input.marketDb,
             token,
             asOfTradeDate,
-            runId
+            runId,
+            macroEnabled
           )
         : {
             seriesCount: 0,
@@ -579,12 +616,12 @@ export async function runUniverseIngest(input: {
         status: totals.errors > 0 ? "partial" : "success",
         asOfTradeDate,
         symbolCount:
-          stockSymbols.size +
-          etfSymbols.size +
+          effectiveStockSymbols.size +
+          effectiveEtfSymbols.size +
           indexSymbols.size +
-          futuresSymbols.size +
-          spotSymbols.size +
-          forexSymbols.size,
+          effectiveFuturesSymbols.size +
+          effectiveSpotSymbols.size +
+          effectiveForexSymbols.size,
         inserted: totals.inserted,
         updated: totals.updated,
         errors: totals.errors,
@@ -599,12 +636,12 @@ export async function runUniverseIngest(input: {
           recoverySummary,
           macroSummary,
           universeCounts: {
-            stocks: stockSymbols.size,
-            etfs: etfSymbols.size,
+            stocks: effectiveStockSymbols.size,
+            etfs: effectiveEtfSymbols.size,
             indexes: indexSymbols.size,
-            futures: futuresSymbols.size,
-            spots: spotSymbols.size,
-            forexes: forexSymbols.size,
+            futures: effectiveFuturesSymbols.size,
+            spots: effectiveSpotSymbols.size,
+            forexes: effectiveForexSymbols.size,
             fxPairs: forexPairCount
           }
         }
@@ -635,16 +672,22 @@ export async function runUniverseIngest(input: {
 }
 
 async function ingestTargetsRange(
+  ingestRunId: string,
   marketDb: SqliteDatabase,
   token: string,
   items: TushareIngestItem[],
   endDate: string,
   totals: IngestTotals,
-  control?: IngestExecutionControl
+  control?: IngestExecutionControl,
+  executionPlan?: MarketExecutionPlan
 ): Promise<void> {
   if (items.length === 0) return;
   const provider = getMarketProvider("tushare");
   const end = endDate;
+  const targetModules = executionPlan?.targetModules;
+  const stockDailyEnabled = targetModules ? targetModules.has("stock.market.daily") : true;
+  const stockMoneyflowEnabled = targetModules ? targetModules.has("stock.moneyflow") : true;
+  const etfDailyEnabled = targetModules ? targetModules.has("etf.daily_quote") : true;
 
   await upsertInstruments(
     marketDb,
@@ -662,6 +705,21 @@ async function ingestTargetsRange(
   for (const item of items) {
     await checkpointOrThrow(control);
     const symbol = item.symbol;
+    const dailyModuleId =
+      item.assetClass === "stock" ? "stock.market.daily" : "etf.daily_quote";
+    const dailyEnabled =
+      item.assetClass === "stock" ? stockDailyEnabled : etfDailyEnabled;
+    if (!dailyEnabled) {
+      await recordPipelineSkipped({
+        marketDb,
+        ingestRunId,
+        scopeId: "targets",
+        domainId: item.assetClass,
+        moduleId: dailyModuleId,
+        symbol
+      });
+      continue;
+    }
     const latest = await getLatestPriceDate(marketDb, symbol);
     const startDate = latest ? nextDate(latest) : lookbackDate;
     if (startDate > end) continue;
@@ -673,8 +731,64 @@ async function ingestTargetsRange(
         startDate,
         endDate: end
       });
+      await recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "targets",
+        domainId: item.assetClass,
+        moduleId: dailyModuleId,
+        stage: "extract",
+        status: "success",
+        inputRows: 1,
+        outputRows: prices.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: symbol
+      });
+      await recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "targets",
+        domainId: item.assetClass,
+        moduleId: dailyModuleId,
+        stage: "normalize",
+        status: "success",
+        inputRows: prices.length,
+        outputRows: prices.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: symbol
+      });
       await upsertPrices(marketDb, prices);
+      await recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "targets",
+        domainId: item.assetClass,
+        moduleId: dailyModuleId,
+        stage: "upsert",
+        status: "success",
+        inputRows: prices.length,
+        outputRows: prices.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: symbol
+      });
       totals.inserted += prices.length;
+      await recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "targets",
+        domainId: item.assetClass,
+        moduleId: dailyModuleId,
+        stage: "evaluate",
+        status: "success",
+        inputRows: prices.length,
+        outputRows: prices.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: symbol
+      });
 
       if (item.assetClass === "stock") {
         const basics = await provider.fetchDailyBasics({
@@ -694,25 +808,106 @@ async function ingestTargetsRange(
           }))
         );
 
-        const moneyflows = await provider.fetchDailyMoneyflows({
-          token,
-          symbol,
-          startDate,
-          endDate: end
-        });
-        await upsertDailyMoneyflows(
-          marketDb,
-          moneyflows.map((row) => ({
-            symbol: row.symbol,
-            tradeDate: row.tradeDate,
-            netMfVol: row.netMfVol,
-            netMfAmount: row.netMfAmount,
-            source: "tushare"
-          }))
-        );
+        if (stockMoneyflowEnabled) {
+          const moneyflows = await provider.fetchDailyMoneyflows({
+            token,
+            symbol,
+            startDate,
+            endDate: end
+          });
+          await recordIngestStep({
+            marketDb,
+            ingestRunId,
+            scopeId: "targets",
+            domainId: "stock",
+            moduleId: "stock.moneyflow",
+            stage: "extract",
+            status: "success",
+            inputRows: 1,
+            outputRows: moneyflows.length,
+            droppedRows: 0,
+            errorMessage: null,
+            key: symbol
+          });
+          await recordIngestStep({
+            marketDb,
+            ingestRunId,
+            scopeId: "targets",
+            domainId: "stock",
+            moduleId: "stock.moneyflow",
+            stage: "normalize",
+            status: "success",
+            inputRows: moneyflows.length,
+            outputRows: moneyflows.length,
+            droppedRows: 0,
+            errorMessage: null,
+            key: symbol
+          });
+          await upsertDailyMoneyflows(
+            marketDb,
+            moneyflows.map((row) => ({
+              symbol: row.symbol,
+              tradeDate: row.tradeDate,
+              netMfVol: row.netMfVol,
+              netMfAmount: row.netMfAmount,
+              source: "tushare"
+            }))
+          );
+          await recordIngestStep({
+            marketDb,
+            ingestRunId,
+            scopeId: "targets",
+            domainId: "stock",
+            moduleId: "stock.moneyflow",
+            stage: "upsert",
+            status: "success",
+            inputRows: moneyflows.length,
+            outputRows: moneyflows.length,
+            droppedRows: 0,
+            errorMessage: null,
+            key: symbol
+          });
+          await recordIngestStep({
+            marketDb,
+            ingestRunId,
+            scopeId: "targets",
+            domainId: "stock",
+            moduleId: "stock.moneyflow",
+            stage: "evaluate",
+            status: "success",
+            inputRows: moneyflows.length,
+            outputRows: moneyflows.length,
+            droppedRows: 0,
+            errorMessage: null,
+            key: symbol
+          });
+        } else {
+          await recordPipelineSkipped({
+            marketDb,
+            ingestRunId,
+            scopeId: "targets",
+            domainId: "stock",
+            moduleId: "stock.moneyflow",
+            symbol
+          });
+        }
       }
     } catch (err) {
       totals.errors += 1;
+      await recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "targets",
+        domainId: item.assetClass,
+        moduleId: dailyModuleId,
+        stage: "extract",
+        status: "failed",
+        inputRows: 1,
+        outputRows: 0,
+        droppedRows: 0,
+        errorMessage: toErrorMessage(err),
+        key: symbol
+      });
       console.error(`[mytrader] targets ingest failed: ${symbol}`);
       console.error(err);
     }
@@ -783,7 +978,7 @@ async function syncUniverseInstrumentMeta(
   marketDb: SqliteDatabase,
   analysisHandle: Awaited<ReturnType<typeof openAnalysisDuckdb>>,
   token: string,
-  p1Enabled: boolean,
+  fxDailyEnabled: boolean,
   control?: IngestExecutionControl
 ): Promise<{
   stockSymbols: Set<string>;
@@ -798,7 +993,7 @@ async function syncUniverseInstrumentMeta(
 }> {
   const provider = getMarketProvider("tushare");
   const profiles = await provider.fetchInstrumentCatalog({ token });
-  const effectiveProfiles = p1Enabled
+  const effectiveProfiles = fxDailyEnabled
     ? profiles
     : profiles.filter((profile) => profile.kind !== "forex");
 
@@ -984,12 +1179,34 @@ async function ingestMacroUniverseSnapshot(
   marketDb: SqliteDatabase,
   token: string,
   asOfTradeDate: string,
-  runId: string
+  runId: string,
+  macroEnabled: boolean
 ): Promise<{
   seriesCount: number;
   observationCount: number;
   moduleSnapshotCount: number;
 }> {
+  if (!macroEnabled) {
+    await recordIngestStep({
+      marketDb,
+      ingestRunId: runId,
+      scopeId: "universe",
+      domainId: "macro",
+      moduleId: "macro.snapshot",
+      stage: "extract",
+      status: "skipped",
+      inputRows: 0,
+      outputRows: 0,
+      droppedRows: 0,
+      errorMessage: "macro module disabled by execution plan."
+    });
+    return {
+      seriesCount: 0,
+      observationCount: 0,
+      moduleSnapshotCount: 0
+    };
+  }
+
   const now = Date.now();
   const historyStart = formatDate(
     addDays(parseDate(asOfTradeDate) ?? new Date(), -365 * 6)
@@ -1011,10 +1228,36 @@ async function ingestMacroUniverseSnapshot(
     const rows = mapMacroObservationRows(response, spec, cnOpenTradeDates, now);
     allObservations.push(...rows);
   }
+  await recordIngestStep({
+    marketDb,
+    ingestRunId: runId,
+    scopeId: "universe",
+    domainId: "macro",
+    moduleId: "macro.snapshot",
+    stage: "extract",
+    status: "success",
+    inputRows: allObservations.length,
+    outputRows: allObservations.length,
+    droppedRows: 0,
+    errorMessage: null
+  });
 
   const observationRows = attachRevisionNumbers(allObservations);
   const latestBySeries = pickLatestMacroSeries(observationRows, asOfTradeDate, now);
   const moduleSnapshots = buildMacroModuleSnapshots(latestBySeries, asOfTradeDate, runId, now);
+  await recordIngestStep({
+    marketDb,
+    ingestRunId: runId,
+    scopeId: "universe",
+    domainId: "macro",
+    moduleId: "macro.snapshot",
+    stage: "normalize",
+    status: "success",
+    inputRows: allObservations.length,
+    outputRows: observationRows.length,
+    droppedRows: Math.max(0, allObservations.length - observationRows.length),
+    errorMessage: null
+  });
 
   const conn = await analysisHandle.connect();
   try {
@@ -1117,6 +1360,32 @@ async function ingestMacroUniverseSnapshot(
   upsertSqliteMacroSeriesMeta(marketDb, now);
   upsertSqliteMacroLatest(marketDb, latestBySeries);
   upsertSqliteMacroModuleSnapshot(marketDb, moduleSnapshots);
+  await recordIngestStep({
+    marketDb,
+    ingestRunId: runId,
+    scopeId: "universe",
+    domainId: "macro",
+    moduleId: "macro.snapshot",
+    stage: "upsert",
+    status: "success",
+    inputRows: observationRows.length,
+    outputRows: observationRows.length + moduleSnapshots.length,
+    droppedRows: 0,
+    errorMessage: null
+  });
+  await recordIngestStep({
+    marketDb,
+    ingestRunId: runId,
+    scopeId: "universe",
+    domainId: "macro",
+    moduleId: "macro.snapshot",
+    stage: "evaluate",
+    status: "success",
+    inputRows: moduleSnapshots.length,
+    outputRows: moduleSnapshots.length,
+    droppedRows: 0,
+    errorMessage: null
+  });
 
   return {
     seriesCount: MACRO_SERIES_SPECS.length,
@@ -2300,7 +2569,9 @@ function resolveMoneyflowSymbolBatchSize(mode: IngestRunMode): number {
 }
 
 async function ingestUniverseTradeDate(
+  ingestRunId: string,
   analysisHandle: Awaited<ReturnType<typeof openAnalysisDuckdb>>,
+  marketDb: SqliteDatabase,
   token: string,
   tradeDate: string,
   stockSymbols: Set<string>,
@@ -2309,7 +2580,7 @@ async function ingestUniverseTradeDate(
   futuresSymbols: Set<string>,
   spotSymbols: Set<string>,
   forexSymbols: Set<string>,
-  p1Enabled: boolean,
+  fxDailyEnabled: boolean,
   totals: IngestTotals
 ): Promise<void> {
   const tradeDateRaw = toTushareDate(tradeDate);
@@ -2322,18 +2593,22 @@ async function ingestUniverseTradeDate(
     spotDaily,
     forexDaily
   ] = await Promise.all([
-    fetchTusharePaged(
-      "daily",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,open,high,low,close,vol"
-    ),
-    fetchTusharePaged(
-      "fund_daily",
-      token,
-      { trade_date: tradeDateRaw },
-      "ts_code,trade_date,open,high,low,close,vol"
-    ),
+    stockSymbols.size > 0
+      ? fetchTusharePaged(
+          "daily",
+          token,
+          { trade_date: tradeDateRaw },
+          "ts_code,trade_date,open,high,low,close,vol"
+        )
+      : { fields: [], items: [] },
+    etfSymbols.size > 0
+      ? fetchTusharePaged(
+          "fund_daily",
+          token,
+          { trade_date: tradeDateRaw },
+          "ts_code,trade_date,open,high,low,close,vol"
+        )
+      : { fields: [], items: [] },
     Promise.resolve({ fields: [], items: [] }),
     futuresSymbols.size > 0
       ? fetchTusharePagedWithFallback(
@@ -2351,7 +2626,7 @@ async function ingestUniverseTradeDate(
           "ts_code,trade_date,open,high,low,close,vol"
         )
       : { fields: [], items: [] },
-    p1Enabled && forexSymbols.size > 0
+    fxDailyEnabled && forexSymbols.size > 0
       ? fetchTusharePagedWithFallback(
           "fx_daily",
           token,
@@ -2378,6 +2653,179 @@ async function ingestUniverseTradeDate(
   const forexRows = mapDailyPriceRows(forexDaily, forexSymbols, "tushare", now);
   const basicRows = mapDailyBasicRows(basics, stockSymbols, "tushare", now);
   const moneyRows = mapDailyMoneyflowRows(moneyflow, stockSymbols, "tushare", now);
+
+  await Promise.all([
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "stock",
+      moduleId: "stock.market.daily",
+      stage: "extract",
+      status: "success",
+      inputRows: daily.items.length,
+      outputRows: dailyRows.length,
+      droppedRows: Math.max(0, daily.items.length - dailyRows.length),
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "etf",
+      moduleId: "etf.daily_quote",
+      stage: "extract",
+      status: "success",
+      inputRows: fundDaily.items.length,
+      outputRows: fundRows.length,
+      droppedRows: Math.max(0, fundDaily.items.length - fundRows.length),
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "futures",
+      moduleId: "futures.daily",
+      stage: "extract",
+      status: "success",
+      inputRows: futuresDaily.items.length,
+      outputRows: futuresRows.length,
+      droppedRows: Math.max(0, futuresDaily.items.length - futuresRows.length),
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "spot",
+      moduleId: "spot.sge_daily",
+      stage: "extract",
+      status: "success",
+      inputRows: spotDaily.items.length,
+      outputRows: spotRows.length,
+      droppedRows: Math.max(0, spotDaily.items.length - spotRows.length),
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "fx",
+      moduleId: "fx.daily",
+      stage: "extract",
+      status: "success",
+      inputRows: forexDaily.items.length,
+      outputRows: forexRows.length,
+      droppedRows: Math.max(0, forexDaily.items.length - forexRows.length),
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "stock",
+      moduleId: "stock.moneyflow",
+      stage: "extract",
+      status: "success",
+      inputRows: moneyflow.items.length,
+      outputRows: moneyRows.length,
+      droppedRows: Math.max(0, moneyflow.items.length - moneyRows.length),
+      errorMessage: null,
+      key: tradeDate
+    })
+  ]);
+  await Promise.all([
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "stock",
+      moduleId: "stock.market.daily",
+      stage: "normalize",
+      status: "success",
+      inputRows: dailyRows.length,
+      outputRows: dailyRows.length,
+      droppedRows: 0,
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "etf",
+      moduleId: "etf.daily_quote",
+      stage: "normalize",
+      status: "success",
+      inputRows: fundRows.length,
+      outputRows: fundRows.length,
+      droppedRows: 0,
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "futures",
+      moduleId: "futures.daily",
+      stage: "normalize",
+      status: "success",
+      inputRows: futuresRows.length,
+      outputRows: futuresRows.length,
+      droppedRows: 0,
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "spot",
+      moduleId: "spot.sge_daily",
+      stage: "normalize",
+      status: "success",
+      inputRows: spotRows.length,
+      outputRows: spotRows.length,
+      droppedRows: 0,
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "fx",
+      moduleId: "fx.daily",
+      stage: "normalize",
+      status: "success",
+      inputRows: forexRows.length,
+      outputRows: forexRows.length,
+      droppedRows: 0,
+      errorMessage: null,
+      key: tradeDate
+    }),
+    recordIngestStep({
+      marketDb,
+      ingestRunId,
+      scopeId: "universe",
+      domainId: "stock",
+      moduleId: "stock.moneyflow",
+      stage: "normalize",
+      status: "success",
+      inputRows: moneyRows.length,
+      outputRows: moneyRows.length,
+      droppedRows: 0,
+      errorMessage: null,
+      key: tradeDate
+    })
+  ]);
 
   const conn = await analysisHandle.connect();
   try {
@@ -2418,6 +2866,179 @@ async function ingestUniverseTradeDate(
     ], moneyRows);
     await conn.query("commit;");
 
+    await Promise.all([
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "stock",
+        moduleId: "stock.market.daily",
+        stage: "upsert",
+        status: "success",
+        inputRows: dailyRows.length,
+        outputRows: dailyRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "etf",
+        moduleId: "etf.daily_quote",
+        stage: "upsert",
+        status: "success",
+        inputRows: fundRows.length,
+        outputRows: fundRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "futures",
+        moduleId: "futures.daily",
+        stage: "upsert",
+        status: "success",
+        inputRows: futuresRows.length,
+        outputRows: futuresRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "spot",
+        moduleId: "spot.sge_daily",
+        stage: "upsert",
+        status: "success",
+        inputRows: spotRows.length,
+        outputRows: spotRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "fx",
+        moduleId: "fx.daily",
+        stage: "upsert",
+        status: "success",
+        inputRows: forexRows.length,
+        outputRows: forexRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "stock",
+        moduleId: "stock.moneyflow",
+        stage: "upsert",
+        status: "success",
+        inputRows: moneyRows.length,
+        outputRows: moneyRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      })
+    ]);
+    await Promise.all([
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "stock",
+        moduleId: "stock.market.daily",
+        stage: "evaluate",
+        status: "success",
+        inputRows: dailyRows.length,
+        outputRows: dailyRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "etf",
+        moduleId: "etf.daily_quote",
+        stage: "evaluate",
+        status: "success",
+        inputRows: fundRows.length,
+        outputRows: fundRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "futures",
+        moduleId: "futures.daily",
+        stage: "evaluate",
+        status: "success",
+        inputRows: futuresRows.length,
+        outputRows: futuresRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "spot",
+        moduleId: "spot.sge_daily",
+        stage: "evaluate",
+        status: "success",
+        inputRows: spotRows.length,
+        outputRows: spotRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "fx",
+        moduleId: "fx.daily",
+        stage: "evaluate",
+        status: "success",
+        inputRows: forexRows.length,
+        outputRows: forexRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "stock",
+        moduleId: "stock.moneyflow",
+        stage: "evaluate",
+        status: "success",
+        inputRows: moneyRows.length,
+        outputRows: moneyRows.length,
+        droppedRows: 0,
+        errorMessage: null,
+        key: tradeDate
+      })
+    ]);
+
     totals.inserted +=
       dailyRows.length +
       fundRows.length +
@@ -2429,6 +3050,36 @@ async function ingestUniverseTradeDate(
       moneyRows.length;
   } catch (err) {
     totals.errors += 1;
+    await Promise.all([
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "stock",
+        moduleId: "stock.market.daily",
+        stage: "upsert",
+        status: "failed",
+        inputRows: dailyRows.length,
+        outputRows: 0,
+        droppedRows: 0,
+        errorMessage: toErrorMessage(err),
+        key: tradeDate
+      }),
+      recordIngestStep({
+        marketDb,
+        ingestRunId,
+        scopeId: "universe",
+        domainId: "etf",
+        moduleId: "etf.daily_quote",
+        stage: "upsert",
+        status: "failed",
+        inputRows: fundRows.length,
+        outputRows: 0,
+        droppedRows: 0,
+        errorMessage: toErrorMessage(err),
+        key: tradeDate
+      })
+    ]);
     try {
       await conn.query("rollback;");
     } catch {
@@ -2654,6 +3305,74 @@ async function setUniverseModuleCursor(
     `,
     [key, value]
   );
+}
+
+async function recordPipelineSkipped(input: {
+  marketDb: SqliteDatabase;
+  ingestRunId: string;
+  scopeId: "targets" | "universe";
+  domainId: string | null;
+  moduleId: string;
+  symbol: string;
+}): Promise<void> {
+  const stages = ["extract", "normalize", "upsert", "evaluate"] as const;
+  for (const stage of stages) {
+    await recordIngestStep({
+      marketDb: input.marketDb,
+      ingestRunId: input.ingestRunId,
+      scopeId: input.scopeId,
+      domainId: input.domainId,
+      moduleId: input.moduleId,
+      stage,
+      status: "skipped",
+      inputRows: 0,
+      outputRows: 0,
+      droppedRows: 0,
+      errorMessage: "module skipped by execution plan.",
+      key: input.symbol
+    });
+  }
+}
+
+async function recordIngestStep(input: {
+  marketDb: SqliteDatabase;
+  ingestRunId: string;
+  scopeId: "targets" | "universe";
+  domainId: string | null;
+  moduleId: string;
+  stage: "extract" | "normalize" | "upsert" | "evaluate";
+  status: "running" | "success" | "failed" | "skipped";
+  inputRows: number;
+  outputRows: number;
+  droppedRows: number;
+  errorMessage: string | null;
+  key?: string | null;
+}): Promise<void> {
+  const now = Date.now();
+  const key = input.key?.trim() ?? "";
+  const stepId = key
+    ? `${input.moduleId}:${key}:${input.stage}`
+    : `${input.moduleId}:${input.stage}`;
+  try {
+    await upsertIngestStepRun(input.marketDb, {
+      ingestRunId: input.ingestRunId,
+      stepId,
+      scopeId: input.scopeId,
+      domainId: input.domainId,
+      moduleId: input.moduleId,
+      stage: input.stage,
+      status: input.status,
+      inputRows: input.inputRows,
+      outputRows: input.outputRows,
+      droppedRows: input.droppedRows,
+      errorMessage: input.errorMessage,
+      startedAt: now,
+      finishedAt: now
+    });
+  } catch (error) {
+    console.warn("[mytrader] failed to record ingest step");
+    console.warn(error);
+  }
 }
 
 async function getLatestPriceDate(

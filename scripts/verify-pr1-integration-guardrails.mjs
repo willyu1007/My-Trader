@@ -198,7 +198,7 @@ assertContains(
 );
 assertContains(
   "apps/backend/src/main/ipc/registerIpcHandlers.ts",
-  "materializeTargetsFromSsot",
+  /materializeTargetsFromSsot|runCompletenessMaterialization/,
   "target materialization ipc integration"
 );
 assertContains(

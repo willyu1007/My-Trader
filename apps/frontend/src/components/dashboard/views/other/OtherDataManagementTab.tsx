@@ -81,6 +81,7 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
     marketTargetsLoading: props.marketTargetsLoading,
     marketTargetsPreview: props.marketTargetsPreview,
     marketTargetsSaving: props.marketTargetsSaving,
+    refreshMarketTargetPoolStats: props.refreshMarketTargetPoolStats,
     refreshMarketTargets: props.refreshMarketTargets,
     refreshMarketTargetsDiff: props.refreshMarketTargetsDiff,
     targetsEditorGridRef: props.targetsEditorGridRef,

@@ -4,7 +4,15 @@ import path from "node:path";
 import type { AccountSummary } from "@mytrader/shared";
 
 import { hashPassword, verifyPassword } from "./password";
-import { all, close, exec, get, openSqliteDatabase, run } from "./sqlite";
+import {
+  all,
+  close,
+  exec,
+  execVolatile,
+  get,
+  openSqliteDatabase,
+  run
+} from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 
 interface CreateAccountArgs {
@@ -36,7 +44,8 @@ export class AccountIndexDb {
 
   static async open(dbPath: string): Promise<AccountIndexDb> {
     const db = await openSqliteDatabase(dbPath);
-    await exec(db, `pragma journal_mode = wal;`);
+    await execVolatile(db, `pragma journal_mode = delete;`);
+    await execVolatile(db, `pragma temp_store = memory;`);
     await exec(
       db,
       `

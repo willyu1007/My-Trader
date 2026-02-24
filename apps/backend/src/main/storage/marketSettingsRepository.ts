@@ -1,7 +1,9 @@
 import type {
+  MarketCompletenessConfig,
   MarketRolloutFlags,
   MarketIngestSchedulerConfig,
   MarketTargetTaskMatrixConfig,
+  SetMarketCompletenessConfigInput,
   SetMarketRolloutFlagsInput,
   MarketTargetsConfig,
   MarketUniversePoolBucketStatus,
@@ -11,13 +13,22 @@ import type {
   UniversePoolBucketId
 } from "@mytrader/shared";
 
+import {
+  getDefaultTargetEnabledCheckIds,
+  getTargetModuleFromCompletenessCheckId,
+  listCompletenessChecks
+} from "../market/completeness/checkRegistry";
+
 import { get, run } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 
 const TARGETS_KEY = "targets_config_v1";
 const TEMP_TARGETS_KEY = "targets_temp_symbols_v1";
 const TARGET_TASK_MATRIX_KEY = "target_task_matrix_config_v1";
+const COMPLETENESS_CONFIG_KEY = "completeness_config_v2";
 const INGEST_SCHEDULER_KEY = "ingest_scheduler_config_v1";
+const INGEST_SCHEDULER_STARTUP_CONVERGENCE_KEY =
+  "ingest_scheduler_startup_disabled_converged_v1";
 const INGEST_CONTROL_STATE_KEY = "ingest_control_state_v1";
 const UNIVERSE_POOL_STATE_KEY = "universe_pool_state_v1";
 const ROLLOUT_FLAGS_KEY = "rollout_flags_v1";
@@ -48,8 +59,8 @@ const DEFAULT_INGEST_SCHEDULER_CONFIG: MarketIngestSchedulerConfig = {
   runAt: "19:30",
   timezone: "Asia/Shanghai",
   scope: "both",
-  runOnStartup: true,
-  catchUpMissed: true
+  runOnStartup: false,
+  catchUpMissed: false
 };
 
 const UNIVERSE_POOL_BUCKETS: UniversePoolBucketId[] = [
@@ -81,6 +92,34 @@ const DEFAULT_TARGET_TASK_MATRIX_CONFIG: MarketTargetTaskMatrixConfig = {
   version: 1,
   defaultLookbackDays: 180,
   enabledModules: [...TARGET_TASK_MODULES]
+};
+
+const COMPLETENESS_CHECKS = listCompletenessChecks();
+
+const TARGET_EDITABLE_CHECK_IDS = new Set(
+  COMPLETENESS_CHECKS
+    .filter((check) => check.scopeId === "target_pool" && check.editable)
+    .map((check) => check.id)
+);
+
+const DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE: Omit<
+  MarketCompletenessConfig,
+  "updatedAt"
+> = {
+  version: 1,
+  defaultLookbackDays: 180,
+  targetEnabledCheckIds: getDefaultTargetEnabledCheckIds(),
+  checks: COMPLETENESS_CHECKS.map((check) => ({
+    id: check.id,
+    scopeId: check.scopeId,
+    bucketId: check.bucketId,
+    label: check.label,
+    domainId: check.domainId,
+    moduleId: check.moduleId,
+    editable: check.editable,
+    sortOrder: check.sortOrder,
+    legacyTargetModuleId: check.legacyTargetModuleId
+  }))
 };
 
 const DEFAULT_UNIVERSE_POOL_STATE: PersistedUniversePoolState = buildDefaultUniversePoolState();
@@ -318,31 +357,91 @@ export async function setMarketIngestSchedulerConfig(
   return normalized;
 }
 
-export async function getMarketTargetTaskMatrixConfig(
+export async function convergeMarketIngestSchedulerStartupDisabled(
   db: SqliteDatabase
-): Promise<MarketTargetTaskMatrixConfig> {
+): Promise<MarketIngestSchedulerConfig> {
+  const marker = await get<{ value: string }>(
+    db,
+    `select value from app_meta where key = ?`,
+    [INGEST_SCHEDULER_STARTUP_CONVERGENCE_KEY]
+  );
+  if (marker?.value === "1") {
+    return await getMarketIngestSchedulerConfig(db);
+  }
+
+  const current = await getMarketIngestSchedulerConfig(db);
+  const next = await setMarketIngestSchedulerConfig(db, {
+    ...current,
+    runOnStartup: false,
+    catchUpMissed: false
+  });
+
+  await run(
+    db,
+    `insert or replace into app_meta (key, value) values (?, ?)`,
+    [INGEST_SCHEDULER_STARTUP_CONVERGENCE_KEY, "1"]
+  );
+
+  return next;
+}
+
+export async function getMarketCompletenessConfig(
+  db: SqliteDatabase
+): Promise<MarketCompletenessConfig> {
   const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [COMPLETENESS_CONFIG_KEY]
+  );
+  if (row?.value_json) {
+    const parsed = safeParseMarketCompletenessConfig(row.value_json);
+    if (parsed) return parsed;
+  }
+
+  const legacyRow = await get<{ value_json: string }>(
     db,
     `select value_json from market_settings where key = ?`,
     [TARGET_TASK_MATRIX_KEY]
   );
-  if (!row?.value_json) {
-    await setMarketTargetTaskMatrixConfig(db, DEFAULT_TARGET_TASK_MATRIX_CONFIG);
-    return { ...DEFAULT_TARGET_TASK_MATRIX_CONFIG };
-  }
-  const parsed = safeParseTargetTaskMatrixConfig(row.value_json);
-  if (!parsed) {
-    await setMarketTargetTaskMatrixConfig(db, DEFAULT_TARGET_TASK_MATRIX_CONFIG);
-    return { ...DEFAULT_TARGET_TASK_MATRIX_CONFIG };
-  }
-  return parsed;
+  const legacy = legacyRow?.value_json
+    ? safeParseTargetTaskMatrixConfig(legacyRow.value_json)
+    : null;
+
+  const migrated = normalizeMarketCompletenessConfig({
+    version: 1,
+    defaultLookbackDays:
+      legacy?.defaultLookbackDays ??
+      DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.defaultLookbackDays,
+    targetEnabledCheckIds: (
+      legacy?.enabledModules ?? DEFAULT_TARGET_TASK_MATRIX_CONFIG.enabledModules
+    )
+      .map((moduleId) => resolveCompletenessCheckIdByTargetModule(moduleId))
+      .filter((checkId): checkId is string => Boolean(checkId)),
+    checks: DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.checks,
+    updatedAt: Date.now()
+  });
+  await writeMarketCompletenessConfig(db, migrated);
+  return migrated;
 }
 
-export async function setMarketTargetTaskMatrixConfig(
+export async function setMarketCompletenessConfig(
   db: SqliteDatabase,
-  input: MarketTargetTaskMatrixConfig
-): Promise<MarketTargetTaskMatrixConfig> {
-  const normalized = normalizeTargetTaskMatrixConfig(input);
+  input: SetMarketCompletenessConfigInput
+): Promise<MarketCompletenessConfig> {
+  const current = await getMarketCompletenessConfig(db);
+  const next = normalizeMarketCompletenessConfig({
+    ...current,
+    defaultLookbackDays:
+      typeof input.defaultLookbackDays === "number"
+        ? input.defaultLookbackDays
+        : current.defaultLookbackDays,
+    targetEnabledCheckIds:
+      input.targetEnabledCheckIds ?? current.targetEnabledCheckIds,
+    updatedAt: Date.now()
+  });
+  await writeMarketCompletenessConfig(db, next);
+
+  const legacy = toLegacyTargetTaskMatrixConfig(next);
   await run(
     db,
     `
@@ -351,9 +450,31 @@ export async function setMarketTargetTaskMatrixConfig(
       on conflict(key) do update set
         value_json = excluded.value_json
     `,
-    [TARGET_TASK_MATRIX_KEY, JSON.stringify(normalized)]
+    [TARGET_TASK_MATRIX_KEY, JSON.stringify(legacy)]
   );
-  return normalized;
+
+  return next;
+}
+
+export async function getMarketTargetTaskMatrixConfig(
+  db: SqliteDatabase
+): Promise<MarketTargetTaskMatrixConfig> {
+  const completeness = await getMarketCompletenessConfig(db);
+  return toLegacyTargetTaskMatrixConfig(completeness);
+}
+
+export async function setMarketTargetTaskMatrixConfig(
+  db: SqliteDatabase,
+  input: MarketTargetTaskMatrixConfig
+): Promise<MarketTargetTaskMatrixConfig> {
+  const normalized = normalizeTargetTaskMatrixConfig(input);
+  await setMarketCompletenessConfig(db, {
+    defaultLookbackDays: normalized.defaultLookbackDays,
+    targetEnabledCheckIds: normalized.enabledModules
+      .map((moduleId) => resolveCompletenessCheckIdByTargetModule(moduleId))
+      .filter((checkId): checkId is string => Boolean(checkId))
+  });
+  return await getMarketTargetTaskMatrixConfig(db);
 }
 
 export async function getMarketUniversePoolOverview(
@@ -684,6 +805,111 @@ function safeParseTargetTaskMatrixConfig(
   } catch {
     return null;
   }
+}
+
+function safeParseMarketCompletenessConfig(
+  value: string
+): MarketCompletenessConfig | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return normalizeMarketCompletenessConfig(parsed as Partial<MarketCompletenessConfig>);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMarketCompletenessConfig(
+  input: Partial<MarketCompletenessConfig>
+): MarketCompletenessConfig {
+  const defaultLookbackDaysRaw = Number(input.defaultLookbackDays);
+  const defaultLookbackDays =
+    Number.isFinite(defaultLookbackDaysRaw) &&
+    defaultLookbackDaysRaw >= 1 &&
+    defaultLookbackDaysRaw <= 3650
+      ? Math.floor(defaultLookbackDaysRaw)
+      : DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.defaultLookbackDays;
+
+  const editableSet = new Set<string>();
+  if (Array.isArray(input.targetEnabledCheckIds)) {
+    input.targetEnabledCheckIds.forEach((checkId) => {
+      const key = String(checkId).trim();
+      if (!key) return;
+      if (!TARGET_EDITABLE_CHECK_IDS.has(key)) return;
+      editableSet.add(key);
+    });
+  }
+
+  const targetEnabledCheckIds =
+    editableSet.size > 0
+      ? DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.targetEnabledCheckIds.filter((id) =>
+          editableSet.has(id)
+        )
+      : [...DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.targetEnabledCheckIds];
+
+  const updatedAtRaw = Number(input.updatedAt);
+  return {
+    version: 1,
+    defaultLookbackDays,
+    targetEnabledCheckIds,
+    checks: DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.checks.map((check) => ({
+      ...check
+    })),
+    updatedAt:
+      Number.isFinite(updatedAtRaw) && updatedAtRaw > 0
+        ? Math.floor(updatedAtRaw)
+        : Date.now()
+  };
+}
+
+async function writeMarketCompletenessConfig(
+  db: SqliteDatabase,
+  config: MarketCompletenessConfig
+): Promise<void> {
+  const normalized = normalizeMarketCompletenessConfig(config);
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [COMPLETENESS_CONFIG_KEY, JSON.stringify(normalized)]
+  );
+}
+
+function toLegacyTargetTaskMatrixConfig(
+  config: MarketCompletenessConfig
+): MarketTargetTaskMatrixConfig {
+  const enabledModules = resolveTargetModulesFromCheckIds(config.targetEnabledCheckIds);
+  return normalizeTargetTaskMatrixConfig({
+    version: 1,
+    defaultLookbackDays: config.defaultLookbackDays,
+    enabledModules
+  });
+}
+
+function resolveTargetModulesFromCheckIds(checkIds: string[]): TargetTaskModuleId[] {
+  const moduleSet = new Set<TargetTaskModuleId>();
+  checkIds.forEach((checkId) => {
+    const moduleId = getTargetModuleFromCompletenessCheckId(checkId);
+    if (!moduleId) return;
+    moduleSet.add(moduleId);
+  });
+  if (moduleSet.size === 0) {
+    return [...DEFAULT_TARGET_TASK_MATRIX_CONFIG.enabledModules];
+  }
+  return TARGET_TASK_MODULES.filter((moduleId) => moduleSet.has(moduleId));
+}
+
+function resolveCompletenessCheckIdByTargetModule(
+  moduleId: TargetTaskModuleId
+): string | null {
+  const match = DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE.checks.find(
+    (check) => check.legacyTargetModuleId === moduleId
+  );
+  return match?.id ?? null;
 }
 
 function normalizeTargetTaskMatrixConfig(

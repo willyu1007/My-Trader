@@ -1,67 +1,43 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
-  ListTargetTaskStatusResult,
-  MarketTargetTaskMatrixConfig,
-  PreviewTargetTaskCoverageResult,
-  TargetTaskModuleId,
-  TargetTaskStatus
+  CompletenessScopeId,
+  CompletenessStatus,
+  ListCompletenessStatusResult,
+  MarketCompletenessConfig,
+  PreviewCompletenessCoverageResult
 } from "@mytrader/shared";
 
 import type { OtherViewProps } from "../../OtherView";
 
-type ModuleFilter = "all" | TargetTaskModuleId;
-type StatusFilter = "all" | TargetTaskStatus;
+type ScopeFilter = "all" | CompletenessScopeId;
+type StatusFilter = "all" | CompletenessStatus;
+type CheckFilter = "all" | string;
 
-const TARGET_TASK_MODULES: Array<{ id: TargetTaskModuleId; label: string }> = [
-  { id: "core.daily_prices", label: "行情日线" },
-  { id: "core.instrument_meta", label: "标的元数据" },
-  { id: "core.daily_basics", label: "股票基础面" },
-  { id: "core.daily_moneyflows", label: "股票资金流" },
-  { id: "core.futures_settle", label: "期货结算价" },
-  { id: "core.futures_oi", label: "期货持仓量" },
-  { id: "core.spot_price_avg", label: "现货均价" },
-  { id: "core.spot_settle", label: "现货交割量" },
-  { id: "task.exposure", label: "任务: 敞口" },
-  { id: "task.momentum", label: "任务: 动量" },
-  { id: "task.liquidity", label: "任务: 流动性" }
+const STATUS_ORDER: CompletenessStatus[] = [
+  "complete",
+  "partial",
+  "missing",
+  "not_started",
+  "not_applicable"
 ];
+
+const COMPLETENESS_DEFINITION_TOOLTIP =
+  "完备性用于评估目标消费与数据源供给覆盖，不直接改变目标池抓取范围。";
 
 const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
   { value: "complete", label: "完整" },
   { value: "partial", label: "部分缺失" },
   { value: "missing", label: "缺失" },
+  { value: "not_started", label: "未启动" },
   { value: "not_applicable", label: "不适用" }
 ];
-const COMPLETENESS_DEFINITION_TOOLTIP =
-  "用于评估/回补目标池数据完整度，不改变抓取范围。";
 
-type HealthLevel = "healthy" | "watch" | "risk";
-
-type CoverageAssetView = {
-  assetClass: string;
-  assetLabel: string;
-  complete: number;
-  partial: number;
-  missing: number;
-  notApplicable: number;
-  applicable: number;
-  total: number;
-  repair: number;
-  completeRate: number;
-  partialRate: number;
-  missingRate: number;
-  notApplicableRate: number;
-  repairRate: number;
-};
-
-type CoverageMatrixRowKey =
-  | "complete"
-  | "partial"
-  | "missing"
-  | "notApplicable"
-  | "repair";
+export type OtherDataManagementTargetTaskPanelProps = Pick<
+  OtherViewProps,
+  "Button" | "Input" | "PopoverSelect" | "formatCnDate"
+>;
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || "未知错误。";
@@ -69,110 +45,102 @@ function toErrorMessage(error: unknown): string {
   return "未知错误。";
 }
 
-function getStatusToneClass(status: TargetTaskStatus): string {
-  if (status === "complete") return "border-emerald-300 text-emerald-700 dark:text-emerald-300";
-  if (status === "partial") return "border-amber-300 text-amber-700 dark:text-amber-300";
-  if (status === "missing") return "border-rose-300 text-rose-700 dark:text-rose-300";
-  return "border-slate-300 text-slate-600 dark:border-border-dark dark:text-slate-300";
+function formatScopeLabel(scopeId: CompletenessScopeId): string {
+  return scopeId === "target_pool" ? "目标消费完备性" : "数据源供给完备性";
 }
 
-function formatStatusLabel(status: TargetTaskStatus): string {
+function formatBucketLabel(bucketId: string): string {
+  if (bucketId === "stock") return "股票";
+  if (bucketId === "etf") return "ETF";
+  if (bucketId === "futures") return "期货";
+  if (bucketId === "spot") return "现货";
+  if (bucketId === "index") return "指数";
+  if (bucketId === "fx") return "外汇";
+  if (bucketId === "macro") return "宏观";
+  if (bucketId === "global") return "全局";
+  return bucketId;
+}
+
+function formatStatusLabel(status: CompletenessStatus): string {
   if (status === "complete") return "完整";
   if (status === "partial") return "部分缺失";
   if (status === "missing") return "缺失";
+  if (status === "not_started") return "未启动";
   return "不适用";
 }
 
-function toAssetLabel(assetClass: string): string {
-  if (assetClass === "stock") return "股票";
-  if (assetClass === "etf") return "ETF";
-  if (assetClass === "futures") return "期货";
-  if (assetClass === "spot") return "现货";
-  if (assetClass === "cash") return "现金";
-  if (assetClass === "unknown") return "未知";
-  return assetClass;
+function statusToneClass(status: CompletenessStatus): string {
+  if (status === "complete") return "border-emerald-300 text-emerald-700 dark:text-emerald-300";
+  if (status === "partial") return "border-amber-300 text-amber-700 dark:text-amber-300";
+  if (status === "missing") return "border-rose-300 text-rose-700 dark:text-rose-300";
+  if (status === "not_started") return "border-blue-300 text-blue-700 dark:text-blue-300";
+  return "border-slate-300 text-slate-600 dark:border-border-dark dark:text-slate-300";
 }
 
-function toRate(numerator: number, denominator: number): number {
-  if (denominator <= 0) return 0;
-  return numerator / denominator;
+function resolveStatusCountFromCoverage(
+  coverage: PreviewCompletenessCoverageResult | null,
+  status: CompletenessStatus
+): number {
+  if (!coverage) return 0;
+  if (status === "complete") return coverage.totals.complete;
+  if (status === "partial") return coverage.totals.partial;
+  if (status === "missing") return coverage.totals.missing;
+  if (status === "not_started") return coverage.totals.notStarted;
+  return coverage.totals.notApplicable;
 }
 
-function formatRate(rate: number): string {
-  return `${(rate * 100).toFixed(1)}%`;
+function resolveStatusCountFromBucket(
+  bucket: PreviewCompletenessCoverageResult["byBucket"][number] | null,
+  status: CompletenessStatus
+): number {
+  if (!bucket) return 0;
+  if (status === "complete") return bucket.complete;
+  if (status === "partial") return bucket.partial;
+  if (status === "missing") return bucket.missing;
+  if (status === "not_started") return bucket.notStarted;
+  return bucket.notApplicable;
 }
 
-function resolveCompletenessBand(rate: number): {
-  textClass: string;
-} {
-  if (rate < 0.2) {
-    return { textClass: "text-rose-600 dark:text-rose-400" };
-  }
-  if (rate < 0.4) {
-    return { textClass: "text-orange-600 dark:text-orange-400" };
-  }
-  if (rate < 0.6) {
-    return { textClass: "text-amber-600 dark:text-amber-400" };
-  }
-  if (rate < 0.8) {
-    return { textClass: "text-lime-600 dark:text-lime-400" };
-  }
-  return { textClass: "text-emerald-600 dark:text-emerald-400" };
+function resolveApplicableCountFromCoverage(
+  coverage: PreviewCompletenessCoverageResult | null
+): number {
+  if (!coverage) return 0;
+  return (
+    coverage.totals.complete +
+    coverage.totals.partial +
+    coverage.totals.missing +
+    coverage.totals.notStarted
+  );
 }
 
-function getDateLagDays(dateText: string | null): number | null {
-  if (!dateText) return null;
-  const target = new Date(`${dateText}T00:00:00`);
-  if (Number.isNaN(target.getTime())) return null;
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const diffMs = todayStart.getTime() - target.getTime();
-  return Math.max(0, Math.floor(diffMs / 86_400_000));
+function resolveApplicableCountFromBucket(
+  bucket: PreviewCompletenessCoverageResult["byBucket"][number] | null
+): number {
+  if (!bucket) return 0;
+  return bucket.complete + bucket.partial + bucket.missing + bucket.notStarted;
 }
 
-function resolveHealthLevel(input: {
-  missingRate: number;
-  partialRate: number;
-  lagDays: number | null;
-}): {
-  level: HealthLevel;
-  label: string;
-  textClass: string;
-  dotClass: string;
-  hint: string;
-} {
-  const lag = input.lagDays ?? 0;
-  if (input.missingRate >= 0.3 || lag >= 3) {
-    return {
-      level: "risk",
-      label: "高风险",
-      textClass: "text-rose-700 dark:text-rose-300",
-      dotClass: "bg-rose-500",
-      hint: "先执行物化，再展开状态明细定位缺失。"
-    };
-  }
-  if (input.missingRate >= 0.1 || input.partialRate >= 0.25 || lag >= 2) {
-    return {
-      level: "watch",
-      label: "需关注",
-      textClass: "text-amber-700 dark:text-amber-300",
-      dotClass: "bg-amber-500",
-      hint: "建议执行一次物化，并关注高缺失资产。"
-    };
-  }
-  return {
-    level: "healthy",
-    label: "健康",
-    textClass: "text-emerald-700 dark:text-emerald-300",
-    dotClass: "bg-emerald-500",
-    hint: "当前覆盖稳定，可按需抽查状态明细。"
-  };
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
-export type OtherDataManagementTargetTaskPanelProps = Pick<
-  OtherViewProps,
-  "Button" | "Input" | "PopoverSelect" | "formatCnDate"
->;
+function completeRateToneClass(rate: number | null): string {
+  if (rate === null) return "text-slate-500 dark:text-slate-400";
+  if (rate >= 0.8) return "text-emerald-700 dark:text-emerald-300";
+  if (rate >= 0.6) return "text-lime-700 dark:text-lime-300";
+  if (rate >= 0.4) return "text-amber-700 dark:text-amber-300";
+  if (rate >= 0.2) return "text-orange-700 dark:text-orange-300";
+  return "text-rose-700 dark:text-rose-300";
+}
+
+function resolveDelayDays(asOfTradeDate: string | null): number | null {
+  if (!asOfTradeDate) return null;
+  const asOfEpoch = Date.parse(`${asOfTradeDate}T00:00:00Z`);
+  if (!Number.isFinite(asOfEpoch)) return null;
+  const nowEpoch = Date.now();
+  const diffDays = Math.floor((nowEpoch - asOfEpoch) / (24 * 60 * 60 * 1000));
+  return Math.max(0, diffDays);
+}
 
 export function OtherDataManagementTargetTaskPanel(
   props: OtherDataManagementTargetTaskPanelProps
@@ -184,255 +152,224 @@ export function OtherDataManagementTargetTaskPanel(
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [matrixConfig, setMatrixConfig] =
-    useState<MarketTargetTaskMatrixConfig | null>(null);
-  const [savedMatrixConfig, setSavedMatrixConfig] =
-    useState<MarketTargetTaskMatrixConfig | null>(null);
-  const [coverage, setCoverage] = useState<PreviewTargetTaskCoverageResult | null>(null);
-  const [statusRows, setStatusRows] = useState<ListTargetTaskStatusResult | null>(null);
+  const [config, setConfig] = useState<MarketCompletenessConfig | null>(null);
+  const [savedConfig, setSavedConfig] = useState<MarketCompletenessConfig | null>(null);
+  const [targetCoverage, setTargetCoverage] =
+    useState<PreviewCompletenessCoverageResult | null>(null);
+  const [sourceCoverage, setSourceCoverage] =
+    useState<PreviewCompletenessCoverageResult | null>(null);
+  const [coverageLoaded, setCoverageLoaded] = useState(false);
+  const [statusRows, setStatusRows] = useState<ListCompletenessStatusResult | null>(null);
 
-  const [symbolFilter, setSymbolFilter] = useState("");
-  const [moduleFilter, setModuleFilter] = useState<ModuleFilter>("all");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
+  const [checkFilter, setCheckFilter] = useState<CheckFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [statusPanelExpanded, setStatusPanelExpanded] = useState(false);
 
-  const refreshConfigAndCoverage = useCallback(async () => {
+  const refreshConfig = useCallback(async () => {
+    if (!window.mytrader) return;
+    const nextConfig = await window.mytrader.market.getCompletenessConfig();
+    setConfig(nextConfig);
+    setSavedConfig(nextConfig);
+  }, []);
+
+  const refreshCoverage = useCallback(async () => {
+    if (!window.mytrader) return;
+    const [target, source] = await Promise.all([
+      window.mytrader.market.previewCompletenessCoverage({
+        scopeId: "target_pool"
+      }),
+      window.mytrader.market.previewCompletenessCoverage({
+        scopeId: "source_pool"
+      })
+    ]);
+    setTargetCoverage(target);
+    setSourceCoverage(source);
+    setCoverageLoaded(true);
+  }, []);
+
+  const refreshOverview = useCallback(async () => {
     if (!window.mytrader) return;
     setLoading(true);
     try {
-      const [nextConfig, nextCoverage] = await Promise.all([
-        window.mytrader.market.getTargetTaskMatrixConfig(),
-        window.mytrader.market.previewTargetTaskCoverage()
-      ]);
-      setMatrixConfig(nextConfig);
-      setSavedMatrixConfig(nextConfig);
-      setCoverage(nextCoverage);
+      await Promise.all([refreshConfig(), refreshCoverage()]);
       setError(null);
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshConfig, refreshCoverage]);
 
   const refreshStatusRows = useCallback(async () => {
     if (!window.mytrader) return;
     setStatusLoading(true);
     try {
-      const result = await window.mytrader.market.listTargetTaskStatus({
-        symbol: symbolFilter.trim() ? symbolFilter.trim() : null,
-        moduleId: moduleFilter === "all" ? null : moduleFilter,
+      const rows = await window.mytrader.market.listCompletenessStatus({
+        scopeId: scopeFilter === "all" ? null : scopeFilter,
+        checkId: checkFilter === "all" ? null : checkFilter,
         status: statusFilter === "all" ? null : statusFilter,
-        limit: 120,
+        limit: 200,
         offset: 0
       });
-      setStatusRows(result);
+      setStatusRows(rows);
+      setError(null);
     } catch (err) {
-      setError(toErrorMessage(err));
       setStatusRows(null);
+      setError(toErrorMessage(err));
     } finally {
       setStatusLoading(false);
     }
-  }, [moduleFilter, statusFilter, symbolFilter]);
+  }, [checkFilter, scopeFilter, statusFilter]);
 
   useEffect(() => {
-    void refreshConfigAndCoverage();
-  }, [refreshConfigAndCoverage]);
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      refreshConfig()
+        .then(() => {
+          setError(null);
+        })
+        .catch((err) => {
+          setError(toErrorMessage(err));
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [refreshConfig]);
 
   useEffect(() => {
     if (!statusPanelExpanded) return;
     void refreshStatusRows();
   }, [refreshStatusRows, statusPanelExpanded]);
 
-  const matrixDirty = useMemo(() => {
-    if (!matrixConfig || !savedMatrixConfig) return false;
-    return JSON.stringify(matrixConfig) !== JSON.stringify(savedMatrixConfig);
-  }, [matrixConfig, savedMatrixConfig]);
+  const targetChecks = useMemo(() => {
+    if (!config) return [];
+    return config.checks
+      .filter((check) => check.scopeId === "target_pool")
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [config]);
 
-  const moduleFilterOptions = useMemo(
-    () => [
-      { value: "all", label: "全部模块" },
-      ...TARGET_TASK_MODULES.map((module) => ({
-        value: module.id,
-        label: module.label
-      }))
-    ],
-    []
+  const sourceChecks = useMemo(() => {
+    if (!config) return [];
+    return config.checks
+      .filter((check) => check.scopeId === "source_pool")
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [config]);
+
+  const targetEnabledCheckIdSet = useMemo(
+    () => new Set(config?.targetEnabledCheckIds ?? []),
+    [config?.targetEnabledCheckIds]
   );
 
-  const coverageSummary = useMemo(() => {
-    if (!coverage) return null;
-    const complete = coverage.totals.complete ?? 0;
-    const partial = coverage.totals.partial ?? 0;
-    const missing = coverage.totals.missing ?? 0;
-    const notApplicable = coverage.totals.notApplicable ?? 0;
-    const applicable = complete + partial + missing;
-    const total = applicable + notApplicable;
-    const repair = partial + missing;
-    const completeRate = toRate(complete, applicable);
-    const partialRate = toRate(partial, applicable);
-    const missingRate = toRate(missing, applicable);
-    const notApplicableRate = toRate(notApplicable, total);
-    const repairRate = toRate(repair, applicable);
-    const lagDays = getDateLagDays(coverage.asOfTradeDate);
-    const health = resolveHealthLevel({ missingRate, partialRate, lagDays });
-
-    return {
-      complete,
-      partial,
-      missing,
-      notApplicable,
-      applicable,
-      total,
-      completeRate,
-      partialRate,
-      missingRate,
-      notApplicableRate,
-      repair,
-      repairRate,
-      lagDays,
-      health
-    };
-  }, [coverage]);
-
-  const assetCoverageViews = useMemo<CoverageAssetView[]>(() => {
-    if (!coverage) return [];
-    return coverage.byAssetClass
-      .map((item) => {
-        const complete = item.complete ?? 0;
-        const partial = item.partial ?? 0;
-        const missing = item.missing ?? 0;
-        const notApplicable = item.notApplicable ?? 0;
-        const applicable = complete + partial + missing;
-        const total = applicable + notApplicable;
-        const repair = partial + missing;
-        return {
-          assetClass: item.assetClass,
-          assetLabel: toAssetLabel(item.assetClass),
-          complete,
-          partial,
-          missing,
-          notApplicable,
-          applicable,
-          total,
-          repair,
-          completeRate: toRate(complete, applicable),
-          partialRate: toRate(partial, applicable),
-          missingRate: toRate(missing, applicable),
-          notApplicableRate: toRate(notApplicable, total),
-          repairRate: toRate(repair, applicable)
-        } satisfies CoverageAssetView;
-      })
-      .sort((a, b) => {
-        if (a.missingRate !== b.missingRate) return b.missingRate - a.missingRate;
-        return b.missing - a.missing;
-      });
-  }, [coverage]);
-
-  const topRiskAsset = useMemo(() => {
-    return assetCoverageViews.find((item) => item.applicable > 0) ?? null;
-  }, [assetCoverageViews]);
-
-  const displayAssetCoverageViews = useMemo(() => {
-    const order = new Map<string, number>([
-      ["stock", 0],
-      ["etf", 1],
-      ["futures", 2],
-      ["spot", 3]
-    ]);
-    return assetCoverageViews
-      .filter((item) => item.total > 0)
-      .sort((a, b) => {
-        const aOrder = order.get(a.assetClass) ?? Number.MAX_SAFE_INTEGER;
-        const bOrder = order.get(b.assetClass) ?? Number.MAX_SAFE_INTEGER;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return a.assetLabel.localeCompare(b.assetLabel, "zh-CN");
-      });
-  }, [assetCoverageViews]);
-
-  const coverageMatrixRows = useMemo(() => {
-    if (!coverageSummary) return [];
-
-    const buildRow = (
-      rowKey: CoverageMatrixRowKey,
-      label: string,
-      overallCount: number,
-      overallRate: number | null,
-      pick: (asset: CoverageAssetView) => { count: number; rate: number | null }
-    ) => ({
-      rowKey,
-      label,
-      overallCount,
-      overallRate,
-      assets: displayAssetCoverageViews.map((asset) => ({
-        assetClass: asset.assetClass,
-        ...pick(asset)
-      }))
-    });
-
+  const checkFilterOptions = useMemo(() => {
+    const allChecks = config?.checks ?? [];
     return [
-      buildRow("complete", "完整", coverageSummary.complete, coverageSummary.completeRate, (asset) => ({
-        count: asset.complete,
-        rate: asset.completeRate
-      })),
-      buildRow("partial", "部分缺失", coverageSummary.partial, coverageSummary.partialRate, (asset) => ({
-        count: asset.partial,
-        rate: asset.partialRate
-      })),
-      buildRow("missing", "缺失", coverageSummary.missing, coverageSummary.missingRate, (asset) => ({
-        count: asset.missing,
-        rate: asset.missingRate
-      })),
-      buildRow(
-        "notApplicable",
-        "不适用",
-        coverageSummary.notApplicable,
-        coverageSummary.notApplicableRate,
-        (asset) => ({
-          count: asset.notApplicable,
-          rate: asset.notApplicableRate
-        })
-      ),
-      buildRow("repair", "待回补", coverageSummary.repair, coverageSummary.repairRate, (asset) => ({
-        count: asset.repair,
-        rate: asset.repairRate
+      { value: "all", label: "全部检查项" },
+      ...allChecks.map((check) => ({
+        value: check.id,
+        label: `${formatScopeLabel(check.scopeId)} · ${check.label}`
       }))
     ];
-  }, [coverageSummary, displayAssetCoverageViews]);
+  }, [config?.checks]);
 
-  const handleToggleModule = useCallback((moduleId: TargetTaskModuleId) => {
-    setMatrixConfig((prev) => {
+  const matrixDirty = useMemo(() => {
+    if (!config || !savedConfig) return false;
+    return JSON.stringify(config.targetEnabledCheckIds) !== JSON.stringify(savedConfig.targetEnabledCheckIds);
+  }, [config, savedConfig]);
+
+  const topStatusSummary = useMemo(() => {
+    const totals = targetCoverage?.totals;
+    const missing = totals?.missing ?? 0;
+    const pending = (totals?.partial ?? 0) + (totals?.notStarted ?? 0);
+    const delayDays = resolveDelayDays(targetCoverage?.asOfTradeDate ?? null);
+    const asOfLabel = targetCoverage?.asOfTradeDate
+      ? props.formatCnDate(targetCoverage.asOfTradeDate)
+      : "--";
+
+    if (!coverageLoaded) {
+      return {
+        label: "待加载",
+        labelTone: "text-slate-600 dark:text-slate-300",
+        message: "点击“刷新”加载完备性状态",
+        asOfLabel,
+        delayLabel: "--",
+        scaleLabel: "--"
+      };
+    }
+
+    if (missing > 0) {
+      return {
+        label: "高风险",
+        labelTone: "text-rose-700 dark:text-rose-300",
+        message: `存在 ${missing.toLocaleString()} 项缺失`,
+        asOfLabel,
+        delayLabel: delayDays === null ? "--" : `${delayDays} 天`,
+        scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 / ${(totals?.checks ?? 0).toLocaleString()} 检查`
+      };
+    }
+
+    if (pending > 0) {
+      return {
+        label: "需关注",
+        labelTone: "text-amber-700 dark:text-amber-300",
+        message: `存在 ${pending.toLocaleString()} 项待收敛`,
+        asOfLabel,
+        delayLabel: delayDays === null ? "--" : `${delayDays} 天`,
+        scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 / ${(totals?.checks ?? 0).toLocaleString()} 检查`
+      };
+    }
+
+    return {
+      label: "健康",
+      labelTone: "text-emerald-700 dark:text-emerald-300",
+      message: "当前无缺失与待收敛项",
+      asOfLabel,
+      delayLabel: delayDays === null ? "--" : `${delayDays} 天`,
+      scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 / ${(totals?.checks ?? 0).toLocaleString()} 检查`
+    };
+  }, [coverageLoaded, props, targetCoverage]);
+
+  const handleToggleTargetCheck = useCallback((checkId: string) => {
+    setConfig((prev) => {
       if (!prev) return prev;
-      const enabled = new Set(prev.enabledModules);
-      if (enabled.has(moduleId)) {
+      const enabled = new Set(prev.targetEnabledCheckIds);
+      if (enabled.has(checkId)) {
         if (enabled.size <= 1) return prev;
-        enabled.delete(moduleId);
+        enabled.delete(checkId);
       } else {
-        enabled.add(moduleId);
+        enabled.add(checkId);
       }
       return {
         ...prev,
-        enabledModules: TARGET_TASK_MODULES.map((item) => item.id).filter((id) =>
-          enabled.has(id)
-        )
+        targetEnabledCheckIds: targetChecks
+          .map((check) => check.id)
+          .filter((id) => enabled.has(id))
       };
     });
-  }, []);
+  }, [targetChecks]);
 
-  const handleSaveMatrix = useCallback(async () => {
-    if (!window.mytrader || !matrixConfig) return;
+  const handleSaveConfig = useCallback(async () => {
+    if (!window.mytrader || !config) return;
     setSaving(true);
-    setError(null);
     setNotice(null);
+    setError(null);
     try {
-      if (matrixConfig.enabledModules.length === 0) {
-        throw new Error("至少启用一个模块。");
+      if (config.targetEnabledCheckIds.length === 0) {
+        throw new Error("Target checks 至少启用一个。");
       }
-      const saved = await window.mytrader.market.setTargetTaskMatrixConfig(matrixConfig);
-      setMatrixConfig(saved);
-      setSavedMatrixConfig(saved);
+      const saved = await window.mytrader.market.setCompletenessConfig({
+        defaultLookbackDays: config.defaultLookbackDays,
+        targetEnabledCheckIds: config.targetEnabledCheckIds
+      });
+      setConfig(saved);
+      setSavedConfig(saved);
       setNotice("完备性配置已保存。");
-      await refreshConfigAndCoverage();
+      await refreshConfig();
+      if (coverageLoaded) {
+        await refreshCoverage();
+      }
       if (statusPanelExpanded) {
         await refreshStatusRows();
       }
@@ -441,7 +378,14 @@ export function OtherDataManagementTargetTaskPanel(
     } finally {
       setSaving(false);
     }
-  }, [matrixConfig, refreshConfigAndCoverage, refreshStatusRows, statusPanelExpanded]);
+  }, [
+    config,
+    coverageLoaded,
+    refreshConfig,
+    refreshCoverage,
+    refreshStatusRows,
+    statusPanelExpanded
+  ]);
 
   const handleRunMaterialization = useCallback(async () => {
     if (!window.mytrader) return;
@@ -449,26 +393,146 @@ export function OtherDataManagementTargetTaskPanel(
     setError(null);
     setNotice(null);
     try {
-      const symbols = symbolFilter
-        .split(/[,\s]+/)
-        .map((value) => value.trim())
-        .filter(Boolean);
-      await window.mytrader.market.runTargetMaterialization({
-        symbols: symbols.length > 0 ? symbols : null
+      await window.mytrader.market.runCompletenessMaterialization({
+        scopeId: "target_pool"
       });
-      await refreshConfigAndCoverage();
+      await window.mytrader.market.runCompletenessMaterialization({
+        scopeId: "source_pool"
+      });
+      await refreshCoverage();
       if (statusPanelExpanded) {
         await refreshStatusRows();
-        setNotice("目标池物化已触发，状态已刷新。");
-      } else {
-        setNotice("目标池物化已触发。");
       }
+      setNotice("完备性物化已触发，target/source 状态已刷新。");
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setMaterializing(false);
     }
-  }, [refreshConfigAndCoverage, refreshStatusRows, statusPanelExpanded, symbolFilter]);
+  }, [refreshCoverage, refreshStatusRows, statusPanelExpanded]);
+
+  const renderCoverageSection = useCallback(
+    (scopeId: CompletenessScopeId, coverage: PreviewCompletenessCoverageResult | null) => {
+      const checks = (config?.checks ?? [])
+        .filter((check) => check.scopeId === scopeId)
+        .filter((check) =>
+          scopeId === "target_pool"
+            ? targetEnabledCheckIdSet.has(check.id)
+            : true
+        )
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+
+      const enabledBuckets = Array.from(
+        new Set(checks.map((check) => check.bucketId))
+      ).sort((a, b) => {
+        const aOrder = checks.find((check) => check.bucketId === a)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = checks.find((check) => check.bucketId === b)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return a.localeCompare(b);
+      });
+
+      const byBucketMap = new Map(
+        (coverage?.byBucket ?? []).map((item) => [item.bucketId, item])
+      );
+
+      const columns: Array<{
+        key: string;
+        label: string;
+        bucketId: PreviewCompletenessCoverageResult["byBucket"][number]["bucketId"] | null;
+      }> = [
+        { key: `${scopeId}-overall`, label: "整体", bucketId: null },
+        ...enabledBuckets.map((bucketId) => ({
+          key: `${scopeId}-${bucketId}`,
+          label: formatBucketLabel(bucketId),
+          bucketId
+        }))
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {formatScopeLabel(scopeId)}
+          </div>
+
+          {enabledBuckets.length > 0 ? (
+            <div className="max-h-[260px] overflow-auto pb-1">
+              <table className="min-w-[860px] w-full text-xs">
+                <thead className="sticky top-0 bg-white dark:bg-background-dark">
+                  <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
+                    <th className="w-20 min-w-[80px] px-2 py-1.5 text-left font-semibold">
+                      状态
+                    </th>
+                    {columns.map((column) => (
+                      <th key={column.key} className="px-2 py-1.5 text-right font-semibold">
+                        {column.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {STATUS_ORDER.map((status) => (
+                    <tr
+                      key={`${scopeId}-matrix-${status}`}
+                      className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
+                    >
+                      <td className="w-20 min-w-[80px] px-2 py-1.5 text-slate-700 dark:text-slate-200">
+                        {formatStatusLabel(status)}
+                      </td>
+                      {columns.map((column) => {
+                        const bucket = column.bucketId ? byBucketMap.get(column.bucketId) ?? null : null;
+                        const value = column.bucketId
+                          ? resolveStatusCountFromBucket(bucket, status)
+                          : resolveStatusCountFromCoverage(coverage, status);
+                        const applicable = column.bucketId
+                          ? resolveApplicableCountFromBucket(bucket)
+                          : resolveApplicableCountFromCoverage(coverage);
+                        const completeRate =
+                          status === "complete" && applicable > 0
+                            ? value / applicable
+                            : null;
+                        return (
+                          <td
+                            key={`${scopeId}-matrix-${status}-${column.key}`}
+                            className="px-2 py-1.5 text-right font-mono text-slate-700 dark:text-slate-200"
+                          >
+                            {status === "complete" ? (
+                              <span>
+                                {value.toLocaleString()} /{" "}
+                                <span className={completeRateToneClass(completeRate)}>
+                                  {completeRate === null ? "--" : formatPercent(completeRate)}
+                                </span>
+                              </span>
+                            ) : (
+                              value.toLocaleString()
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              当前无已配置 bucket。
+            </div>
+          )}
+        </div>
+      );
+    },
+    [config?.checks, props, targetEnabledCheckIdSet]
+  );
+
+  const sourceModuleRows = useMemo(() => {
+    return sourceChecks.map((check) => ({
+      id: check.id,
+      label: check.label,
+      bucket: formatBucketLabel(check.bucketId),
+      domain: check.domainId ?? "--",
+      module: check.moduleId ?? "--"
+    }));
+  }, [sourceChecks]);
 
   return (
     <section className="space-y-3">
@@ -489,7 +553,7 @@ export function OtherDataManagementTargetTaskPanel(
             size="sm"
             icon="refresh"
             onClick={() => {
-              void refreshConfigAndCoverage();
+              void refreshOverview();
               if (statusPanelExpanded) {
                 void refreshStatusRows();
               }
@@ -510,134 +574,35 @@ export function OtherDataManagementTargetTaskPanel(
         </div>
       </div>
 
-      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-3">
-        {coverageSummary ? (
-          <div className="space-y-3">
-            <div className="overflow-x-auto">
-              <div className="flex min-w-full w-max items-center gap-4 whitespace-nowrap px-1 py-1 text-xs">
-                <span className="inline-flex items-center gap-2">
-                  <span
-                    className={`inline-flex h-2.5 w-2.5 rounded-full ${coverageSummary.health.dotClass}`}
-                  />
-                  <span className={`font-semibold ${coverageSummary.health.textClass}`}>
-                    健康状态: {coverageSummary.health.label}
-                  </span>
-                </span>
-                <span className="text-slate-600 dark:text-slate-300">
-                  {coverageSummary.health.hint}
-                </span>
-                <span className="ml-auto text-right font-mono text-slate-500 dark:text-slate-400">
-                  统计日期 {coverage?.asOfTradeDate ? props.formatCnDate(coverage.asOfTradeDate) : "--"}
-                  {" · "}
-                  延迟 {coverageSummary.lagDays === null ? "--" : `${coverageSummary.lagDays} 天`}
-                  {" · "}
-                  规模 {coverage?.totals.symbols ?? 0} symbols / {coverage?.totals.modules ?? 0} modules
-                </span>
-              </div>
-            </div>
-            <div className="w-full border-t border-slate-200/70 dark:border-border-dark/70" />
-
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  资产覆盖状态矩阵
-                </div>
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {topRiskAsset
-                    ? `最高风险: ${topRiskAsset.assetLabel} · 缺失率 ${formatRate(
-                        topRiskAsset.missingRate
-                      )}`
-                    : "最高风险: --"}
-                  {" · "}
-                  当前显示 {displayAssetCoverageViews.length} 个资产类别
-                </div>
-              </div>
-              {displayAssetCoverageViews.length > 0 ? (
-                <div className="max-h-[360px] overflow-auto">
-                  <table className="min-w-[860px] w-full border-collapse text-xs">
-                    <thead className="sticky top-0 z-20 bg-white dark:bg-background-dark">
-                      <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
-                        <th className="sticky left-0 z-30 w-20 min-w-[80px] bg-white px-1.5 py-1.5 text-left font-semibold dark:bg-background-dark">
-                          覆盖程度
-                        </th>
-                        <th className="px-1.5 py-1.5 text-right font-semibold">整体</th>
-                        {displayAssetCoverageViews.map((asset) => (
-                          <th
-                            key={`coverage-matrix-header-${asset.assetClass}`}
-                            className="px-1.5 py-1.5 text-right font-semibold"
-                          >
-                            {asset.assetLabel}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {coverageMatrixRows.map((row) => {
-                        const overallCompleteTone =
-                          row.rowKey === "complete" && row.overallRate !== null
-                            ? resolveCompletenessBand(row.overallRate).textClass
-                            : "text-slate-500 dark:text-slate-400";
-                        return (
-                          <tr
-                            key={`coverage-matrix-row-${row.rowKey}`}
-                            className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
-                          >
-                            <td className="sticky left-0 z-10 w-20 min-w-[80px] bg-white px-1.5 py-1.5 dark:bg-background-dark">
-                              <span className="font-semibold text-slate-700 dark:text-slate-200">
-                                {row.label}
-                              </span>
-                            </td>
-                            <td className="px-1.5 py-1.5 text-right">
-                              <div className="font-mono text-slate-700 dark:text-slate-200">
-                                {row.overallCount.toLocaleString()}
-                              </div>
-                              <div className={`text-[10px] ${overallCompleteTone}`}>
-                                {row.overallRate === null ? "--" : formatRate(row.overallRate)}
-                              </div>
-                            </td>
-                            {row.assets.map((cell) => {
-                              const cellCompleteTone =
-                                row.rowKey === "complete" && cell.rate !== null
-                                  ? resolveCompletenessBand(cell.rate).textClass
-                                  : "text-slate-500 dark:text-slate-400";
-                              return (
-                                <td
-                                  key={`coverage-matrix-cell-${row.rowKey}-${cell.assetClass}`}
-                                  className="px-1.5 py-1.5 text-right"
-                                >
-                                  <div className="font-mono text-slate-700 dark:text-slate-200">
-                                    {cell.count.toLocaleString()}
-                                  </div>
-                                  <div className={`text-[10px] ${cellCompleteTone}`}>
-                                    {cell.rate === null ? "--" : formatRate(cell.rate)}
-                                  </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  暂无资产维度覆盖数据。
-                </div>
-              )}
-            </div>
+      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3">
+        <div className="overflow-x-auto pb-1">
+          <div className="min-w-max flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+            <span className={`font-semibold ${topStatusSummary.labelTone}`}>
+              健康状态：{topStatusSummary.label}
+            </span>
+            <span>提示：{topStatusSummary.message}</span>
+            <span className="text-slate-400 dark:text-slate-500">|</span>
+            <span>统计日期：{topStatusSummary.asOfLabel}</span>
+            <span className="text-slate-400 dark:text-slate-500">|</span>
+            <span>延迟：{topStatusSummary.delayLabel}</span>
+            <span className="text-slate-400 dark:text-slate-500">|</span>
+            <span>规模：{topStatusSummary.scaleLabel}</span>
           </div>
-        ) : (
-          <div className="rounded-md border border-slate-200/70 px-3 py-2 text-xs text-slate-500 dark:border-border-dark/70 dark:text-slate-400">
-            暂无覆盖数据。
-          </div>
-        )}
+        </div>
 
-        <div className="rounded-md border border-slate-200/70 dark:border-border-dark/70 p-2.5 space-y-2">
+        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3">
+          {renderCoverageSection("target_pool", targetCoverage)}
+        </div>
+
+        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3">
+          {renderCoverageSection("source_pool", sourceCoverage)}
+        </div>
+
+        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-2 text-xs">
               <span className="font-semibold text-slate-700 dark:text-slate-200">
-                完备性模块配置
+                Target checks（可编辑）
               </span>
               <span
                 className={`inline-flex items-center rounded-full border px-2 py-0.5 ${
@@ -654,8 +619,8 @@ export function OtherDataManagementTargetTaskPanel(
                 variant="secondary"
                 size="sm"
                 icon="restart_alt"
-                onClick={() => setMatrixConfig(savedMatrixConfig)}
-                disabled={!matrixDirty || saving || !savedMatrixConfig}
+                onClick={() => setConfig(savedConfig)}
+                disabled={!matrixDirty || saving || !savedConfig}
               >
                 重置
               </props.Button>
@@ -663,39 +628,65 @@ export function OtherDataManagementTargetTaskPanel(
                 variant="primary"
                 size="sm"
                 icon="save"
-                onClick={handleSaveMatrix}
-                disabled={!matrixDirty || saving || !matrixConfig}
+                onClick={handleSaveConfig}
+                disabled={!matrixDirty || saving || !config}
               >
-                保存矩阵
+                保存
               </props.Button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {TARGET_TASK_MODULES.map((module) => {
-              const enabled = Boolean(
-                matrixConfig?.enabledModules.includes(module.id)
-              );
+            {targetChecks.map((check) => {
+              const enabled = targetEnabledCheckIdSet.has(check.id);
               return (
                 <button
-                  key={`task-module-${module.id}`}
+                  key={`target-check-${check.id}`}
                   type="button"
-                  onClick={() => handleToggleModule(module.id)}
+                  onClick={() => handleToggleTargetCheck(check.id)}
                   className={`rounded-md border px-2.5 py-2 text-left text-xs ${
                     enabled
                       ? "border-primary/40 bg-primary/12 text-slate-800 dark:text-slate-100"
                       : "border-slate-200/80 dark:border-border-dark/70 text-slate-500 dark:text-slate-400"
                   }`}
                 >
-                  <div className="font-semibold">{module.label}</div>
-                  <div className="mt-0.5 font-mono opacity-75">{module.id}</div>
+                  <div className="font-semibold">{check.label}</div>
+                  <div className="mt-0.5 text-[11px] opacity-75">
+                    {formatBucketLabel(check.bucketId)} · {check.moduleId ?? "--"}
+                  </div>
+                  <div className="mt-0.5 font-mono opacity-75">{check.id}</div>
                 </button>
               );
             })}
           </div>
         </div>
 
-        <div className="rounded-md border border-slate-200/70 dark:border-border-dark/70 p-2.5 space-y-2">
+        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3 space-y-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            Source checks（只读，来源于 Source Center 配置）
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {sourceModuleRows.map((row) => (
+              <div
+                key={`source-check-${row.id}`}
+                className="rounded-md border border-slate-200/80 dark:border-border-dark/70 px-2.5 py-2 text-xs"
+              >
+                <div className="font-semibold text-slate-700 dark:text-slate-200">{row.label}</div>
+                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  {row.bucket} · {row.domain} · {row.module}
+                </div>
+                <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                  {row.id}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+            Source checks 在本面板只读，配置入口在 Source Center。
+          </div>
+        </div>
+
+        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3 space-y-2">
           <button
             type="button"
             onClick={() => setStatusPanelExpanded((prev) => !prev)}
@@ -714,17 +705,22 @@ export function OtherDataManagementTargetTaskPanel(
           {statusPanelExpanded ? (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <props.Input
-                  value={symbolFilter}
-                  onChange={(event) => setSymbolFilter(event.target.value)}
-                  placeholder="筛选 symbol（支持逗号/空格多值）"
-                  className="h-8 max-w-[260px] text-xs font-mono"
+                <props.PopoverSelect
+                  value={scopeFilter}
+                  onChangeValue={(value: string) => setScopeFilter(value as ScopeFilter)}
+                  options={[
+                    { value: "all", label: "全部范围" },
+                    { value: "target_pool", label: "目标消费" },
+                    { value: "source_pool", label: "数据源供给" }
+                  ]}
+                  className="w-[180px]"
+                  buttonClassName="h-8 text-xs"
                 />
                 <props.PopoverSelect
-                  value={moduleFilter}
-                  onChangeValue={(value: string) => setModuleFilter(value as ModuleFilter)}
-                  options={moduleFilterOptions}
-                  className="w-[220px]"
+                  value={checkFilter}
+                  onChangeValue={(value: string) => setCheckFilter(value as CheckFilter)}
+                  options={checkFilterOptions}
+                  className="w-[300px]"
                   buttonClassName="h-8 text-xs"
                 />
                 <props.PopoverSelect
@@ -753,9 +749,10 @@ export function OtherDataManagementTargetTaskPanel(
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-white dark:bg-background-dark">
                       <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
-                        <th className="px-2 py-1.5 text-left font-semibold">Symbol</th>
-                        <th className="px-2 py-1.5 text-left font-semibold">Module</th>
-                        <th className="px-2 py-1.5 text-left font-semibold">Asset</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Scope</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Check</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Entity</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Bucket</th>
                         <th className="px-2 py-1.5 text-left font-semibold">Status</th>
                         <th className="px-2 py-1.5 text-right font-semibold">Coverage</th>
                         <th className="px-2 py-1.5 text-left font-semibold">As Of</th>
@@ -764,21 +761,24 @@ export function OtherDataManagementTargetTaskPanel(
                     <tbody>
                       {(statusRows?.items ?? []).map((item) => (
                         <tr
-                          key={`${item.symbol}-${item.moduleId}`}
+                          key={`${item.scopeId}-${item.checkId}-${item.entityType}-${item.entityId}`}
                           className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
                         >
+                          <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">
+                            {formatScopeLabel(item.scopeId)}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
+                            {item.checkId}
+                          </td>
                           <td className="px-2 py-1.5 font-mono text-slate-700 dark:text-slate-200">
-                            {item.symbol}
+                            {item.entityId}
                           </td>
                           <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
-                            {item.moduleId}
-                          </td>
-                          <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
-                            {item.assetClass ?? "--"}
+                            {formatBucketLabel(item.bucketId)}
                           </td>
                           <td className="px-2 py-1.5">
                             <span
-                              className={`inline-flex rounded-full border px-2 py-0.5 ${getStatusToneClass(
+                              className={`inline-flex rounded-full border px-2 py-0.5 ${statusToneClass(
                                 item.status
                               )}`}
                             >
@@ -804,6 +804,7 @@ export function OtherDataManagementTargetTaskPanel(
                   ) : null}
                 </div>
               )}
+
               {!statusLoading && statusRows ? (
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
                   展示 {statusRows.items.length} / {statusRows.total}
@@ -812,17 +813,17 @@ export function OtherDataManagementTargetTaskPanel(
             </>
           ) : (
             <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              默认收起，展开后可按 symbol/module/status 排查缺口。
+              默认收起，展开后可按 scope/check/status 排查缺口。
             </div>
           )}
         </div>
 
         {(error || notice) && (
           <div
-            className={`rounded-md border px-3 py-2 text-xs ${
+            className={`mt-3 border-t pt-2 text-xs ${
               error
-                ? "border-rose-300 text-rose-700 dark:text-rose-300"
-                : "border-emerald-300 text-emerald-700 dark:text-emerald-300"
+                ? "border-rose-200 text-rose-700 dark:border-rose-900/60 dark:text-rose-300"
+                : "border-emerald-200 text-emerald-700 dark:border-emerald-900/60 dark:text-emerald-300"
             }`}
           >
             {error ?? notice}
@@ -830,7 +831,7 @@ export function OtherDataManagementTargetTaskPanel(
         )}
 
         {loading && (
-          <div className="text-xs text-slate-500 dark:text-slate-400">
+          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             完备性面板加载中...
           </div>
         )}

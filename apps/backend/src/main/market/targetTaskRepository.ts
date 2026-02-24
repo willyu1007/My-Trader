@@ -12,6 +12,7 @@ import type {
 
 import { all, get, run, transaction } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
+import { toTargetCompletenessCheckId } from "./completeness/legacyTargetModule";
 
 type PersistedTargetTaskStatusRow = {
   symbol: string;
@@ -72,6 +73,56 @@ export async function upsertTargetTaskStatuses(
           normalizeCoverageRatio(row.coverageRatio),
           row.sourceRunId ?? null,
           row.lastError ?? null,
+          now
+        ]
+      );
+
+      await run(
+        db,
+        `
+          insert into completeness_status_v2 (
+            scope_id,
+            check_id,
+            entity_type,
+            entity_id,
+            bucket_id,
+            domain_id,
+            module_id,
+            asset_class,
+            as_of_trade_date,
+            status,
+            coverage_ratio,
+            source_run_id,
+            detail_json,
+            updated_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(scope_id, check_id, entity_type, entity_id) do update set
+            bucket_id = excluded.bucket_id,
+            domain_id = excluded.domain_id,
+            module_id = excluded.module_id,
+            asset_class = excluded.asset_class,
+            as_of_trade_date = excluded.as_of_trade_date,
+            status = excluded.status,
+            coverage_ratio = excluded.coverage_ratio,
+            source_run_id = excluded.source_run_id,
+            detail_json = excluded.detail_json,
+            updated_at = excluded.updated_at
+        `,
+        [
+          "target_pool",
+          toTargetCompletenessCheckId(row.moduleId),
+          "instrument",
+          symbol,
+          toCompletenessBucket(row.assetClass),
+          toCompletenessDomain(row.assetClass),
+          row.moduleId,
+          row.assetClass,
+          row.asOfTradeDate,
+          row.status,
+          normalizeCoverageRatio(row.coverageRatio),
+          row.sourceRunId ?? null,
+          row.lastError ? JSON.stringify({ lastError: row.lastError }) : null,
           now
         ]
       );
@@ -234,6 +285,34 @@ export async function createTargetMaterializationRun(
     `,
     [id, now]
   );
+  await run(
+    db,
+    `
+      insert into completeness_runs_v2 (
+        id,
+        scope_id,
+        status,
+        as_of_trade_date,
+        entity_count,
+        complete_count,
+        partial_count,
+        missing_count,
+        not_applicable_count,
+        not_started_count,
+        source_run_id,
+        error_message,
+        started_at,
+        finished_at
+      )
+      values (?, 'target_pool', 'running', null, 0, 0, 0, 0, 0, 0, null, null, ?, null)
+      on conflict(id) do update set
+        scope_id = excluded.scope_id,
+        status = excluded.status,
+        started_at = excluded.started_at,
+        finished_at = excluded.finished_at
+    `,
+    [id, now]
+  );
   return id;
 }
 
@@ -282,6 +361,38 @@ export async function finishTargetMaterializationRun(
       input.id
     ]
   );
+  await run(
+    db,
+    `
+      update completeness_runs_v2
+      set status = ?,
+          as_of_trade_date = ?,
+          entity_count = ?,
+          complete_count = ?,
+          partial_count = ?,
+          missing_count = ?,
+          not_applicable_count = ?,
+          not_started_count = ?,
+          source_run_id = ?,
+          error_message = ?,
+          finished_at = ?
+      where id = ?
+    `,
+    [
+      input.status,
+      input.asOfTradeDate,
+      input.symbolCount,
+      input.completeCount,
+      input.partialCount,
+      input.missingCount,
+      input.notApplicableCount,
+      0,
+      input.sourceRunId ?? null,
+      input.errorMessage ?? null,
+      Date.now(),
+      input.id
+    ]
+  );
 }
 
 function normalizeCoverageRatio(value: number | null | undefined): number | null {
@@ -306,3 +417,18 @@ function toTargetTaskStatusRow(row: PersistedTargetTaskStatusRow): MarketTargetT
   };
 }
 
+function toCompletenessBucket(assetClass: AssetClass | null): string {
+  if (assetClass === "stock") return "stock";
+  if (assetClass === "etf") return "etf";
+  if (assetClass === "futures") return "futures";
+  if (assetClass === "spot") return "spot";
+  return "global";
+}
+
+function toCompletenessDomain(assetClass: AssetClass | null): string | null {
+  if (assetClass === "stock") return "stock";
+  if (assetClass === "etf") return "etf";
+  if (assetClass === "futures") return "futures";
+  if (assetClass === "spot") return "spot";
+  return null;
+}

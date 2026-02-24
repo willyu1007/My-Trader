@@ -132,6 +132,8 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_GET),
     setIngestSchedulerConfig: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_SET, input),
+    getRuntimePerfStats: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_RUNTIME_PERF_STATS_GET),
     getUniversePoolConfig: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_CONFIG),
     setUniversePoolConfig: (input) =>
@@ -149,6 +151,22 @@ const api: MyTraderApi = {
     runTargetMaterialization: (input) =>
       ipcRenderer.invoke(
         IPC_CHANNELS.MARKET_TARGET_TASK_RUN_MATERIALIZATION,
+        input ?? null
+      ),
+    getCompletenessConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_COMPLETENESS_GET_CONFIG),
+    setCompletenessConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_COMPLETENESS_SET_CONFIG, input),
+    previewCompletenessCoverage: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_COMPLETENESS_PREVIEW_COVERAGE,
+        input ?? null
+      ),
+    listCompletenessStatus: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_COMPLETENESS_LIST_STATUS, input ?? null),
+    runCompletenessMaterialization: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_COMPLETENESS_RUN_MATERIALIZATION,
         input ?? null
       ),
     getRolloutFlags: () =>

@@ -70,7 +70,7 @@ const DOMAIN_SEEDS: DomainSeed[] = [
     label: "指数专题",
     modules: [
       { id: "index.basic", label: "指数基本信息", implemented: false, syncCapable: false, defaultEnabled: false },
-      { id: "index.daily", label: "指数日线行情", implemented: false, syncCapable: false, defaultEnabled: false },
+      { id: "index.daily", label: "指数日线行情", implemented: true, syncCapable: true, defaultEnabled: false },
       { id: "index.realtime_daily", label: "指数实时日线", implemented: false, syncCapable: false, defaultEnabled: false },
       { id: "index.realtime_min", label: "指数实时分钟", implemented: false, syncCapable: false, defaultEnabled: false },
       { id: "index.weekly", label: "指数周线行情", implemented: false, syncCapable: false, defaultEnabled: false },
@@ -158,7 +158,7 @@ const DOMAIN_SEEDS: DomainSeed[] = [
     label: "外汇数据",
     modules: [
       { id: "fx.basic", label: "外汇基础信息", implemented: false, syncCapable: false, defaultEnabled: false },
-      { id: "fx.daily", label: "外汇日线行情", implemented: false, syncCapable: false, defaultEnabled: false }
+      { id: "fx.daily", label: "外汇日线行情", implemented: true, syncCapable: true, defaultEnabled: false }
     ]
   },
   {
@@ -208,6 +208,7 @@ const DOMAIN_SEEDS: DomainSeed[] = [
     id: "macro",
     label: "宏观经济",
     modules: [
+      { id: "macro.snapshot", label: "宏观快照供给", implemented: true, syncCapable: true, defaultEnabled: false },
       { id: "macro.rates", label: "利率数据", implemented: false, syncCapable: false, defaultEnabled: false },
       { id: "macro.national_economy", label: "国民经济", implemented: false, syncCapable: false, defaultEnabled: false },
       { id: "macro.price_index", label: "价格指数", implemented: false, syncCapable: false, defaultEnabled: false },

@@ -10,7 +10,8 @@
     "start": "node scripts/start.mjs",
     "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
     "phase-r2:gate-snapshot": "node scripts/phase-r2-gate-snapshot.mjs",
-    "verify:position-engine": "pnpm run build && node dist/verify-position-engine.js"
+    "verify:position-engine": "pnpm run build && node dist/verify-position-engine.js",
+    "verify:completeness-v2": "pnpm run build && node dist/verify-completeness-v2.js"
   },
   "dependencies": {
     "@mytrader/shared": "workspace:*",

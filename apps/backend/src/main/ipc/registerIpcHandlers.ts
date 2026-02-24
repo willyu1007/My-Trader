@@ -17,6 +17,7 @@ import type {
   GetQuotesInput,
   GetTagMembersInput,
   GetTagSeriesInput,
+  ListCompletenessStatusInput,
   ListInstrumentRegistryInput,
   ListTargetTaskStatusInput,
   CreateLedgerEntryInput,
@@ -34,8 +35,11 @@ import type {
   MarketTargetsConfig,
   MarketUniversePoolConfig,
   PreviewTargetsDraftInput,
+  PreviewCompletenessCoverageInput,
   PortfolioPerformanceRangeInput,
+  RunCompletenessMaterializationInput,
   SearchInstrumentsInput,
+  SetMarketCompletenessConfigInput,
   SetMarketDomainTokenInput,
   SetMarketMainTokenInput,
   SetInstrumentAutoIngestInput,
@@ -99,7 +103,13 @@ import {
   updateRiskLimit
 } from "../storage/riskLimitRepository";
 import { ensureAccountDataLayout } from "../storage/paths";
-import { close, exec, openSqliteDatabase } from "../storage/sqlite";
+import {
+  all,
+  close,
+  execVolatile,
+  getSqliteRuntimePerfStats,
+  openSqliteDatabase
+} from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 import {
   clearDomainToken,
@@ -127,6 +137,7 @@ import {
 } from "../services/marketService";
 import { config } from "../config";
 import {
+  convergeMarketIngestSchedulerStartupDisabled,
   convergeMarketRolloutFlagsToDefaultOpen,
   getMarketTargetTaskMatrixConfig,
   getMarketTargetsConfig,
@@ -154,7 +165,6 @@ import {
 import { previewTargets, previewTargetsDraft } from "../market/targetsService";
 import {
   getIngestRunById,
-  getLatestIngestRun,
   listIngestRuns
 } from "../market/ingestRunsRepository";
 import { getMarketProvider } from "../market/providers";
@@ -183,15 +193,20 @@ import {
   stopIngestOrchestrator
 } from "../market/ingestOrchestrator";
 import {
-  listTargetTaskStatusRows,
-  previewTargetTaskCoverage
-} from "../market/targetTaskRepository";
-import { materializeTargetsFromSsot } from "../market/targetMaterializationService";
+  getCompletenessConfig,
+  listCompletenessStatus,
+  listTargetTaskStatusFromCompleteness,
+  previewCompletenessCoverage,
+  previewTargetTaskCoverageFromCompleteness,
+  runCompletenessMaterialization,
+  setCompletenessConfig
+} from "../market/completeness/completenessService";
 
 let accountIndexDb: AccountIndexDb | null = null;
 let activeAccount: AccountSummary | null = null;
 let activeBusinessDb: SqliteDatabase | null = null;
 let marketCacheDb: SqliteDatabase | null = null;
+let shutdownPromise: Promise<void> | null = null;
 
 function requireActiveBusinessDb(): SqliteDatabase {
   if (!activeBusinessDb) throw new Error("当前账号未解锁。");
@@ -208,6 +223,118 @@ function requireAnalysisDbPath(): string {
   return path.join(activeAccount.dataDir, "analysis.duckdb");
 }
 
+async function stopAndCloseActiveBusinessDb(): Promise<void> {
+  stopIngestOrchestrator();
+  stopAutoIngest();
+  stopMarketIngestScheduler();
+
+  if (!activeBusinessDb) return;
+  const db = activeBusinessDb;
+  activeBusinessDb = null;
+  await close(db);
+}
+
+export async function shutdownBackendRuntime(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+
+  shutdownPromise = (async () => {
+    const errors: unknown[] = [];
+    try {
+      await stopAndCloseActiveBusinessDb();
+    } catch (error) {
+      errors.push(error);
+      console.error("[mytrader] failed to close active business DB", error);
+    }
+    activeAccount = null;
+
+    if (marketCacheDb) {
+      const db = marketCacheDb;
+      marketCacheDb = null;
+      try {
+        await close(db);
+      } catch (error) {
+        errors.push(error);
+        console.error("[mytrader] failed to close market cache DB", error);
+      }
+    }
+
+    if (accountIndexDb) {
+      const db = accountIndexDb;
+      accountIndexDb = null;
+      try {
+        await db.close();
+      } catch (error) {
+        errors.push(error);
+        console.error("[mytrader] failed to close account index DB", error);
+      }
+    }
+
+    if (errors.length > 0) {
+      throw errors[0];
+    }
+  })().finally(() => {
+    shutdownPromise = null;
+  });
+
+  return shutdownPromise;
+}
+
+function isRecoverableMarketCacheError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  if (!message) return false;
+  const text = message.toLowerCase();
+  return (
+    text.includes("disk i/o error") ||
+    text.includes("database disk image is malformed") ||
+    text.includes("malformed") ||
+    text.includes("not a database")
+  );
+}
+
+function isMissingTableError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return message.toLowerCase().includes("no such table");
+}
+
+function toCompactTimestamp(epochMs: number): string {
+  const iso = new Date(epochMs).toISOString();
+  return iso.replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+}
+
+async function assertMarketCacheReadable(db: SqliteDatabase): Promise<void> {
+  await all<{ value: number }>(db, `select 1 as value from sqlite_master limit 1`);
+  try {
+    await all<{ value: number }>(
+      db,
+      `select 1 as value from completeness_status_v2 limit 1`
+    );
+  } catch (error) {
+    if (isMissingTableError(error)) return;
+    throw error;
+  }
+}
+
+function rotateCorruptedMarketCacheFiles(marketCachePath: string): void {
+  const suffixes = ["", "-shm", "-wal"];
+  const stamp = toCompactTimestamp(Date.now());
+  for (const suffix of suffixes) {
+    const sourcePath = `${marketCachePath}${suffix}`;
+    if (!fs.existsSync(sourcePath)) continue;
+    const targetPath = `${marketCachePath}.corrupt-${stamp}${suffix}.bak`;
+    fs.renameSync(sourcePath, targetPath);
+  }
+}
+
 export async function registerIpcHandlers() {
   const userDataDir = app.getPath("userData");
   fs.mkdirSync(userDataDir, { recursive: true });
@@ -216,9 +343,53 @@ export async function registerIpcHandlers() {
   accountIndexDb = await AccountIndexDb.open(accountIndexPath);
 
   const marketCachePath = path.join(userDataDir, "market-cache.sqlite");
-  marketCacheDb = await openSqliteDatabase(marketCachePath);
-  await exec(marketCacheDb, `pragma journal_mode = wal;`);
-  await ensureMarketCacheSchema(marketCacheDb);
+  const openMarketCacheDb = async (): Promise<SqliteDatabase> => {
+    const db = await openSqliteDatabase(marketCachePath);
+    await execVolatile(db, `pragma journal_mode = delete;`);
+    await execVolatile(db, `pragma temp_store = memory;`);
+    return db;
+  };
+  let cacheRecoveredFromCorruption = false;
+  const recoverMarketCache = async (error: unknown): Promise<void> => {
+    cacheRecoveredFromCorruption = true;
+    console.warn(
+      `[mytrader] 检测到 market-cache 读写错误，准备重建缓存库：${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    if (marketCacheDb) {
+      try {
+        await close(marketCacheDb);
+      } catch {
+        // ignore close failure on corrupted db
+      }
+    }
+    rotateCorruptedMarketCacheFiles(marketCachePath);
+    marketCacheDb = await openMarketCacheDb();
+  };
+
+  marketCacheDb = await openMarketCacheDb();
+  try {
+    await assertMarketCacheReadable(marketCacheDb);
+    await ensureMarketCacheSchema(marketCacheDb);
+    await assertMarketCacheReadable(marketCacheDb);
+  } catch (error) {
+    if (!isRecoverableMarketCacheError(error)) throw error;
+    await recoverMarketCache(error);
+    await ensureMarketCacheSchema(marketCacheDb);
+  }
+
+  if (cacheRecoveredFromCorruption) {
+    void dialog
+      .showMessageBox({
+        type: "warning",
+        title: "行情缓存已自动恢复",
+        message: "检测到 market-cache 损坏，已自动备份并重建。",
+        detail:
+          "备份文件名为 market-cache.sqlite.corrupt-<timestamp>*.bak。缓存已重建，请手动或按定时任务重新拉取数据。"
+      })
+      .catch(() => undefined);
+  }
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNT_GET_ACTIVE, async () => activeAccount);
 
@@ -316,17 +487,13 @@ export async function registerIpcHandlers() {
 
       const layout = await ensureAccountDataLayout(unlocked.dataDir);
 
-      if (activeBusinessDb) {
-        stopIngestOrchestrator();
-        stopAutoIngest();
-        stopMarketIngestScheduler();
-        await close(activeBusinessDb);
-        activeBusinessDb = null;
-      }
+      await stopAndCloseActiveBusinessDb();
 
       activeBusinessDb = await openSqliteDatabase(layout.businessDbPath);
-      await exec(activeBusinessDb, `pragma journal_mode = wal;`);
+      await execVolatile(activeBusinessDb, `pragma journal_mode = delete;`);
+      await execVolatile(activeBusinessDb, `pragma temp_store = memory;`);
       await ensureBusinessSchema(activeBusinessDb);
+      await convergeMarketIngestSchedulerStartupDisabled(activeBusinessDb);
       await convergeMarketRolloutFlagsToDefaultOpen(activeBusinessDb);
 
       activeAccount = unlocked;
@@ -343,13 +510,7 @@ export async function registerIpcHandlers() {
   );
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNT_LOCK, async () => {
-    if (activeBusinessDb) {
-      stopIngestOrchestrator();
-      stopAutoIngest();
-      stopMarketIngestScheduler();
-      await close(activeBusinessDb);
-      activeBusinessDb = null;
-    }
+    await stopAndCloseActiveBusinessDb();
     activeAccount = null;
   });
 
@@ -1127,6 +1288,17 @@ export async function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.MARKET_RUNTIME_PERF_STATS_GET, async () => {
+    const memory = process.memoryUsage();
+    return {
+      collectedAt: Date.now(),
+      processUptimeMs: Math.floor(process.uptime() * 1000),
+      processRssBytes: memory.rss,
+      processHeapUsedBytes: memory.heapUsed,
+      sqlite: getSqliteRuntimePerfStats()
+    };
+  });
+
   ipcMain.handle(IPC_CHANNELS.MARKET_UNIVERSE_POOL_GET_CONFIG, async () => {
     const businessDb = requireActiveBusinessDb();
     return await getLegacyUniversePoolConfigFromDataSource(businessDb);
@@ -1174,14 +1346,17 @@ export async function registerIpcHandlers() {
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TARGET_TASK_PREVIEW_COVERAGE, async () => {
     const marketDb = requireMarketCacheDb();
-    return await previewTargetTaskCoverage(marketDb);
+    return await previewTargetTaskCoverageFromCompleteness({ marketDb });
   });
 
   ipcMain.handle(
     IPC_CHANNELS.MARKET_TARGET_TASK_LIST_STATUS,
     async (_event, input: ListTargetTaskStatusInput | null | undefined) => {
       const marketDb = requireMarketCacheDb();
-      return await listTargetTaskStatusRows(marketDb, input ?? undefined);
+      return await listTargetTaskStatusFromCompleteness({
+        marketDb,
+        request: input ?? undefined
+      });
     }
   );
 
@@ -1191,16 +1366,67 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       const analysisDbPath = requireAnalysisDbPath();
-      const latestUniverseRun = await getLatestIngestRun(marketDb, "universe");
-      const asOfTradeDate =
-        latestUniverseRun?.as_of_trade_date ?? new Date().toISOString().slice(0, 10);
-      await materializeTargetsFromSsot({
+      await runCompletenessMaterialization({
         businessDb,
         marketDb,
         analysisDbPath,
-        asOfTradeDate,
-        sourceRunId: latestUniverseRun?.id ?? null,
-        symbols: input?.symbols ?? null
+        request: {
+          scopeId: "target_pool",
+          symbols: input?.symbols ?? null
+        }
+      });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_COMPLETENESS_GET_CONFIG, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getCompletenessConfig({ businessDb });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_COMPLETENESS_SET_CONFIG,
+    async (_event, input: SetMarketCompletenessConfigInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await setCompletenessConfig({
+        businessDb,
+        patch: input ?? {}
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_COMPLETENESS_PREVIEW_COVERAGE,
+    async (_event, input: PreviewCompletenessCoverageInput | null | undefined) => {
+      const marketDb = requireMarketCacheDb();
+      return await previewCompletenessCoverage({
+        marketDb,
+        request: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_COMPLETENESS_LIST_STATUS,
+    async (_event, input: ListCompletenessStatusInput | null | undefined) => {
+      const marketDb = requireMarketCacheDb();
+      return await listCompletenessStatus({
+        marketDb,
+        request: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_COMPLETENESS_RUN_MATERIALIZATION,
+    async (_event, input: RunCompletenessMaterializationInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const analysisDbPath = requireAnalysisDbPath();
+      await runCompletenessMaterialization({
+        businessDb,
+        marketDb,
+        analysisDbPath,
+        request: input ?? undefined
       });
     }
   );

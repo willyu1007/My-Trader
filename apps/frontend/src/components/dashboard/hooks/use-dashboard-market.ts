@@ -1088,16 +1088,9 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
     if (!window.mytrader) return;
 
     if (options.otherTab === "data-management") {
-      options.refreshMarketTokenStatus().catch(() => undefined);
       options.refreshMarketTargets().catch(() => undefined);
-      options.refreshMarketIngestRuns().catch(() => undefined);
-      options.refreshMarketIngestControl().catch(() => undefined);
-      options.refreshMarketSchedulerConfig().catch(() => undefined);
       options.refreshMarketUniversePool().catch(() => undefined);
-      if (options.marketRegistryEntryEnabled) {
-        options.refreshMarketRegistry().catch(() => undefined);
-      }
-      return;
+      return undefined;
     }
 
     if (options.otherTab === "instrument-management") {
@@ -1113,6 +1106,7 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
       options.refreshMarketIngestRuns().catch(() => undefined);
       options.refreshMarketIngestControl().catch(() => undefined);
     }
+    return undefined;
   }, [
     options.activeView,
     options.marketRegistryEntryEnabled,
@@ -1132,6 +1126,7 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
     if (options.activeView !== "other" || options.otherTab !== "data-management") {
       return;
     }
+    if (!options.marketTargetsDirty) return;
     if (!window.mytrader) return;
     const timer = window.setTimeout(() => {
       options.refreshMarketTargetsDiff().catch(() => undefined);
@@ -1140,6 +1135,7 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
   }, [
     options.activeView,
     options.marketTargetsConfig,
+    options.marketTargetsDirty,
     options.otherTab,
     options.refreshMarketTargetsDiff
   ]);
@@ -1148,14 +1144,16 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
     if (options.activeView !== "other" || options.otherTab !== "data-management") {
       return;
     }
+    if (options.marketTargetsDirty) return;
     if (!window.mytrader) return;
     const timer = window.setTimeout(() => {
       options.refreshMarketTargetPoolStats().catch(() => undefined);
-    }, 260);
+    }, 520);
     return () => window.clearTimeout(timer);
   }, [
     options.activeView,
     options.marketFocusTargetSymbols,
+    options.marketTargetsDirty,
     options.otherTab,
     options.refreshMarketTargetPoolStats
   ]);
@@ -1209,14 +1207,23 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
       return;
     }
     if (!window.mytrader) return;
-    const interval = window.setInterval(() => {
+    const tick = () => {
+      if (document.hidden) return;
       options.refreshMarketIngestControl().catch(() => undefined);
       options.refreshMarketIngestRuns().catch(() => undefined);
       if (options.otherTab === "data-management") {
         options.refreshMarketUniversePoolOverview().catch(() => undefined);
       }
-    }, 8000);
-    return () => window.clearInterval(interval);
+    };
+    const interval = window.setInterval(tick, 15000);
+    const handleVisibilityChange = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [
     options.activeView,
     options.otherTab,

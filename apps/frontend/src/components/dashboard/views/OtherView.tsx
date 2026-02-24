@@ -167,6 +167,7 @@ export function OtherView(props: OtherViewProps) {
     marketTargetsLoading: props.marketTargetsLoading,
     marketTargetsPreview: props.marketTargetsPreview,
     marketTargetsSaving: props.marketTargetsSaving,
+    refreshMarketTargetPoolStats: props.refreshMarketTargetPoolStats,
     refreshMarketTargets: props.refreshMarketTargets,
     refreshMarketTargetsDiff: props.refreshMarketTargetsDiff,
     targetsEditorGridRef: props.targetsEditorGridRef,

@@ -1,7 +1,15 @@
-import { all, exec } from "../storage/sqlite";
+import { all, exec, get, run, transaction } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 
 export async function ensureMarketCacheSchema(
+  db: SqliteDatabase
+): Promise<void> {
+  await transaction(db, async () => {
+    await ensureMarketCacheSchemaInTransaction(db);
+  });
+}
+
+async function ensureMarketCacheSchemaInTransaction(
   db: SqliteDatabase
 ): Promise<void> {
   await exec(
@@ -104,16 +112,7 @@ export async function ensureMarketCacheSchema(
     `
   );
 
-  // Keep targets ingest baseline aligned with rollout-closure:
-  // futures/spot remain in universe metadata but are not auto-target assets.
-  await exec(
-    db,
-    `
-      update instruments
-      set asset_class = null
-      where asset_class in ('futures', 'spot');
-    `
-  );
+  await ensureTargetAssetClassBaselineConvergence(db);
 
   await exec(
     db,
@@ -473,6 +472,107 @@ export async function ensureMarketCacheSchema(
       on target_materialization_runs (started_at desc);
     `
   );
+
+  await exec(
+    db,
+    `
+      create table if not exists completeness_status_v2 (
+        scope_id text not null,
+        check_id text not null,
+        entity_type text not null,
+        entity_id text not null,
+        bucket_id text not null,
+        domain_id text,
+        module_id text,
+        asset_class text,
+        as_of_trade_date text,
+        status text not null,
+        coverage_ratio real,
+        source_run_id text,
+        detail_json text,
+        updated_at integer not null,
+        primary key (scope_id, check_id, entity_type, entity_id)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists completeness_status_v2_scope_status
+      on completeness_status_v2 (scope_id, status, updated_at desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists completeness_status_v2_bucket
+      on completeness_status_v2 (scope_id, bucket_id, updated_at desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists completeness_runs_v2 (
+        id text primary key not null,
+        scope_id text not null,
+        status text not null,
+        as_of_trade_date text,
+        entity_count integer not null,
+        complete_count integer not null,
+        partial_count integer not null,
+        missing_count integer not null,
+        not_applicable_count integer not null,
+        not_started_count integer not null,
+        source_run_id text,
+        error_message text,
+        started_at integer not null,
+        finished_at integer
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists completeness_runs_v2_started_at
+      on completeness_runs_v2 (started_at desc);
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create table if not exists ingest_step_runs_v1 (
+        ingest_run_id text not null,
+        step_id text not null,
+        scope_id text not null,
+        domain_id text,
+        module_id text,
+        stage text not null,
+        status text not null,
+        input_rows integer,
+        output_rows integer,
+        dropped_rows integer,
+        error_message text,
+        started_at integer not null,
+        finished_at integer,
+        primary key (ingest_run_id, step_id)
+      );
+    `
+  );
+
+  await exec(
+    db,
+    `
+      create index if not exists ingest_step_runs_v1_scope_stage
+      on ingest_step_runs_v1 (scope_id, stage, started_at desc);
+    `
+  );
+
+  await ensureCompletenessV2Backfill(db);
 }
 
 async function ensureColumn(
@@ -487,4 +587,144 @@ async function ensureColumn(
   );
   if (columns.some((entry) => entry.name === column)) return;
   await exec(db, `alter table ${table} add column ${column} ${definition};`);
+}
+
+async function ensureCompletenessV2Backfill(
+  db: SqliteDatabase
+): Promise<void> {
+  const markerKey = "completeness_v2_backfill_v1";
+  const marker = await get<{ value: string }>(
+    db,
+    `select value from market_meta where key = ?`,
+    [markerKey]
+  );
+  if (marker?.value === "1") return;
+
+  await exec(
+    db,
+    `
+      insert or ignore into completeness_status_v2 (
+        scope_id,
+        check_id,
+        entity_type,
+        entity_id,
+        bucket_id,
+        domain_id,
+        module_id,
+        asset_class,
+        as_of_trade_date,
+        status,
+        coverage_ratio,
+        source_run_id,
+        detail_json,
+        updated_at
+      )
+      select
+        'target_pool' as scope_id,
+        'target.' || module_id as check_id,
+        'instrument' as entity_type,
+        symbol as entity_id,
+        case
+          when asset_class in ('stock', 'etf', 'futures', 'spot') then asset_class
+          else 'global'
+        end as bucket_id,
+        case
+          when asset_class in ('stock', 'etf', 'futures', 'spot') then asset_class
+          else null
+        end as domain_id,
+        module_id,
+        asset_class,
+        as_of_trade_date,
+        case
+          when status in ('complete', 'partial', 'missing', 'not_applicable') then status
+          else 'missing'
+        end as status,
+        coverage_ratio,
+        source_run_id,
+        null as detail_json,
+        updated_at
+      from target_task_status;
+    `
+  );
+
+  await exec(
+    db,
+    `
+      insert or ignore into completeness_runs_v2 (
+        id,
+        scope_id,
+        status,
+        as_of_trade_date,
+        entity_count,
+        complete_count,
+        partial_count,
+        missing_count,
+        not_applicable_count,
+        not_started_count,
+        source_run_id,
+        error_message,
+        started_at,
+        finished_at
+      )
+      select
+        id,
+        'target_pool' as scope_id,
+        status,
+        as_of_trade_date,
+        symbol_count as entity_count,
+        complete_count,
+        partial_count,
+        missing_count,
+        not_applicable_count,
+        0 as not_started_count,
+        source_run_id,
+        error_message,
+        started_at,
+        finished_at
+      from target_materialization_runs;
+    `
+  );
+
+  await run(
+    db,
+    `
+      insert into market_meta (key, value)
+      values (?, '1')
+      on conflict(key) do update set
+        value = excluded.value
+    `,
+    [markerKey]
+  );
+}
+
+async function ensureTargetAssetClassBaselineConvergence(
+  db: SqliteDatabase
+): Promise<void> {
+  const markerKey = "targets_asset_class_baseline_v1";
+  const marker = await get<{ value: string }>(
+    db,
+    `select value from market_meta where key = ?`,
+    [markerKey]
+  );
+  if (marker?.value === "1") return;
+
+  await exec(
+    db,
+    `
+      update instruments
+      set asset_class = null
+      where asset_class in ('futures', 'spot');
+    `
+  );
+
+  await run(
+    db,
+    `
+      insert into market_meta (key, value)
+      values (?, '1')
+      on conflict(key) do update set
+        value = excluded.value
+    `,
+    [markerKey]
+  );
 }

@@ -201,3 +201,11 @@ dev-docs/active/dashboard-pr1-main-integration/
 - [x] 确认全部迁移合并
 - [x] 确认 1 个交易日观察窗口
 - [ ] 按 phase 拆分实际 PR 队列
+
+## 2026-02-23 Completeness V2 Expansion
+- Phase 1（contracts + IPC channels）: ✅ 完成
+- Phase 2（market-cache schema + backfill + repository）: ✅ 完成
+- Phase 3（registry + completeness service + target adapter）: ✅ 完成
+- Phase 4（execution plan resolver 接入 orchestrator/runner）: ✅ 完成
+- Phase 5（前端 completeness 双区块面板）: ✅ 完成
+- Phase 6（verify script + 回归 + 文档）: ✅ 完成

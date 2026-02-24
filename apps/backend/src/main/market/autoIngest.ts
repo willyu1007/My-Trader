@@ -35,10 +35,6 @@ export function startAutoIngest(
   console.log(
     `[mytrader] auto-ingest scheduled every ${Math.round(intervalMs / 60000)} min.`
   );
-  void runOnce("startup").catch((err) => {
-    console.error("[mytrader] auto-ingest startup failed");
-    console.error(err);
-  });
   state.timer = setInterval(() => {
     void runOnce("interval").catch((err) => {
       console.error("[mytrader] auto-ingest interval failed");
@@ -68,7 +64,7 @@ export function triggerAutoIngest(reason: "import" | "positions"): void {
 }
 
 async function runOnce(
-  schedule: "startup" | "interval" | "trigger",
+  schedule: "interval" | "trigger",
   reason?: "import" | "positions"
 ): Promise<void> {
   if (state.running) return;

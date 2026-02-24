@@ -8,10 +8,46 @@ export type SqliteDatabase = SqlJsDatabase;
 let SQL: Awaited<ReturnType<typeof initSqlJs>> | null = null;
 
 const WASM_FILENAME = "sql-wasm.wasm";
+const FLUSH_DEBOUNCE_MS = 250;
+const RECENT_FLUSH_LIMIT = 50;
 
 // Map to track database file paths for persistence
 const dbFilePaths = new Map<SqlJsDatabase, string>();
 const transactionDepths = new Map<SqlJsDatabase, number>();
+const dirtyDatabases = new Set<SqlJsDatabase>();
+const flushTimers = new Map<SqlJsDatabase, NodeJS.Timeout>();
+
+type FlushTrigger = "scheduled" | "transaction_commit" | "close" | "manual";
+
+type FlushRecord = {
+  filePath: string;
+  trigger: FlushTrigger;
+  bytes: number;
+  durationMs: number;
+  timestamp: number;
+};
+
+const runtimeStats = {
+  flushDebounceMs: FLUSH_DEBOUNCE_MS,
+  dirtyDbCount: 0,
+  scheduledFlushCount: 0,
+  completedFlushCount: 0,
+  totalFlushBytes: 0,
+  totalFlushDurationMs: 0,
+  lastFlushError: null as string | null,
+  recentFlushes: [] as FlushRecord[]
+};
+
+export type SqliteRuntimePerfStats = {
+  flushDebounceMs: number;
+  dirtyDbCount: number;
+  scheduledFlushCount: number;
+  completedFlushCount: number;
+  totalFlushBytes: number;
+  totalFlushDurationMs: number;
+  lastFlushError: string | null;
+  recentFlushes: FlushRecord[];
+};
 
 function resolveSqlJsWasmPath(): string {
   const distPath = path.join(__dirname, WASM_FILENAME);
@@ -43,7 +79,7 @@ async function getSqlJs() {
 
 export async function openSqliteDatabase(filePath: string): Promise<SqlJsDatabase> {
   const sqlJs = await getSqlJs();
-  
+
   let db: SqlJsDatabase;
   if (fs.existsSync(filePath)) {
     const buffer = fs.readFileSync(filePath);
@@ -56,17 +92,81 @@ export async function openSqliteDatabase(filePath: string): Promise<SqlJsDatabas
     }
     db = new sqlJs.Database();
   }
-  
+
   dbFilePaths.set(db, filePath);
   return db;
 }
 
-function saveDatabase(db: SqlJsDatabase): void {
+function updateDirtyDbCount(): void {
+  runtimeStats.dirtyDbCount = dirtyDatabases.size;
+}
+
+function clearScheduledFlush(db: SqlJsDatabase): void {
+  const timer = flushTimers.get(db);
+  if (timer) {
+    clearTimeout(timer);
+    flushTimers.delete(db);
+  }
+}
+
+function recordFlush(
+  db: SqlJsDatabase,
+  trigger: FlushTrigger,
+  bytes: number,
+  durationMs: number
+): void {
   const filePath = dbFilePaths.get(db);
-  if (filePath) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(filePath, buffer);
+  if (!filePath) return;
+
+  const record: FlushRecord = {
+    filePath,
+    trigger,
+    bytes,
+    durationMs,
+    timestamp: Date.now()
+  };
+  runtimeStats.completedFlushCount += 1;
+  runtimeStats.totalFlushBytes += bytes;
+  runtimeStats.totalFlushDurationMs += durationMs;
+  runtimeStats.recentFlushes.push(record);
+  if (runtimeStats.recentFlushes.length > RECENT_FLUSH_LIMIT) {
+    runtimeStats.recentFlushes.splice(
+      0,
+      runtimeStats.recentFlushes.length - RECENT_FLUSH_LIMIT
+    );
+  }
+}
+
+function saveDatabaseAtomic(db: SqlJsDatabase, trigger: FlushTrigger): void {
+  const filePath = dbFilePaths.get(db);
+  if (!filePath) return;
+
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const flushStart = Date.now();
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+
+  try {
+    fs.writeFileSync(tmpPath, buffer);
+    fs.renameSync(tmpPath, filePath);
+    runtimeStats.lastFlushError = null;
+    recordFlush(db, trigger, buffer.byteLength, Date.now() - flushStart);
+  } catch (error) {
+    runtimeStats.lastFlushError =
+      error instanceof Error ? error.message : String(error);
+    try {
+      if (fs.existsSync(tmpPath)) {
+        fs.unlinkSync(tmpPath);
+      }
+    } catch {
+      // ignore temp cleanup errors
+    }
+    throw error;
   }
 }
 
@@ -74,29 +174,76 @@ function isTransactionActive(db: SqlJsDatabase): boolean {
   return (transactionDepths.get(db) ?? 0) > 0;
 }
 
-function markTransactionStart(db: SqlJsDatabase): void {
-  const next = (transactionDepths.get(db) ?? 0) + 1;
-  transactionDepths.set(db, next);
+function markDirty(db: SqlJsDatabase): void {
+  dirtyDatabases.add(db);
+  updateDirtyDbCount();
 }
 
-function markTransactionEnd(db: SqlJsDatabase): void {
-  const current = transactionDepths.get(db) ?? 0;
-  if (current <= 1) {
-    transactionDepths.delete(db);
-    return;
-  }
-  transactionDepths.set(db, current - 1);
+function flushDatabase(
+  db: SqlJsDatabase,
+  trigger: FlushTrigger,
+  force = false
+): void {
+  if (!force && !dirtyDatabases.has(db)) return;
+  if (!force && isTransactionActive(db)) return;
+  saveDatabaseAtomic(db, trigger);
+  dirtyDatabases.delete(db);
+  updateDirtyDbCount();
 }
 
-function flushDatabase(db: SqlJsDatabase): void {
-  if (!isTransactionActive(db)) saveDatabase(db);
+function scheduleFlush(db: SqlJsDatabase): void {
+  if (!dirtyDatabases.has(db)) return;
+  if (isTransactionActive(db)) return;
+  if (flushTimers.has(db)) return;
+  if (!dbFilePaths.has(db)) return;
+
+  runtimeStats.scheduledFlushCount += 1;
+  const timer = setTimeout(() => {
+    flushTimers.delete(db);
+    try {
+      flushDatabase(db, "scheduled");
+    } catch (error) {
+      console.error("[mytrader] sqlite scheduled flush failed", error);
+    } finally {
+      if (dirtyDatabases.has(db) && !isTransactionActive(db)) {
+        scheduleFlush(db);
+      }
+    }
+  }, FLUSH_DEBOUNCE_MS);
+  timer.unref?.();
+  flushTimers.set(db, timer);
+}
+
+export function getSqliteRuntimePerfStats(): SqliteRuntimePerfStats {
+  return {
+    flushDebounceMs: runtimeStats.flushDebounceMs,
+    dirtyDbCount: runtimeStats.dirtyDbCount,
+    scheduledFlushCount: runtimeStats.scheduledFlushCount,
+    completedFlushCount: runtimeStats.completedFlushCount,
+    totalFlushBytes: runtimeStats.totalFlushBytes,
+    totalFlushDurationMs: runtimeStats.totalFlushDurationMs,
+    lastFlushError: runtimeStats.lastFlushError,
+    recentFlushes: [...runtimeStats.recentFlushes]
+  };
 }
 
 export function exec(db: SqlJsDatabase, sql: string): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
       db.exec(sql);
-      flushDatabase(db);
+      markDirty(db);
+      scheduleFlush(db);
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+export function execVolatile(db: SqlJsDatabase, sql: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      db.exec(sql);
       resolve();
     } catch (err) {
       reject(err);
@@ -112,7 +259,8 @@ export function run(
   return new Promise((resolve, reject) => {
     try {
       db.run(sql, params as (string | number | null | Uint8Array)[]);
-      flushDatabase(db);
+      markDirty(db);
+      scheduleFlush(db);
       resolve();
     } catch (err) {
       reject(err);
@@ -129,7 +277,7 @@ export function get<T>(
     try {
       const stmt = db.prepare(sql);
       stmt.bind(params as (string | number | null | Uint8Array)[]);
-      
+
       if (stmt.step()) {
         const columns = stmt.getColumnNames();
         const values = stmt.get();
@@ -158,7 +306,7 @@ export function all<T>(
     try {
       const stmt = db.prepare(sql);
       stmt.bind(params as (string | number | null | Uint8Array)[]);
-      
+
       const rows: T[] = [];
       while (stmt.step()) {
         const columns = stmt.getColumnNames();
@@ -180,9 +328,17 @@ export function all<T>(
 export function close(db: SqlJsDatabase): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
-      saveDatabase(db);
+      clearScheduledFlush(db);
+      if (dirtyDatabases.has(db)) {
+        if (isTransactionActive(db)) {
+          throw new Error("[mytrader] cannot close sqlite database during active transaction");
+        }
+        flushDatabase(db, "close");
+      }
       dbFilePaths.delete(db);
       transactionDepths.delete(db);
+      dirtyDatabases.delete(db);
+      updateDirtyDbCount();
       db.close();
       resolve();
     } catch (err) {
@@ -195,27 +351,69 @@ export async function transaction<T>(
   db: SqlJsDatabase,
   fn: () => Promise<T>
 ): Promise<T> {
-  markTransactionStart(db);
+  const previousDepth = transactionDepths.get(db) ?? 0;
+  const nextDepth = previousDepth + 1;
+  const savepointName = `mytrader_tx_${nextDepth}`;
+  const isNested = previousDepth > 0;
+
+  if (!isNested && dirtyDatabases.has(db)) {
+    clearScheduledFlush(db);
+    flushDatabase(db, "manual", true);
+  }
+
+  transactionDepths.set(db, nextDepth);
   try {
-    await exec(db, "begin");
+    if (isNested) {
+      db.exec(`savepoint ${savepointName}`);
+    } else {
+      db.exec("begin");
+    }
   } catch (err) {
-    markTransactionEnd(db);
+    if (previousDepth <= 0) {
+      transactionDepths.delete(db);
+    } else {
+      transactionDepths.set(db, previousDepth);
+    }
     throw err;
   }
+
   try {
     const result = await fn();
-    await exec(db, "commit");
-    markTransactionEnd(db);
-    saveDatabase(db);
+    if (isNested) {
+      db.exec(`release savepoint ${savepointName}`);
+      transactionDepths.set(db, previousDepth);
+      return result;
+    }
+
+    db.exec("commit");
+    transactionDepths.delete(db);
+    clearScheduledFlush(db);
+    flushDatabase(db, "transaction_commit");
     return result;
   } catch (err) {
     try {
-      await exec(db, "rollback");
+      if (isNested) {
+        db.exec(`rollback to savepoint ${savepointName}`);
+        db.exec(`release savepoint ${savepointName}`);
+      } else {
+        db.exec("rollback");
+      }
     } catch (rollbackError) {
       console.error("[mytrader] failed to rollback transaction", rollbackError);
     }
-    markTransactionEnd(db);
-    saveDatabase(db);
+
+    if (isNested) {
+      transactionDepths.set(db, previousDepth);
+    } else {
+      transactionDepths.delete(db);
+      dirtyDatabases.delete(db);
+      updateDirtyDbCount();
+      clearScheduledFlush(db);
+    }
     throw err;
+  } finally {
+    if (!isTransactionActive(db) && dirtyDatabases.has(db)) {
+      scheduleFlush(db);
+    }
   }
 }
