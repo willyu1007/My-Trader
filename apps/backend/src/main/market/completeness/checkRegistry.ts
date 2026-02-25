@@ -11,6 +11,13 @@ import {
   fromTargetCompletenessCheckId,
   toTargetCompletenessCheckId
 } from "./legacyTargetModule";
+import {
+  buildUiApplicationTooltips,
+  buildUsageContextTooltips,
+  listSourceUiApplications,
+  resolveTargetUiApplications,
+  resolveTargetUsageContexts
+} from "./uiApplicationRegistry";
 
 export interface CompletenessCheckDefinition {
   id: string;
@@ -20,6 +27,10 @@ export interface CompletenessCheckDefinition {
   entityType: CompletenessEntityType;
   domainId: DataDomainId | null;
   moduleId: string | null;
+  usageContexts: string[];
+  uiApplications: string[];
+  usageContextTooltips: Record<string, string>;
+  uiApplicationTooltips: Record<string, string>;
   editable: boolean;
   sortOrder: number;
   requiredDatasetIds: string[];
@@ -80,27 +91,35 @@ function resolveTargetRequiredDatasets(moduleId: TargetTaskModuleId): string[] {
 }
 
 const TARGET_CHECKS: CompletenessCheckDefinition[] = TARGET_TASK_MODULE_ORDER.map(
-  (moduleId, index) => ({
-    id: toTargetCompletenessCheckId(moduleId),
-    label: TARGET_MODULE_LABELS[moduleId],
-    scopeId: "target_pool",
-    bucketId: resolveTargetBucket(moduleId),
-    entityType: "instrument",
-    domainId:
-      moduleId === "core.daily_basics" || moduleId === "core.daily_moneyflows"
-        ? "stock"
-        : moduleId === "core.futures_settle" || moduleId === "core.futures_oi"
-          ? "futures"
-          : moduleId === "core.spot_price_avg" || moduleId === "core.spot_settle"
-            ? "spot"
-            : null,
-    moduleId,
-    editable: true,
-    sortOrder: 100 + index,
-    requiredDatasetIds: resolveTargetRequiredDatasets(moduleId),
-    optionalDatasetIds: [],
-    legacyTargetModuleId: moduleId
-  })
+  (moduleId, index) => {
+    const usageContexts = resolveTargetUsageContexts(moduleId);
+    const uiApplications = resolveTargetUiApplications(moduleId);
+    return {
+      id: toTargetCompletenessCheckId(moduleId),
+      label: TARGET_MODULE_LABELS[moduleId],
+      scopeId: "target_pool",
+      bucketId: resolveTargetBucket(moduleId),
+      entityType: "instrument",
+      domainId:
+        moduleId === "core.daily_basics" || moduleId === "core.daily_moneyflows"
+          ? "stock"
+          : moduleId === "core.futures_settle" || moduleId === "core.futures_oi"
+            ? "futures"
+            : moduleId === "core.spot_price_avg" || moduleId === "core.spot_settle"
+              ? "spot"
+              : null,
+      moduleId,
+      usageContexts,
+      uiApplications,
+      usageContextTooltips: buildUsageContextTooltips(usageContexts),
+      uiApplicationTooltips: buildUiApplicationTooltips(uiApplications),
+      editable: true,
+      sortOrder: 100 + index,
+      requiredDatasetIds: resolveTargetRequiredDatasets(moduleId),
+      optionalDatasetIds: [],
+      legacyTargetModuleId: moduleId
+    };
+  }
 );
 
 const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
@@ -112,6 +131,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "instrument",
     domainId: "stock",
     moduleId: "stock.market.daily",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 200,
     requiredDatasetIds: ["sqlite.daily_prices"],
@@ -126,6 +149,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "instrument",
     domainId: "stock",
     moduleId: "stock.moneyflow",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 210,
     requiredDatasetIds: ["sqlite.daily_moneyflows"],
@@ -140,6 +167,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "instrument",
     domainId: "etf",
     moduleId: "etf.daily_quote",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 220,
     requiredDatasetIds: ["sqlite.daily_prices"],
@@ -154,6 +185,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "instrument",
     domainId: "futures",
     moduleId: "futures.daily",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 230,
     requiredDatasetIds: ["sqlite.daily_prices"],
@@ -168,6 +203,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "instrument",
     domainId: "spot",
     moduleId: "spot.sge_daily",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 240,
     requiredDatasetIds: ["sqlite.daily_prices"],
@@ -182,6 +221,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "instrument",
     domainId: "index",
     moduleId: "index.daily",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 250,
     requiredDatasetIds: ["sqlite.daily_prices"],
@@ -196,6 +239,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "fx_pair",
     domainId: "fx",
     moduleId: "fx.daily",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 260,
     requiredDatasetIds: ["sqlite.daily_prices"],
@@ -210,6 +257,10 @@ const SOURCE_CHECKS: CompletenessCheckDefinition[] = [
     entityType: "macro_module",
     domainId: "macro",
     moduleId: "macro.snapshot",
+    usageContexts: ["数据源供给监控"],
+    uiApplications: listSourceUiApplications(),
+    usageContextTooltips: buildUsageContextTooltips(["数据源供给监控"]),
+    uiApplicationTooltips: buildUiApplicationTooltips(listSourceUiApplications()),
     editable: false,
     sortOrder: 270,
     requiredDatasetIds: ["sqlite.macro_module_snapshot"],
@@ -227,6 +278,10 @@ const CHECKS = [...TARGET_CHECKS, ...SOURCE_CHECKS].sort((a, b) => {
 export function listCompletenessChecks(): CompletenessCheckDefinition[] {
   return CHECKS.map((check) => ({
     ...check,
+    usageContexts: [...check.usageContexts],
+    uiApplications: [...check.uiApplications],
+    usageContextTooltips: { ...check.usageContextTooltips },
+    uiApplicationTooltips: { ...check.uiApplicationTooltips },
     requiredDatasetIds: [...check.requiredDatasetIds],
     optionalDatasetIds: [...check.optionalDatasetIds]
   }));
@@ -245,6 +300,10 @@ export function getCompletenessCheckById(
   if (!check) return null;
   return {
     ...check,
+    usageContexts: [...check.usageContexts],
+    uiApplications: [...check.uiApplications],
+    usageContextTooltips: { ...check.usageContextTooltips },
+    uiApplicationTooltips: { ...check.uiApplicationTooltips },
     requiredDatasetIds: [...check.requiredDatasetIds],
     optionalDatasetIds: [...check.optionalDatasetIds]
   };

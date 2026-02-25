@@ -922,6 +922,10 @@ export interface MarketCompletenessCheckDescriptor {
   label: string;
   domainId?: DataDomainId | null;
   moduleId?: string | null;
+  usageContexts: string[];
+  uiApplications: string[];
+  usageContextTooltips: Record<string, string>;
+  uiApplicationTooltips: Record<string, string>;
   editable: boolean;
   sortOrder: number;
   legacyTargetModuleId?: TargetTaskModuleId | null;

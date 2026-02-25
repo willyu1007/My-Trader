@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Dashboard } from "./components/Dashboard";
+import { GlobalHoverTooltipLayer } from "./components/GlobalHoverTooltipLayer";
 import {
   getThemeMode,
   resolveTheme,
@@ -631,6 +632,7 @@ export function App() {
           (c) 2026 MyTrader 专业交易工作台。
         </footer>
       )}
+      <GlobalHoverTooltipLayer />
     </div>
   );
 }

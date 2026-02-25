@@ -919,12 +919,13 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
 export function HelpHint({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const HOVER_TOOLTIP_DELAY_MS = 200;
 
   const scheduleOpen = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
     }
-    timerRef.current = setTimeout(() => setOpen(true), 500);
+    timerRef.current = setTimeout(() => setOpen(true), HOVER_TOOLTIP_DELAY_MS);
   };
 
   const closeHint = () => {

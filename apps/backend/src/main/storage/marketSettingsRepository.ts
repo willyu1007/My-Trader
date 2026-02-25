@@ -116,6 +116,10 @@ const DEFAULT_MARKET_COMPLETENESS_CONFIG_BASE: Omit<
     label: check.label,
     domainId: check.domainId,
     moduleId: check.moduleId,
+    usageContexts: [...check.usageContexts],
+    uiApplications: [...check.uiApplications],
+    usageContextTooltips: { ...check.usageContextTooltips },
+    uiApplicationTooltips: { ...check.uiApplicationTooltips },
     editable: check.editable,
     sortOrder: check.sortOrder,
     legacyTargetModuleId: check.legacyTargetModuleId
