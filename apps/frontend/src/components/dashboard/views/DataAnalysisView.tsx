@@ -205,7 +205,6 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
       <div className="px-3 py-4 space-y-6 max-w-6xl">
                 <Panel>
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">数据分析</h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       更全面的分析入口：组合 / 个股 / 指数 / 板块。
                     </p>
@@ -244,7 +243,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
 
                 {(analysisTab === "index" || analysisTab === "sector") && (
                   <PlaceholderPanel
-                    title={`数据分析 · ${analysisTabs.find((tab) => tab.key === analysisTab)?.label ?? ""}`}
+                    title={`${analysisTabs.find((tab) => tab.key === analysisTab)?.label ?? ""}`}
                     description={
                       analysisTabs.find((tab) => tab.key === analysisTab)?.description ?? ""
                     }

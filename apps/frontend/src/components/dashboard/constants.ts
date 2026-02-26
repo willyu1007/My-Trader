@@ -120,6 +120,7 @@ export const portfolioTabs = [
 export const otherTabs = [
   { key: "data-management", label: "数据管理", icon: "settings_suggest" },
   { key: "instrument-management", label: "标的管理", icon: "inventory_2" },
+  { key: "valuation-methods", label: "估值方法", icon: "calculate" },
   { key: "data-status", label: "数据状态", icon: "monitoring" },
   { key: "test", label: "测试", icon: "science" }
 ] as const;

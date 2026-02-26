@@ -8,18 +8,31 @@ import { IPC_CHANNELS } from "@mytrader/shared";
 import type {
   AccountSummary,
   BatchSetInstrumentAutoIngestInput,
+  CloneBuiltinValuationMethodInput,
   ClearMarketDomainTokenInput,
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
+  CreateCustomValuationMethodInput,
+  CreateInsightInput,
   GetDailyBarsInput,
   GetIngestRunDetailInput,
+  GetInsightInput,
+  GetValuationMethodInput,
+  InsightTargetExcludeInput,
+  InsightTargetUnexcludeInput,
   RemoveIngestRunInput,
+  RemoveInsightEffectChannelInput,
+  RemoveInsightEffectPointInput,
+  RemoveInsightInput,
+  RemoveInsightScopeRuleInput,
   GetQuotesInput,
   GetTagMembersInput,
   GetTagSeriesInput,
   ListCompletenessStatusInput,
+  ListInsightsInput,
   ListInstrumentRegistryInput,
+  ListValuationMethodsInput,
   ListTargetTaskStatusInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
@@ -29,8 +42,12 @@ import type {
   ImportPricesCsvInput,
   ListTagsInput,
   MarketTargetTaskMatrixConfig,
+  MaterializeInsightTargetsInput,
+  PublishValuationMethodVersionInput,
   RunIngestPreflightInput,
   RunTargetMaterializationInput,
+  SearchInsightsInput,
+  SetActiveValuationMethodVersionInput,
   SetMarketRolloutFlagsInput,
   MarketIngestSchedulerConfig,
   MarketTargetsConfig,
@@ -47,7 +64,13 @@ import type {
   TestMarketDomainConnectivityInput,
   TestMarketModuleConnectivityInput,
   TushareIngestInput,
+  UpdateCustomValuationMethodInput,
+  UpdateInsightInput,
+  UpsertInsightEffectChannelInput,
+  UpsertInsightEffectPointInput,
+  UpsertInsightScopeRuleInput,
   UpsertWatchlistItemInput,
+  ValuationPreviewBySymbolInput,
   UpdateLedgerEntryInput,
   UpdatePortfolioInput,
   UpdatePositionInput,
@@ -108,6 +131,7 @@ import {
   all,
   close,
   execVolatile,
+  get,
   getSqliteRuntimePerfStats,
   openSqliteDatabase
 } from "../storage/sqlite";
@@ -136,6 +160,32 @@ import {
   seedMarketDemoData,
   listMarketTags
 } from "../services/marketService";
+import {
+  cloneBuiltinValuationMethod,
+  createCustomValuationMethod,
+  createInsight,
+  excludeInsightTarget,
+  getInsightDetail,
+  getValuationMethodDetail,
+  listInsights,
+  listValuationMethods,
+  previewMaterializeInsightTargets,
+  previewValuationBySymbol,
+  publishValuationMethodVersion,
+  refreshAllInsightMaterializations,
+  removeInsight,
+  removeInsightEffectChannel,
+  removeInsightEffectPoint,
+  removeInsightScopeRule,
+  searchInsights,
+  setActiveValuationMethodVersion,
+  unexcludeInsightTarget,
+  updateCustomValuationMethod,
+  updateInsight,
+  upsertInsightEffectChannel,
+  upsertInsightEffectPoint,
+  upsertInsightScopeRule
+} from "../services/insightService";
 import { config } from "../config";
 import {
   convergeMarketIngestSchedulerStartupDisabled,
@@ -498,6 +548,7 @@ export async function registerIpcHandlers() {
       await ensureBusinessSchema(activeBusinessDb);
       await convergeMarketIngestSchedulerStartupDisabled(activeBusinessDb);
       await convergeMarketRolloutFlagsToDefaultOpen(activeBusinessDb);
+      await refreshAllInsightMaterializations(activeBusinessDb, requireMarketCacheDb());
 
       activeAccount = unlocked;
       const marketDb = requireMarketCacheDb();
@@ -834,7 +885,9 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       const resolved = await getResolvedTushareToken(businessDb);
-      return await syncTushareInstrumentCatalog(marketDb, resolved.token);
+      const result = await syncTushareInstrumentCatalog(marketDb, resolved.token);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
+      return result;
     }
   );
 
@@ -914,7 +967,9 @@ export async function registerIpcHandlers() {
     IPC_CHANNELS.MARKET_WATCHLIST_UPSERT,
     async (_event, input: UpsertWatchlistItemInput) => {
       const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
       const item = await upsertWatchlistItem(businessDb, input);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
       void triggerAutoIngest("positions");
       return item;
     }
@@ -924,7 +979,9 @@ export async function registerIpcHandlers() {
     IPC_CHANNELS.MARKET_WATCHLIST_REMOVE,
     async (_event, symbol: string) => {
       const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
       await removeWatchlistItem(businessDb, symbol);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
       void triggerAutoIngest("positions");
     }
   );
@@ -941,7 +998,9 @@ export async function registerIpcHandlers() {
     IPC_CHANNELS.MARKET_TAGS_ADD,
     async (_event, symbol: string, tag: string) => {
       const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
       await addInstrumentTag(businessDb, symbol, tag);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
       void triggerAutoIngest("positions");
     }
   );
@@ -950,7 +1009,9 @@ export async function registerIpcHandlers() {
     IPC_CHANNELS.MARKET_TAGS_REMOVE,
     async (_event, symbol: string, tag: string) => {
       const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
       await removeInstrumentTag(businessDb, symbol, tag);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
       void triggerAutoIngest("positions");
     }
   );
@@ -1510,6 +1571,212 @@ export async function registerIpcHandlers() {
     void triggerAutoIngest("positions");
     return await getMarketTargetsConfig(businessDb);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_LIST,
+    async (_event, input: ListInsightsInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listInsights(businessDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_GET,
+    async (_event, input: GetInsightInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await getInsightDetail(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_CREATE,
+    async (_event, input: CreateInsightInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await createInsight(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_UPDATE,
+    async (_event, input: UpdateInsightInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await updateInsight(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_DELETE,
+    async (_event, input: RemoveInsightInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await removeInsight(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_SEARCH,
+    async (_event, input: SearchInsightsInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await searchInsights(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_SCOPE_UPSERT,
+    async (_event, input: UpsertInsightScopeRuleInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const rule = await upsertInsightScopeRule(businessDb, input);
+      await previewMaterializeInsightTargets(businessDb, marketDb, {
+        insightId: rule.insightId,
+        persist: true
+      });
+      return rule;
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_SCOPE_DELETE,
+    async (_event, input: RemoveInsightScopeRuleInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const row = await get<{ insight_id: string }>(
+        businessDb,
+        `select insight_id from insight_scope_rules where id = ? limit 1`,
+        [input?.id ?? ""]
+      );
+      await removeInsightScopeRule(businessDb, input);
+      if (row?.insight_id) {
+        await previewMaterializeInsightTargets(businessDb, marketDb, {
+          insightId: row.insight_id,
+          persist: true
+        });
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_CHANNEL_UPSERT,
+    async (_event, input: UpsertInsightEffectChannelInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await upsertInsightEffectChannel(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_CHANNEL_DELETE,
+    async (_event, input: RemoveInsightEffectChannelInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await removeInsightEffectChannel(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_POINT_UPSERT,
+    async (_event, input: UpsertInsightEffectPointInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await upsertInsightEffectPoint(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_POINT_DELETE,
+    async (_event, input: RemoveInsightEffectPointInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await removeInsightEffectPoint(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_MATERIALIZE_PREVIEW,
+    async (_event, input: MaterializeInsightTargetsInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await previewMaterializeInsightTargets(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_TARGET_EXCLUDE,
+    async (_event, input: InsightTargetExcludeInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      await excludeInsightTarget(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_TARGET_UNEXCLUDE,
+    async (_event, input: InsightTargetUnexcludeInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      await unexcludeInsightTarget(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_LIST,
+    async (_event, input: ListValuationMethodsInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listValuationMethods(businessDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_GET,
+    async (_event, input: GetValuationMethodInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await getValuationMethodDetail(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_CREATE_CUSTOM,
+    async (_event, input: CreateCustomValuationMethodInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await createCustomValuationMethod(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_UPDATE_CUSTOM,
+    async (_event, input: UpdateCustomValuationMethodInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await updateCustomValuationMethod(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_CLONE_BUILTIN,
+    async (_event, input: CloneBuiltinValuationMethodInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await cloneBuiltinValuationMethod(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_PUBLISH_VERSION,
+    async (_event, input: PublishValuationMethodVersionInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await publishValuationMethodVersion(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_SET_ACTIVE_VERSION,
+    async (_event, input: SetActiveValuationMethodVersionInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await setActiveValuationMethodVersion(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_PREVIEW_BY_SYMBOL,
+    async (_event, input: ValuationPreviewBySymbolInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await previewValuationBySymbol(businessDb, marketDb, input);
+    }
+  );
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

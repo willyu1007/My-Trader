@@ -101,6 +101,7 @@ import type { UseDashboardPortfolioResult } from "../hooks/use-dashboard-portfol
 import { AccountView } from "./AccountView";
 import { DataAnalysisView } from "./DataAnalysisView";
 import { DashboardOverlays } from "./DashboardOverlays";
+import { InsightsView } from "./InsightsView";
 import { MarketView } from "./MarketView";
 import { OtherView } from "./OtherView";
 import { PortfolioView } from "./PortfolioView";
@@ -784,7 +785,15 @@ export function DashboardContainerLayout({
             />
           )}
 
-          {["opportunities", "backtest", "insights", "alerts", "index-tracking"].includes(
+          {activeView === "insights" && (
+            <InsightsView
+              Button={Button}
+              Panel={Panel}
+              formatDateTime={formatDateTime}
+            />
+          )}
+
+          {["opportunities", "backtest", "alerts", "index-tracking"].includes(
             activeView
           ) && (
             <PlaceholderPanel

@@ -31,12 +31,6 @@ export type OtherInstrumentManagementTabProps = Pick<
 export function OtherInstrumentManagementTab(props: OtherInstrumentManagementTabProps) {
   return (
     <>
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold text-slate-900 dark:text-white">
-          标的管理
-        </h3>
-      </div>
-
       <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-3 items-start">
         <section className="space-y-2">
           <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-2.5 space-y-2.5 h-full flex flex-col">

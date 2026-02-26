@@ -1,34 +1,39 @@
 # 01 Plan
 
 ## Milestones
-### Milestone 1: FTS5 升级路径落地（completed）
+### Milestone 1: Phase 0 - FTS5 验收与任务包就绪（completed）
 - Acceptance
-  - 识别当前 `sql.js` 构建不含 FTS5 的根因
-  - 引入可复现的 FTS5-enabled 运行时产物
-  - 在 backend 启动路径增加能力自检（失败即显式报错）
+  - `verify:fts5` 通过
+  - 任务包更新为可实施状态
 
-### Milestone 2: 工程接入与构建验证（completed）
+### Milestone 2: Phase 1 - Schema + IPC 契约（in progress）
 - Acceptance
-  - dev/build/start 路径使用新产物
-  - `pnpm typecheck`、`pnpm build` 通过
-  - 增加最小验证命令记录（FTS5 建表 + 查询）
+  - 新增 insights/valuation 业务表、索引、FTS 触发器
+  - 新增 shared IPC 类型与 channel
+  - preload + ipcMain 注册新能力
 
-### Milestone 3: 观点×估值组件契约（in progress）
+### Milestone 3: Phase 2 - Backend service（pending）
 - Acceptance
-  - 方法注册、参数图、算子层、作用域解析、时间插值规则形成书面契约
-  - 冲突语义明确为“所有作用最终作用到 symbol，行业/概念只是展开方式”
+  - 观点 CRUD / 搜索 / scope/channel/point 管理
+  - scope 展开并收敛到 symbol materialization
+  - 时间插值 + 阶段冲突合并 + exclusion 生效
+  - valuation methods 管理与 preview by symbol
 
-## Detailed execution checklist
-1. 落地 `dev-docs` 任务包并持续记录。
-2. 调整 sqlite runtime 依赖或构建方式，确保 FTS5 可用。
-3. 增加 FTS5 能力探测与清晰错误提示。
-4. 跑通 typecheck/build 与最小运行时验证。
-5. 输出观点估值组件的数据契约与合并规则。
+### Milestone 4: Phase 3 - Frontend 落位（pending）
+- Acceptance
+  - insights 页面替换 placeholder
+  - other 新增“估值方法”tab
+  - 标的详情展示 base vs adjusted 与 applied effects
+
+### Milestone 5: Phase 4 - 联调验收（pending）
+- Acceptance
+  - `pnpm typecheck` / `pnpm build` 通过
+  - 关键场景手工验收通过（CRUD/搜索/materialization/插值/冲突/展示）
 
 ## Risks & mitigations
-- Risk: 直接替换 SQLite 运行时导致现有仓库 API 行为回归。
-  - Mitigation: 保持 `storage/sqlite.ts` 对外函数签名不变。
-- Risk: FTS5 编译链依赖复杂导致不可复现。
-  - Mitigation: 优先采用可安装的稳定发行包；若需自编译，固定脚本与版本。
-- Risk: 估值通道定义后续频繁变更。
-  - Mitigation: 使用“metric registry + operator DSL + symbol-level materialization”抽象。
+- Risk: scope 展开规则与现有标签体系不完全一致。
+  - Mitigation: 先支持 `symbol/tag/kind/asset_class/market/domain/watchlist`，其余类型返回空集合并记录 reason。
+- Risk: symbol 维度主键在跨市场同码下出现冲突。
+  - Mitigation: 执行“同 provider+market 可覆盖；跨市场同 symbol 阻断并报错”的保护。
+- Risk: 估值 preview 引擎早期不具备完整因子数据。
+  - Mitigation: 采用“已接入域完整公式 + 未接入域模板占位 + not_applicable”策略，保持协议稳定。

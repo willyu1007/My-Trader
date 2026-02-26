@@ -1102,6 +1102,362 @@ export interface RemoveTempTargetSymbolInput {
   symbol: string;
 }
 
+export type InsightStatus = "draft" | "active" | "archived" | "deleted";
+export type InsightScopeType =
+  | "symbol"
+  | "tag"
+  | "kind"
+  | "asset_class"
+  | "market"
+  | "domain"
+  | "watchlist";
+export type InsightScopeMode = "include" | "exclude";
+export type InsightEffectStage =
+  | "base"
+  | "first_order"
+  | "second_order"
+  | "output"
+  | "risk";
+export type InsightEffectOperator = "set" | "add" | "mul" | "min" | "max";
+
+export interface Insight {
+  id: string;
+  title: string;
+  thesis: string;
+  status: InsightStatus;
+  validFrom: string | null;
+  validTo: string | null;
+  tags: string[];
+  meta: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface InsightScopeRule {
+  id: string;
+  insightId: string;
+  scopeType: InsightScopeType;
+  scopeKey: string;
+  mode: InsightScopeMode;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface InsightEffectChannel {
+  id: string;
+  insightId: string;
+  methodKey: string;
+  metricKey: string;
+  stage: InsightEffectStage;
+  operator: InsightEffectOperator;
+  priority: number;
+  enabled: boolean;
+  meta: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface InsightEffectPoint {
+  id: string;
+  channelId: string;
+  effectDate: string;
+  effectValue: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface InsightTargetExclusion {
+  id: string;
+  insightId: string;
+  symbol: string;
+  reason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface InsightMaterializedTarget {
+  id: string;
+  insightId: string;
+  symbol: string;
+  sourceScopeType: InsightScopeType;
+  sourceScopeKey: string;
+  materializedAt: number;
+}
+
+export interface InsightDetail extends Insight {
+  scopeRules: InsightScopeRule[];
+  effectChannels: InsightEffectChannel[];
+  effectPoints: InsightEffectPoint[];
+  targetExclusions: InsightTargetExclusion[];
+  materializedTargets: InsightMaterializedTarget[];
+}
+
+export interface ListInsightsInput {
+  query?: string | null;
+  status?: InsightStatus | "all" | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListInsightsResult {
+  items: Insight[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface GetInsightInput {
+  id: string;
+}
+
+export interface CreateInsightInput {
+  title: string;
+  thesis?: string | null;
+  status?: InsightStatus | null;
+  validFrom?: string | null;
+  validTo?: string | null;
+  tags?: string[] | null;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface UpdateInsightInput extends CreateInsightInput {
+  id: string;
+}
+
+export interface RemoveInsightInput {
+  id: string;
+}
+
+export interface SearchInsightsInput {
+  query: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface InsightSearchHit {
+  insight: Insight;
+  snippet: string | null;
+  score: number | null;
+}
+
+export interface SearchInsightsResult {
+  items: InsightSearchHit[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface UpsertInsightScopeRuleInput {
+  id?: string | null;
+  insightId: string;
+  scopeType: InsightScopeType;
+  scopeKey: string;
+  mode: InsightScopeMode;
+  enabled?: boolean | null;
+}
+
+export interface RemoveInsightScopeRuleInput {
+  id: string;
+}
+
+export interface UpsertInsightEffectChannelInput {
+  id?: string | null;
+  insightId: string;
+  methodKey: string;
+  metricKey: string;
+  stage: InsightEffectStage;
+  operator: InsightEffectOperator;
+  priority?: number | null;
+  enabled?: boolean | null;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface RemoveInsightEffectChannelInput {
+  id: string;
+}
+
+export interface UpsertInsightEffectPointInput {
+  id?: string | null;
+  channelId: string;
+  effectDate: string;
+  effectValue: number;
+}
+
+export interface RemoveInsightEffectPointInput {
+  id: string;
+}
+
+export interface MaterializeInsightTargetsInput {
+  insightId: string;
+  previewLimit?: number | null;
+  persist?: boolean | null;
+}
+
+export interface MaterializeInsightTargetsResult {
+  insightId: string;
+  total: number;
+  symbols: string[];
+  truncated: boolean;
+  rulesApplied: number;
+  updatedAt: number;
+}
+
+export interface InsightTargetExcludeInput {
+  insightId: string;
+  symbol: string;
+  reason?: string | null;
+}
+
+export interface InsightTargetUnexcludeInput {
+  insightId: string;
+  symbol: string;
+}
+
+export type ValuationMethodStatus = "active" | "archived";
+
+export interface ValuationMethodAssetScope {
+  kinds: string[];
+  assetClasses: string[];
+  markets: string[];
+  domains: DataDomainId[];
+}
+
+export interface ValuationMetricNode {
+  key: string;
+  label: string;
+  layer: "top" | "first_order" | "second_order" | "output" | "risk";
+  unit: "number" | "pct" | "currency" | "score" | "unknown";
+  dependsOn: string[];
+  formulaId: string;
+  editable: boolean;
+}
+
+export interface ValuationMethod {
+  id: string;
+  methodKey: string;
+  name: string;
+  description: string | null;
+  isBuiltin: boolean;
+  status: ValuationMethodStatus;
+  assetScope: ValuationMethodAssetScope;
+  activeVersionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ValuationMethodVersion {
+  id: string;
+  methodId: string;
+  version: number;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  graph: ValuationMetricNode[];
+  paramSchema: Record<string, unknown>;
+  metricSchema: Record<string, unknown>;
+  formulaManifest: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ValuationMethodDetail {
+  method: ValuationMethod;
+  versions: ValuationMethodVersion[];
+}
+
+export interface ListValuationMethodsInput {
+  query?: string | null;
+  includeArchived?: boolean | null;
+  includeBuiltin?: boolean | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListValuationMethodsResult {
+  items: ValuationMethod[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface GetValuationMethodInput {
+  methodKey: string;
+}
+
+export interface CreateCustomValuationMethodInput {
+  methodKey: string;
+  name: string;
+  description?: string | null;
+  assetScope: ValuationMethodAssetScope;
+  templateMethodKey?: string | null;
+}
+
+export interface UpdateCustomValuationMethodInput {
+  methodKey: string;
+  name?: string | null;
+  description?: string | null;
+  status?: ValuationMethodStatus | null;
+  assetScope?: ValuationMethodAssetScope | null;
+}
+
+export interface CloneBuiltinValuationMethodInput {
+  sourceMethodKey: string;
+  targetMethodKey: string;
+  name?: string | null;
+  description?: string | null;
+  assetScope?: ValuationMethodAssetScope | null;
+}
+
+export interface PublishValuationMethodVersionInput {
+  methodKey: string;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  graph: ValuationMetricNode[];
+  paramSchema: Record<string, unknown>;
+  metricSchema: Record<string, unknown>;
+}
+
+export interface SetActiveValuationMethodVersionInput {
+  methodKey: string;
+  versionId: string;
+}
+
+export interface ValuationPreviewBySymbolInput {
+  symbol: string;
+  asOfDate?: string | null;
+  methodKey?: string | null;
+}
+
+export interface ValuationAppliedEffect {
+  insightId: string;
+  insightTitle: string;
+  channelId: string;
+  metricKey: string;
+  stage: InsightEffectStage;
+  operator: InsightEffectOperator;
+  priority: number;
+  value: number;
+  beforeValue: number | null;
+  afterValue: number | null;
+  scopes: string[];
+}
+
+export interface ValuationAdjustmentPreview {
+  symbol: string;
+  asOfDate: string;
+  methodKey: string | null;
+  methodVersionId: string | null;
+  baseMetrics: Record<string, number | null>;
+  adjustedMetrics: Record<string, number | null>;
+  baseValue: number | null;
+  adjustedValue: number | null;
+  appliedEffects: ValuationAppliedEffect[];
+  notApplicable: boolean;
+  reason: string | null;
+  computedAt: number;
+}
+
 export interface CreateLedgerEntryInput {
   portfolioId: PortfolioId;
   accountKey?: string | null;
@@ -1269,6 +1625,51 @@ export interface MyTraderApi {
       input: BatchSetInstrumentAutoIngestInput
     ): Promise<void>;
   };
+  insights: {
+    list(input?: ListInsightsInput): Promise<ListInsightsResult>;
+    get(input: GetInsightInput): Promise<InsightDetail | null>;
+    create(input: CreateInsightInput): Promise<InsightDetail>;
+    update(input: UpdateInsightInput): Promise<InsightDetail>;
+    remove(input: RemoveInsightInput): Promise<void>;
+    search(input: SearchInsightsInput): Promise<SearchInsightsResult>;
+    upsertScopeRule(input: UpsertInsightScopeRuleInput): Promise<InsightScopeRule>;
+    removeScopeRule(input: RemoveInsightScopeRuleInput): Promise<void>;
+    upsertEffectChannel(
+      input: UpsertInsightEffectChannelInput
+    ): Promise<InsightEffectChannel>;
+    removeEffectChannel(input: RemoveInsightEffectChannelInput): Promise<void>;
+    upsertEffectPoint(input: UpsertInsightEffectPointInput): Promise<InsightEffectPoint>;
+    removeEffectPoint(input: RemoveInsightEffectPointInput): Promise<void>;
+    previewMaterializedTargets(
+      input: MaterializeInsightTargetsInput
+    ): Promise<MaterializeInsightTargetsResult>;
+    excludeTarget(input: InsightTargetExcludeInput): Promise<void>;
+    unexcludeTarget(input: InsightTargetUnexcludeInput): Promise<void>;
+    listValuationMethods(
+      input?: ListValuationMethodsInput
+    ): Promise<ListValuationMethodsResult>;
+    getValuationMethod(
+      input: GetValuationMethodInput
+    ): Promise<ValuationMethodDetail | null>;
+    createCustomValuationMethod(
+      input: CreateCustomValuationMethodInput
+    ): Promise<ValuationMethodDetail>;
+    updateCustomValuationMethod(
+      input: UpdateCustomValuationMethodInput
+    ): Promise<ValuationMethodDetail>;
+    cloneBuiltinValuationMethod(
+      input: CloneBuiltinValuationMethodInput
+    ): Promise<ValuationMethodDetail>;
+    publishValuationMethodVersion(
+      input: PublishValuationMethodVersionInput
+    ): Promise<ValuationMethodDetail>;
+    setActiveValuationMethodVersion(
+      input: SetActiveValuationMethodVersionInput
+    ): Promise<ValuationMethodDetail>;
+    previewValuationBySymbol(
+      input: ValuationPreviewBySymbolInput
+    ): Promise<ValuationAdjustmentPreview>;
+  };
 }
 
 export const IPC_CHANNELS = {
@@ -1368,5 +1769,28 @@ export const IPC_CHANNELS = {
   MARKET_INSTRUMENT_REGISTRY_SET_AUTO_INGEST:
     "market:instrumentRegistry:setAutoIngest",
   MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST:
-    "market:instrumentRegistry:batchSetAutoIngest"
+    "market:instrumentRegistry:batchSetAutoIngest",
+  INSIGHTS_LIST: "insights:list",
+  INSIGHTS_GET: "insights:get",
+  INSIGHTS_CREATE: "insights:create",
+  INSIGHTS_UPDATE: "insights:update",
+  INSIGHTS_DELETE: "insights:delete",
+  INSIGHTS_SEARCH: "insights:search",
+  INSIGHTS_SCOPE_UPSERT: "insights:scope:upsert",
+  INSIGHTS_SCOPE_DELETE: "insights:scope:delete",
+  INSIGHTS_CHANNEL_UPSERT: "insights:channel:upsert",
+  INSIGHTS_CHANNEL_DELETE: "insights:channel:delete",
+  INSIGHTS_POINT_UPSERT: "insights:point:upsert",
+  INSIGHTS_POINT_DELETE: "insights:point:delete",
+  INSIGHTS_MATERIALIZE_PREVIEW: "insights:materialize:preview",
+  INSIGHTS_TARGET_EXCLUDE: "insights:target:exclude",
+  INSIGHTS_TARGET_UNEXCLUDE: "insights:target:unexclude",
+  VALUATION_METHOD_LIST: "valuationMethod:list",
+  VALUATION_METHOD_GET: "valuationMethod:get",
+  VALUATION_METHOD_CREATE_CUSTOM: "valuationMethod:createCustom",
+  VALUATION_METHOD_UPDATE_CUSTOM: "valuationMethod:updateCustom",
+  VALUATION_METHOD_CLONE_BUILTIN: "valuationMethod:cloneBuiltin",
+  VALUATION_METHOD_PUBLISH_VERSION: "valuationMethod:publishVersion",
+  VALUATION_METHOD_SET_ACTIVE_VERSION: "valuationMethod:setActiveVersion",
+  VALUATION_PREVIEW_BY_SYMBOL: "valuation:previewBySymbol"
 } as const;

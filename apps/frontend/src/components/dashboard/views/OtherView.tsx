@@ -34,6 +34,10 @@ import {
   type OtherInstrumentManagementTabProps
 } from "./other/OtherInstrumentManagementTab";
 import { OtherTestTab, type OtherTestTabProps } from "./other/OtherTestTab";
+import {
+  OtherValuationMethodsTab,
+  type OtherValuationMethodsTabProps
+} from "./other/OtherValuationMethodsTab";
 
 type DashboardMarketState = ReturnType<
   typeof import("../hooks/use-dashboard-market").useDashboardMarket<
@@ -260,6 +264,10 @@ export function OtherView(props: OtherViewProps) {
     pricesCsvPath: props.pricesCsvPath,
     setActiveView: props.setActiveView
   } satisfies OtherTestTabProps;
+  const valuationMethodsTabProps = {
+    Button: props.Button,
+    formatDateTime: props.formatDateTime
+  } satisfies OtherValuationMethodsTabProps;
 
   return (
     <Panel>
@@ -277,6 +285,9 @@ export function OtherView(props: OtherViewProps) {
 
         {otherTab === "data-status" &&
           createElement(OtherDataStatusTab, dataStatusTabProps)}
+
+        {otherTab === "valuation-methods" &&
+          createElement(OtherValuationMethodsTab, valuationMethodsTabProps)}
 
         {otherTab === "test" && createElement(OtherTestTab, testTabProps)}
       </div>

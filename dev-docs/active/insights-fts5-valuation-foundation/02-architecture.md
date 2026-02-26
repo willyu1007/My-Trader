@@ -2,23 +2,47 @@
 
 ## Scope boundaries
 - In scope
-  - SQLite FTS5 能力升级与运行时接入
-  - 观点影响估值的数据契约（非完整业务实现）
+  - insights/valuation business schema
+  - 观点 CRUD + FTS5 搜索 + 作用域展开 + symbol materialization
+  - valuation methods 管理（内置只读、可克隆、自定义版本）
+  - valuation preview（base vs adjusted）与 applied effects 展示接口
 - Out of scope
-  - 观点完整 CRUD/UI 开发
-  - 完整估值计算引擎
+  - instrument_id 全链路主键迁移
+  - 全域行情数据链路补齐
 
 ## Runtime design
-- 目标：保持现有 `storage/sqlite.ts` API 稳定（`open/get/all/run/transaction/close`）。
-- 约束：FTS5 必须在运行时可检测；若不可用，应阻止进入“观点检索”功能并抛出可诊断错误。
+- DB：
+  - business DB 保存 insights 与 valuation methods。
+  - market cache DB 提供 symbol/kind/asset_class/market/tag 数据用于 scope resolver 与 preview。
+- 键策略：
+  - 首版以 `symbol` 落地，不引入 instrument_id 迁移。
+  - instrument catalog 写入执行冲突保护：同 provider+market+symbol 可覆盖；跨市场同 symbol 阻断。
 
-## Valuation component contract (draft)
-- `MethodRegistry`: 注册估值方法与依赖参数（可扩展到 PE/PB/DCF/多因子/波动率等）。
-- `MetricGraph`: 参数依赖图（顶层指标 -> 一阶参数 -> 二阶参数）。
-- `InsightOperatorLayer`: `set/add/mul/min/max` 对任意 metric 施加算子。
-- `ScopeResolver`: 行业/概念/领域展开为 symbol 集合；最终 materialize 到 symbol。
-- `TimeSeriesEffect`: 观点在时间轴上以离散点定义，区间内线性插值，区间外不生效。
+## Data contracts
+- Core tables
+  - `insights`
+  - `insight_scope_rules`
+  - `insight_target_exclusions`
+  - `insight_effect_channels`
+  - `insight_effect_points`
+  - `insight_materialized_targets`
+  - `insight_fts`（FTS5）
+- Valuation tables
+  - `valuation_methods`
+  - `valuation_method_versions`
+  - `valuation_adjustment_snapshots`
 
 ## Key rule alignments
-- 冲突规则：不以“行业优先级”做最终裁决，先展开为 symbol，再按 symbol 维度合并。
-- 时间规则：`[(t0,v0),(t1,v1),...]` 线性插值；`t < t0` 或 `t > tn` 时无影响（effect=0/none）。
+- Scope resolver:
+  - 支持 `symbol/tag/kind/asset_class/market/domain/watchlist`。
+  - 所有作用先展开后收敛到 symbol。
+- 时间规则：
+  - effect points 按自然日线性插值。
+  - 区间外无影响。
+- 冲突规则：
+  - 阶段固定：`base -> first_order -> second_order -> output -> risk`
+  - 阶段内排序：`priority asc -> created_at asc -> insight_id asc`
+  - 算子：`set/add/mul/min/max`
+- 生命周期规则：
+  - 标的侧解绑写 `insight_target_exclusions`。
+  - 方法新版本仅影响未来日期，不回溯历史快照。

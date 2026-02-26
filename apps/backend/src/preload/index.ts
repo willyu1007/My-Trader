@@ -202,6 +202,48 @@ const api: MyTraderApi = {
         IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST,
         input
       )
+  },
+  insights: {
+    list: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_LIST, input ?? null),
+    get: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_GET, input),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_CREATE, input),
+    update: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_UPDATE, input),
+    remove: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_DELETE, input),
+    search: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_SEARCH, input),
+    upsertScopeRule: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_SCOPE_UPSERT, input),
+    removeScopeRule: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_SCOPE_DELETE, input),
+    upsertEffectChannel: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_CHANNEL_UPSERT, input),
+    removeEffectChannel: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_CHANNEL_DELETE, input),
+    upsertEffectPoint: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_POINT_UPSERT, input),
+    removeEffectPoint: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_POINT_DELETE, input),
+    previewMaterializedTargets: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_MATERIALIZE_PREVIEW, input),
+    excludeTarget: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_TARGET_EXCLUDE, input),
+    unexcludeTarget: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_TARGET_UNEXCLUDE, input),
+    listValuationMethods: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_LIST, input ?? null),
+    getValuationMethod: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_GET, input),
+    createCustomValuationMethod: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_CREATE_CUSTOM, input),
+    updateCustomValuationMethod: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_UPDATE_CUSTOM, input),
+    cloneBuiltinValuationMethod: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_CLONE_BUILTIN, input),
+    publishValuationMethodVersion: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_PUBLISH_VERSION, input),
+    setActiveValuationMethodVersion: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_SET_ACTIVE_VERSION, input),
+    previewValuationBySymbol: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_PREVIEW_BY_SYMBOL, input)
   }
 };
 

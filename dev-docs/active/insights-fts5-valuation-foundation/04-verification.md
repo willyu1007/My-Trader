@@ -28,8 +28,57 @@
 - `2026-02-26` `pnpm -C apps/backend verify:fts5`
   - Result: pass
   - Notes: 输出 `[verify-fts5] ok`，后续可作为回归验证入口。
+- `2026-02-26` `pnpm typecheck`
+  - Result: pass
+  - Notes: shared/backend/frontend 类型检查通过；`apps/frontend verify:theme` 通过。
+- `2026-02-26` `pnpm build`
+  - Result: pass
+  - Notes: shared/frontend/backend 全链路构建通过；frontend 仅有 chunk size 提示（非阻断）。
+- `2026-02-26` `pnpm -C apps/backend verify:fts5`
+  - Result: pass
+  - Notes: 输出 `[verify-fts5] ok`，FTS5 回归通过。
+- `2026-02-26` `pnpm -C apps/backend verify:fts5`（post e2e rerun）
+  - Result: pass
+  - Notes: 冒烟脚本与新增 tsup entry 后再次回归，输出 `[verify-fts5] ok`。
+- `2026-02-26` `pnpm -C apps/backend verify:insights-e2e`
+  - Result: pass
+  - Notes: 输出 `[verify-insights-e2e] ok`；覆盖 scope 展开、插值、跨资产估值预览、exclusion/unexclude、FTS 命中。
+- `2026-02-26` `pnpm -C apps/backend verify:insights-e2e`（lifecycle delete case）
+  - Result: fail
+  - Notes: FTS MATCH 关键词含 `-`（`fan-out`）触发语法解析，报错 `no such column: out`。
+- `2026-02-26` `pnpm -C apps/backend verify:insights-e2e`（query 修正后）
+  - Result: pass
+  - Notes: 使用稳定关键词后通过，删除后 FTS 不可见断言生效。
+- `2026-02-26` `pnpm typecheck`
+  - Result: pass
+  - Notes: 修复 `verifyInsightsE2E` 中 `UpdateInsightInput` 缺少 `title` 后通过。
+- `2026-02-26` `pnpm build`
+  - Result: pass
+  - Notes: frontend/backend/shared 构建通过；frontend 仍有 chunk size 提示（非阻断）。
+- `2026-02-26` `pnpm typecheck`（post preview-link patch）
+  - Result: pass
+  - Notes: 含 InsightsView 估值预览链路与 verify 脚本修复后，类型检查通过。
+- `2026-02-26` `pnpm build`（post preview-link patch）
+  - Result: pass
+  - Notes: 全链路构建通过；frontend 仍有 chunk size 提示（非阻断）。
+- `2026-02-26` `pnpm typecheck`（title dedup patch）
+  - Result: pass
+  - Notes: 移除重复模块/子 tab 标题后，shared/backend/frontend 类型检查与 theme contract 通过。
+- `2026-02-26` `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json`（data-analysis placeholder title dedup）
+  - Result: pass
+  - Notes: 去除 `数据分析 ·` 占位标题前缀后，前端编译检查通过。
+- `2026-02-26` `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json`（valuation-methods ui reshape）
+  - Result: pass
+  - Notes: 估值方法页重构（资产类型优先、版本差异简化）后前端编译检查通过。
+- `2026-02-26` `pnpm typecheck`（valuation-methods ui reshape）
+  - Result: pass
+  - Notes: shared/backend/frontend 类型检查与 theme contract 均通过。
 
 ## Manual checks
 - [x] backend 运行时可创建 FTS5 virtual table
 - [x] 关键词检索最小示例正常
-- [ ] 关键词高亮/排序（snippet/bm25）待观点模块落地时补充端到端检查
+- [x] insights FTS5 搜索（命中）自动化检查
+- [x] 观点生命周期（创建/更新）自动化检查
+- [x] scope materialization + exclusion 双向解绑自动化检查
+- [x] valuation preview（当前值 vs 调整后值）自动化检查
+- [ ] UI 手工回归（视图交互与文案口径）

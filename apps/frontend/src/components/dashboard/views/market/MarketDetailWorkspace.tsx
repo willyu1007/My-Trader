@@ -1,3 +1,7 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import type { ValuationAdjustmentPreview } from "@mytrader/shared";
+
 import type {
   MarketChartHoverDatum,
   MarketRangeOption,
@@ -68,6 +72,94 @@ export type MarketDetailWorkspaceProps = Pick<
 >;
 
 export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
+  const [valuationPreview, setValuationPreview] =
+    useState<ValuationAdjustmentPreview | null>(null);
+  const [valuationLoading, setValuationLoading] = useState(false);
+  const [valuationError, setValuationError] = useState<string | null>(null);
+  const [excludingInsightId, setExcludingInsightId] = useState<string | null>(null);
+
+  const valuationAsOfDate = useMemo(
+    () =>
+      props.marketSelectedQuote?.tradeDate ??
+      props.marketLatestBar?.date ??
+      null,
+    [props.marketLatestBar?.date, props.marketSelectedQuote?.tradeDate]
+  );
+
+  const loadValuationPreview = useCallback(async () => {
+    const symbol = props.marketSelectedSymbol;
+    if (!symbol || !window.mytrader?.insights) {
+      setValuationPreview(null);
+      setValuationError(null);
+      return;
+    }
+    setValuationLoading(true);
+    setValuationError(null);
+    try {
+      const preview = await window.mytrader.insights.previewValuationBySymbol({
+        symbol,
+        asOfDate: valuationAsOfDate
+      });
+      setValuationPreview(preview);
+    } catch (err) {
+      setValuationPreview(null);
+      setValuationError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setValuationLoading(false);
+    }
+  }, [props.marketSelectedSymbol, valuationAsOfDate]);
+
+  useEffect(() => {
+    void loadValuationPreview();
+  }, [loadValuationPreview]);
+
+  const appliedInsightRows = useMemo(() => {
+    if (!valuationPreview) return [];
+    const map = new Map<
+      string,
+      { insightId: string; insightTitle: string; count: number; scopes: string[] }
+    >();
+    for (const effect of valuationPreview.appliedEffects) {
+      const existing = map.get(effect.insightId);
+      if (existing) {
+        existing.count += 1;
+        effect.scopes.forEach((scope) => {
+          if (!existing.scopes.includes(scope)) existing.scopes.push(scope);
+        });
+        continue;
+      }
+      map.set(effect.insightId, {
+        insightId: effect.insightId,
+        insightTitle: effect.insightTitle,
+        count: 1,
+        scopes: [...effect.scopes]
+      });
+    }
+    return Array.from(map.values());
+  }, [valuationPreview]);
+
+  const handleExcludeInsight = useCallback(
+    async (insightId: string) => {
+      const symbol = props.marketSelectedSymbol;
+      if (!symbol || !window.mytrader?.insights) return;
+      setExcludingInsightId(insightId);
+      setValuationError(null);
+      try {
+        await window.mytrader.insights.excludeTarget({
+          insightId,
+          symbol,
+          reason: "removed from symbol side"
+        });
+        await loadValuationPreview();
+      } catch (err) {
+        setValuationError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setExcludingInsightId(null);
+      }
+    },
+    [loadValuationPreview, props.marketSelectedSymbol]
+  );
+
   return (
       <main className="flex-1 min-w-0 min-h-0 overflow-hidden bg-white/40 dark:bg-background-dark/40">
         {!props.marketSelectedSymbol &&
@@ -374,6 +466,115 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
             </div>
 
             <div className="min-h-0 px-6 pt-3 pb-3 flex flex-col">
+              <div className="flex-shrink-0 pb-2">
+                <div className="rounded-lg border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/80 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      价值判断（当前值 vs 调整后值）
+                    </div>
+                    <props.Button
+                      variant="secondary"
+                      size="sm"
+                      icon="refresh"
+                      onClick={() => void loadValuationPreview()}
+                      disabled={valuationLoading}
+                    >
+                      刷新
+                    </props.Button>
+                  </div>
+
+                  {valuationError && (
+                    <div className="text-xs text-rose-600 dark:text-rose-400">
+                      {valuationError}
+                    </div>
+                  )}
+
+                  {valuationLoading && (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      估值预览加载中...
+                    </div>
+                  )}
+
+                  {!valuationLoading && valuationPreview && (
+                    <>
+                      <div className="grid grid-cols-4 gap-3 text-xs">
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
+                          <div className="text-slate-500 dark:text-slate-400">当前值</div>
+                          <div className="font-mono text-sm text-slate-900 dark:text-slate-100">
+                            {props.formatNumber(valuationPreview.baseValue, 4)}
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
+                          <div className="text-slate-500 dark:text-slate-400">调整后值</div>
+                          <div className="font-mono text-sm text-slate-900 dark:text-slate-100">
+                            {props.formatNumber(valuationPreview.adjustedValue, 4)}
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
+                          <div className="text-slate-500 dark:text-slate-400">方法</div>
+                          <div className="font-mono text-[11px] text-slate-900 dark:text-slate-100 truncate">
+                            {valuationPreview.methodKey ?? "not_applicable"}
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
+                          <div className="text-slate-500 dark:text-slate-400">作用链路数</div>
+                          <div className="font-mono text-sm text-slate-900 dark:text-slate-100">
+                            {valuationPreview.appliedEffects.length}
+                          </div>
+                        </div>
+                      </div>
+
+                      {valuationPreview.notApplicable && (
+                        <div className="text-xs text-amber-700 dark:text-amber-400">
+                          not_applicable: {valuationPreview.reason ?? "无可用估值方法"}
+                        </div>
+                      )}
+
+                      {!valuationPreview.notApplicable &&
+                        valuationPreview.appliedEffects.length > 0 && (
+                          <div className="max-h-28 overflow-auto rounded border border-slate-200 dark:border-border-dark">
+                            {valuationPreview.appliedEffects.slice(0, 12).map((effect) => (
+                              <div
+                                key={`${effect.channelId}:${effect.metricKey}:${effect.stage}`}
+                                className="px-2 py-1.5 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0 text-[11px] font-mono flex items-center justify-between gap-2"
+                              >
+                                <span className="truncate">
+                                  {effect.metricKey} · {effect.operator} {effect.value} ·{" "}
+                                  p={effect.priority}
+                                </span>
+                                <span className="text-slate-500 dark:text-slate-400 truncate">
+                                  {effect.insightTitle}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                      {appliedInsightRows.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {appliedInsightRows.map((item) => (
+                            <props.Button
+                              key={item.insightId}
+                              variant="danger"
+                              size="sm"
+                              icon="link_off"
+                              onClick={() => void handleExcludeInsight(item.insightId)}
+                              disabled={
+                                excludingInsightId !== null &&
+                                excludingInsightId !== item.insightId
+                              }
+                              title={`作用域: ${item.scopes.join(", ") || "--"}`}
+                            >
+                              解除 {item.insightTitle}（{item.count}）
+                            </props.Button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
               <div className="flex-shrink-0 pb-1">
                 <div className="relative group h-9">
                   <div className="absolute inset-0 z-0 flex items-center justify-center">

@@ -29,19 +29,24 @@ export async function upsertInstrumentProfiles(
   if (inputs.length === 0) return { inserted: 0, updated: 0 };
   const now = Date.now();
 
-  const existing = new Set<string>();
+  const existing = new Map<string, { provider: string; market: string | null }>();
   const chunkSize = 500;
   for (let idx = 0; idx < inputs.length; idx += chunkSize) {
     const chunk = inputs.slice(idx, idx + chunkSize);
     const symbols = chunk.map((item) => item.symbol);
-    const rows = await all<{ symbol: string }>(
+    const rows = await all<{ symbol: string; provider: string; market: string | null }>(
       db,
-      `select symbol from instrument_profiles where symbol in (${symbols
+      `select symbol, provider, market from instrument_profiles where symbol in (${symbols
         .map(() => "?")
         .join(",")})`,
       symbols
     );
-    rows.forEach((row) => existing.add(row.symbol));
+    rows.forEach((row) =>
+      existing.set(row.symbol, {
+        provider: row.provider,
+        market: row.market ?? null
+      })
+    );
   }
 
   let inserted = 0;
@@ -49,6 +54,19 @@ export async function upsertInstrumentProfiles(
 
   await transaction(db, async () => {
     for (const item of inputs) {
+      const known = existing.get(item.symbol);
+      if (known) {
+        const sameProvider =
+          normalizeKey(known.provider) === normalizeKey(item.provider);
+        const sameMarket =
+          normalizeKey(known.market) === normalizeKey(item.market ?? null);
+        if (!sameProvider || !sameMarket) {
+          throw new Error(
+            `symbol collision blocked: ${item.symbol} existing(${known.provider}/${known.market ?? "-"}) incoming(${item.provider}/${item.market ?? "-"})`
+          );
+        }
+      }
+
       const tagsJson = JSON.stringify(item.tags ?? []);
       const providerDataJson = JSON.stringify(item.providerData ?? {});
       await run(
@@ -311,4 +329,8 @@ function parseJsonObject(value: string): Record<string, unknown> {
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function normalizeKey(value: string | null): string {
+  return (value ?? "").trim().toUpperCase();
 }

@@ -57,6 +57,7 @@ export type PortfolioTab =
 export type OtherTab =
   | "data-management"
   | "instrument-management"
+  | "valuation-methods"
   | "data-status"
   | "test";
 
