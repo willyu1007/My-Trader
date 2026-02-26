@@ -453,3 +453,59 @@
   - 可选诊断 API（已落地）：
     - `packages/shared/src/ipc.ts` / `apps/backend/src/preload/index.ts` / `apps/backend/src/main/ipc/registerIpcHandlers.ts`
       - 新增 `market.getRuntimePerfStats()`（`MARKET_RUNTIME_PERF_STATS_GET`），用于回归定位 flush 与进程内存指标。
+
+## 2026-02-25 Follow-up #16: 数据管理-状态明细搜索（P0）
+- 触发背景：
+  - 用户反馈“状态明细”在高基数数据下全量展示意义不大，要求增加可定位问题的搜索能力，并讨论与其它模块的搜索逻辑复用边界。
+- 已落地改动：
+  - shared 协议扩展：
+    - `packages/shared/src/ipc.ts`
+      - `ListCompletenessStatusInput` 新增字段：
+        - `domainId` / `moduleId` / `asOfTradeDate`
+        - `keyword` / `keywordFields`
+        - `onlyExceptions`
+        - `sortBy` / `sortOrder`
+  - backend 查询增强：
+    - `apps/backend/src/main/market/completeness/completenessRepository.ts`
+      - `listCompletenessStatusRows` 新增结构化过滤（domain/module/asOf）；
+      - 新增关键词搜索（entity/check/module，`LIKE` + 转义）；
+      - 新增 `onlyExceptions` 过滤（`missing/partial/not_started`）；
+      - 新增排序控制（updatedAt/asOfTradeDate/status）；
+      - 增加保护：无任何过滤条件时拒绝执行查询，避免无意义全表扫描。
+    - `apps/backend/src/main/market/completeness/completenessService.ts`
+      - list-status cache-error fallback 默认分页大小收敛为 50。
+  - frontend 状态明细交互增强：
+    - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+      - 新增关键词输入（Entity/Check/Module），支持 Enter 立即检索 + 250ms debounce；
+      - 新增“仅异常”开关（默认开启）；
+      - 新增“清空搜索”动作；
+      - 新增分页导航（50/页，上一页/下一页）；
+      - 切换 scope/check/status 或关键词时自动回到第一页；
+      - “查看供给详情”入口会重置为 source + onlyExceptions=true，便于异常排查。
+- 设计取舍：
+  - 复用范围收敛在“查询协议与交互模式”，暂不跨模块统一 repository/SQL；
+  - 先保证定位效率与性能（结构化过滤 + 限页），不引入全文检索引擎。
+
+## 2026-02-25 Follow-up #17: 数据管理滚动卡顿收敛（tooltip/overflow 降载）
+- 触发背景：
+  - 用户反馈在“数据管理”面板滚动出现轻微卡顿，体感较此前变差。
+- 已落地改动（最小风险）：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 移除本文件内大量 `HoverTooltip` 组件实例（每个标签一个），统一改为 `data-mt-tooltip`，交由全局 `GlobalHoverTooltipLayer` 处理；
+    - 目标检查项列表滚动容器从 `overflow-y-hidden + hover/focus 切换` 改为常驻 `overflow-y-auto`，避免 hover 切换触发额外重排；
+    - 保留现有视觉样式与 tooltip 语义，不改变业务口径。
+- 预期收益：
+  - 降低滚动中的组件状态开销与样式切换重排概率；
+  - 保持 tooltip 与标签展示一致性的同时减少交互卡顿。
+
+## 2026-02-25 Follow-up #18: 全局 tooltip 滚动抖动抑制
+- 触发背景：
+  - Follow-up #17 后用户反馈“仍不够流畅”，说明卡顿热点不只在面板局部组件，还可能在全局 hover 监听链路。
+- 已落地改动：
+  - `apps/frontend/src/components/GlobalHoverTooltipLayer.tsx`
+    - 新增滚动抑制窗口：`POINTER_SUPPRESS_AFTER_SCROLL_MS = 120`；
+    - 在滚动后短窗口内跳过 `mouseover/mouseout` 处理，避免滚动过程中大量 pointer 事件触发 tooltip 解析；
+    - `releaseActiveElement` 增加空态短路，避免“无 active tooltip 时”的重复状态更新。
+- 预期收益：
+  - 减少滚动期间由 tooltip 层带来的高频 JS 调度与状态更新；
+  - 降低数据管理长页滚动时的主线程噪声。

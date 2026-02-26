@@ -142,6 +142,35 @@ export async function getIngestRunById(
   return row ?? null;
 }
 
+export async function removeIngestRunById(
+  db: SqliteDatabase,
+  id: string
+): Promise<void> {
+  const existing = await getIngestRunById(db, id);
+  if (!existing) return;
+  if (existing.status === "running") {
+    throw new Error("运行中的拉取记录不可删除。");
+  }
+  await run(
+    db,
+    `
+      delete from ingest_runs
+      where id = ?
+    `,
+    [id]
+  );
+}
+
+export async function clearIngestRunsHistory(db: SqliteDatabase): Promise<void> {
+  await run(
+    db,
+    `
+      delete from ingest_runs
+      where status <> 'running'
+    `
+  );
+}
+
 export async function getLatestIngestRun(
   db: SqliteDatabase,
   scope: IngestRunScope

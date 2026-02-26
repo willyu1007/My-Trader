@@ -101,7 +101,7 @@ export async function listCompletenessStatus(input: {
         error
       )}`
     );
-    const limit = Math.max(1, Math.min(1000, Math.floor(input.request?.limit ?? 200)));
+    const limit = Math.max(1, Math.min(200, Math.floor(input.request?.limit ?? 50)));
     const offset = Math.max(0, Math.floor(input.request?.offset ?? 0));
     return {
       items: [],

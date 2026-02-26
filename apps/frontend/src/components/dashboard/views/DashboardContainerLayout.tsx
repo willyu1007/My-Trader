@@ -266,10 +266,7 @@ export function DashboardContainerLayout({
       ? "scroll-auto"
       : "scroll-smooth";
   const topTabGroupLabel = navItems.find((item) => item.key === activeView)?.label ?? "";
-  const topbarPrimaryLabel =
-    activeView === "other" && otherTab === "data-status"
-      ? "数据状态"
-      : topTabGroupLabel;
+  const topbarPrimaryLabel = topTabGroupLabel;
   const topTabs:
     | {
         key: string;

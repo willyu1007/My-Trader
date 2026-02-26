@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ReactNode } from "react";
 
 import type {
   CompletenessScopeId,
@@ -12,12 +11,12 @@ import type {
 
 import type { OtherViewProps } from "../../OtherView";
 
-type ScopeFilter = "all" | CompletenessScopeId;
 type StatusFilter = "all" | CompletenessStatus;
 type CheckFilter = "all" | string;
 type MultiSelectOption = { value: string; label: string };
-const HOVER_TOOLTIP_DELAY_MS = 200;
 const CHECK_TAG_SLOT_COUNT = 3;
+const STATUS_PAGE_SIZE = 50;
+const STATUS_KEYWORD_DEBOUNCE_MS = 250;
 
 const STATUS_ORDER: CompletenessStatus[] = [
   "complete",
@@ -25,9 +24,6 @@ const STATUS_ORDER: CompletenessStatus[] = [
   "missing",
   "not_applicable"
 ];
-
-const COMPLETENESS_DEFINITION_TOOLTIP =
-  "完备性用于评估目标池与数据源供给覆盖，不直接改变目标池抓取范围。";
 
 const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
@@ -39,8 +35,10 @@ const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
 
 export type OtherDataManagementTargetTaskPanelProps = Pick<
   OtherViewProps,
-  "Button" | "Input" | "PopoverSelect" | "formatCnDate"
->;
+  "Button" | "Input" | "Modal" | "PopoverSelect" | "formatCnDate"
+> & {
+  mode?: "management" | "status";
+};
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || "未知错误。";
@@ -49,7 +47,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 function formatScopeLabel(scopeId: CompletenessScopeId): string {
-  return scopeId === "target_pool" ? "目标池完备性" : "数据源供给完备性";
+  return scopeId === "target_pool" ? "目标池数据完备性" : "数据源供给完备性";
 }
 
 function formatBucketLabel(bucketId: string): string {
@@ -104,7 +102,7 @@ function resolveStatusCountFromBucket(
   return bucket.notApplicable;
 }
 
-function resolveApplicableCountFromCoverage(
+function resolveTotalCountFromCoverage(
   coverage: PreviewCompletenessCoverageResult | null
 ): number {
   if (!coverage) return 0;
@@ -112,15 +110,16 @@ function resolveApplicableCountFromCoverage(
     coverage.totals.complete +
     coverage.totals.partial +
     coverage.totals.missing +
-    coverage.totals.notStarted
+    coverage.totals.notStarted +
+    coverage.totals.notApplicable
   );
 }
 
-function resolveApplicableCountFromBucket(
+function resolveTotalCountFromBucket(
   bucket: PreviewCompletenessCoverageResult["byBucket"][number] | null
 ): number {
   if (!bucket) return 0;
-  return bucket.complete + bucket.partial + bucket.missing + bucket.notStarted;
+  return bucket.complete + bucket.partial + bucket.missing + bucket.notStarted + bucket.notApplicable;
 }
 
 function formatPercent(value: number): string {
@@ -134,6 +133,77 @@ function completeRateToneClass(rate: number | null): string {
   if (rate >= 0.4) return "text-amber-700 dark:text-amber-300";
   if (rate >= 0.2) return "text-orange-700 dark:text-orange-300";
   return "text-rose-700 dark:text-rose-300";
+}
+
+type CoverageSummary = {
+  label: string;
+  labelTone: string;
+  metricTone: string;
+  summary: string;
+  scaleLabel: string;
+  dateLabel: string;
+};
+
+function buildCoverageSummary(
+  coverageLoaded: boolean,
+  coverage: PreviewCompletenessCoverageResult | null,
+  formatCnDate: (date: string) => string
+): CoverageSummary {
+  const totals = coverage?.totals;
+  const missing = totals?.missing ?? 0;
+  const pending = (totals?.partial ?? 0) + (totals?.notStarted ?? 0);
+  const applicable =
+    (totals?.complete ?? 0) +
+    (totals?.partial ?? 0) +
+    (totals?.missing ?? 0) +
+    (totals?.notStarted ?? 0);
+  const delayDays = resolveDelayDays(coverage?.asOfTradeDate ?? null);
+  const asOfLabel = coverage?.asOfTradeDate ? formatCnDate(coverage.asOfTradeDate) : "--";
+  const delayLabel = delayDays === null ? "--" : `${delayDays} 天`;
+
+  if (!coverageLoaded) {
+    return {
+      label: "待加载",
+      labelTone: "text-slate-600 dark:text-slate-300",
+      metricTone: "text-slate-600 dark:text-slate-300",
+      summary: "点击“刷新”加载完备性状态",
+      scaleLabel: "--",
+      dateLabel: "截至 --（延迟 --）"
+    };
+  }
+
+  if (missing > 0) {
+    const missingRatio = applicable > 0 ? missing / applicable : 0;
+    return {
+      label: "高风险",
+      labelTone: "text-rose-700 dark:text-rose-300",
+      metricTone: "text-rose-700 dark:text-rose-300",
+      summary: `缺失 ${missing.toLocaleString()} 项（${formatPercent(missingRatio)}）`,
+      scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 × ${(totals?.checks ?? 0).toLocaleString()} 检查`,
+      dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
+    };
+  }
+
+  if (pending > 0) {
+    const pendingRatio = applicable > 0 ? pending / applicable : 0;
+    return {
+      label: "需关注",
+      labelTone: "text-amber-700 dark:text-amber-300",
+      metricTone: "text-amber-700 dark:text-amber-300",
+      summary: `待收敛 ${pending.toLocaleString()} 项（${formatPercent(pendingRatio)}）`,
+      scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 × ${(totals?.checks ?? 0).toLocaleString()} 检查`,
+      dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
+    };
+  }
+
+  return {
+    label: "健康",
+    labelTone: "text-emerald-700 dark:text-emerald-300",
+    metricTone: "text-emerald-700 dark:text-emerald-300",
+    summary: "无缺失与待收敛项（100.0%）",
+    scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 × ${(totals?.checks ?? 0).toLocaleString()} 检查`,
+    dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
+  };
 }
 
 function resolveDelayDays(asOfTradeDate: string | null): number | null {
@@ -255,115 +325,6 @@ function hasTargetCheckConfigChanged(
   if (left.defaultLookbackDays !== right.defaultLookbackDays) return true;
   if (left.targetEnabledCheckIds.length !== right.targetEnabledCheckIds.length) return true;
   return left.targetEnabledCheckIds.some((item, index) => item !== right.targetEnabledCheckIds[index]);
-}
-
-function HoverTooltip({
-  content,
-  children,
-  maxWidth = 320
-}: {
-  content: string;
-  children: ReactNode;
-  maxWidth?: number;
-}) {
-  const anchorRef = useRef<HTMLSpanElement | null>(null);
-  const timerRef = useRef<number | null>(null);
-  const [visible, setVisible] = useState(false);
-  const [layout, setLayout] = useState<{
-    top: number;
-    left: number;
-    width: number;
-    placement: "top" | "bottom";
-  } | null>(null);
-
-  const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-
-  const updateLayout = useCallback(() => {
-    const anchor = anchorRef.current;
-    if (!anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const gutter = 8;
-    const offset = 8;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const width = Math.min(maxWidth, viewportWidth - gutter * 2);
-    const left = Math.min(
-      Math.max(gutter, rect.left + rect.width / 2 - width / 2),
-      viewportWidth - width - gutter
-    );
-    const estimatedHeight = 52;
-    const spaceBelow = viewportHeight - rect.bottom - gutter;
-    const placement: "top" | "bottom" =
-      spaceBelow < estimatedHeight && rect.top > spaceBelow ? "top" : "bottom";
-    const top = placement === "top" ? rect.top - offset : rect.bottom + offset;
-    setLayout({ top, left, width, placement });
-  }, [maxWidth]);
-
-  const show = useCallback(() => {
-    clearTimer();
-    timerRef.current = window.setTimeout(() => {
-      updateLayout();
-      setVisible(true);
-    }, HOVER_TOOLTIP_DELAY_MS);
-  }, [clearTimer, updateLayout]);
-
-  const hide = useCallback(() => {
-    clearTimer();
-    setVisible(false);
-  }, [clearTimer]);
-
-  useEffect(() => {
-    return () => clearTimer();
-  }, [clearTimer]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const onScrollOrResize = () => updateLayout();
-    document.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
-    return () => {
-      document.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
-    };
-  }, [updateLayout, visible]);
-
-  return (
-    <span
-      ref={anchorRef}
-      onMouseEnter={show}
-      onMouseLeave={hide}
-      onFocus={show}
-      onBlur={hide}
-      className="inline-flex"
-    >
-      {children}
-      {visible && layout
-        ? createPortal(
-            <div
-              role="tooltip"
-              className="pointer-events-none z-[90]"
-              style={{
-                position: "fixed",
-                top: `${layout.top}px`,
-                left: `${layout.left}px`,
-                width: `${layout.width}px`,
-                transform: layout.placement === "top" ? "translateY(-100%)" : undefined
-              }}
-            >
-              <div className="rounded-md border border-slate-200/90 bg-white px-2 py-1.5 text-[11px] leading-4 text-slate-700 shadow-lg dark:border-border-dark dark:bg-surface-dark dark:text-slate-200">
-                {content}
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-    </span>
-  );
 }
 
 function MultiSelectFilter({
@@ -570,6 +531,8 @@ function MultiSelectFilter({
 export function OtherDataManagementTargetTaskPanel(
   props: OtherDataManagementTargetTaskPanelProps
 ) {
+  const panelMode = props.mode ?? "management";
+  const isStatusPanel = panelMode === "status";
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [materializing, setMaterializing] = useState(false);
@@ -581,13 +544,18 @@ export function OtherDataManagementTargetTaskPanel(
   const [savedConfig, setSavedConfig] = useState<MarketCompletenessConfig | null>(null);
   const [targetCoverage, setTargetCoverage] =
     useState<PreviewCompletenessCoverageResult | null>(null);
+  const [sourceCoverage, setSourceCoverage] =
+    useState<PreviewCompletenessCoverageResult | null>(null);
   const [coverageLoaded, setCoverageLoaded] = useState(false);
   const [statusRows, setStatusRows] = useState<ListCompletenessStatusResult | null>(null);
 
-  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const [checkFilter, setCheckFilter] = useState<CheckFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [statusPanelExpanded, setStatusPanelExpanded] = useState(false);
+  const [detailScopeId, setDetailScopeId] = useState<CompletenessScopeId | null>(null);
+  const [statusKeywordInput, setStatusKeywordInput] = useState("");
+  const [statusKeyword, setStatusKeyword] = useState("");
+  const [statusOnlyExceptions, setStatusOnlyExceptions] = useState(false);
+  const [statusPage, setStatusPage] = useState(0);
   const [targetBucketFilters, setTargetBucketFilters] = useState<string[]>([]);
   const [targetApplicationDomainFilters, setTargetApplicationDomainFilters] = useState<string[]>([]);
 
@@ -600,10 +568,16 @@ export function OtherDataManagementTargetTaskPanel(
 
   const refreshCoverage = useCallback(async () => {
     if (!window.mytrader) return;
-    const target = await window.mytrader.market.previewCompletenessCoverage({
-      scopeId: "target_pool"
-    });
+    const [target, source] = await Promise.all([
+      window.mytrader.market.previewCompletenessCoverage({
+        scopeId: "target_pool"
+      }),
+      window.mytrader.market.previewCompletenessCoverage({
+        scopeId: "source_pool"
+      })
+    ]);
     setTargetCoverage(target);
+    setSourceCoverage(source);
     setCoverageLoaded(true);
   }, []);
 
@@ -620,16 +594,21 @@ export function OtherDataManagementTargetTaskPanel(
     }
   }, [refreshConfig, refreshCoverage]);
 
-  const refreshStatusRows = useCallback(async () => {
-    if (!window.mytrader) return;
+  const refreshStatusRows = useCallback(async (scopeId: CompletenessScopeId | null = detailScopeId) => {
+    if (!window.mytrader || !scopeId) return;
     setStatusLoading(true);
     try {
       const rows = await window.mytrader.market.listCompletenessStatus({
-        scopeId: scopeFilter === "all" ? null : scopeFilter,
+        scopeId,
         checkId: checkFilter === "all" ? null : checkFilter,
         status: statusFilter === "all" ? null : statusFilter,
-        limit: 200,
-        offset: 0
+        keyword: statusKeyword.trim() ? statusKeyword.trim() : null,
+        keywordFields: ["entity", "check", "module"],
+        onlyExceptions: statusOnlyExceptions,
+        sortBy: "updatedAt",
+        sortOrder: "desc",
+        limit: STATUS_PAGE_SIZE,
+        offset: statusPage * STATUS_PAGE_SIZE
       });
       setStatusRows(rows);
       setError(null);
@@ -639,7 +618,26 @@ export function OtherDataManagementTargetTaskPanel(
     } finally {
       setStatusLoading(false);
     }
-  }, [checkFilter, scopeFilter, statusFilter]);
+  }, [
+    checkFilter,
+    detailScopeId,
+    statusFilter,
+    statusKeyword,
+    statusOnlyExceptions,
+    statusPage
+  ]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = statusKeywordInput.trim();
+      setStatusKeyword((prev) => {
+        if (prev === next) return prev;
+        setStatusPage(0);
+        return next;
+      });
+    }, STATUS_KEYWORD_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [statusKeywordInput]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -659,9 +657,9 @@ export function OtherDataManagementTargetTaskPanel(
   }, [refreshConfig]);
 
   useEffect(() => {
-    if (!statusPanelExpanded) return;
-    void refreshStatusRows();
-  }, [refreshStatusRows, statusPanelExpanded]);
+    if (!detailScopeId) return;
+    void refreshStatusRows(detailScopeId);
+  }, [detailScopeId, refreshStatusRows]);
 
   const targetChecks = useMemo(() => {
     if (!config) return [];
@@ -675,16 +673,18 @@ export function OtherDataManagementTargetTaskPanel(
     [config?.targetEnabledCheckIds]
   );
 
-  const checkFilterOptions = useMemo(() => {
-    const allChecks = config?.checks ?? [];
+  const detailCheckFilterOptions = useMemo(() => {
+    const allChecks = (config?.checks ?? []).filter((check) =>
+      detailScopeId ? check.scopeId === detailScopeId : true
+    );
     return [
       { value: "all", label: "全部检查项" },
       ...allChecks.map((check) => ({
         value: check.id,
-        label: `${formatScopeLabel(check.scopeId)} · ${check.label}`
+        label: check.label
       }))
     ];
-  }, [config?.checks]);
+  }, [config?.checks, detailScopeId]);
 
   const targetBucketFilterOptions = useMemo<MultiSelectOption[]>(() => {
     const unique = Array.from(new Set(targetChecks.map((check) => check.bucketId)));
@@ -753,8 +753,8 @@ export function OtherDataManagementTargetTaskPanel(
           if (coverageLoaded) {
             await refreshCoverage();
           }
-          if (statusPanelExpanded) {
-            await refreshStatusRows();
+          if (detailScopeId) {
+            await refreshStatusRows(detailScopeId);
           }
         })
         .catch((err) => {
@@ -773,68 +773,18 @@ export function OtherDataManagementTargetTaskPanel(
     refreshStatusRows,
     savedConfig,
     saving,
-    statusPanelExpanded
+    detailScopeId
   ]);
 
-  const topStatusSummary = useMemo(() => {
-    const totals = targetCoverage?.totals;
-    const missing = totals?.missing ?? 0;
-    const pending = (totals?.partial ?? 0) + (totals?.notStarted ?? 0);
-    const applicable =
-      (totals?.complete ?? 0) +
-      (totals?.partial ?? 0) +
-      (totals?.missing ?? 0) +
-      (totals?.notStarted ?? 0);
-    const delayDays = resolveDelayDays(targetCoverage?.asOfTradeDate ?? null);
-    const asOfLabel = targetCoverage?.asOfTradeDate
-      ? props.formatCnDate(targetCoverage.asOfTradeDate)
-      : "--";
-    const delayLabel = delayDays === null ? "--" : `${delayDays} 天`;
+  const targetStatusSummary = useMemo(
+    () => buildCoverageSummary(coverageLoaded, targetCoverage, props.formatCnDate),
+    [coverageLoaded, props.formatCnDate, targetCoverage]
+  );
 
-    if (!coverageLoaded) {
-      return {
-        label: "待加载",
-        labelTone: "text-slate-600 dark:text-slate-300",
-        metricTone: "text-slate-600 dark:text-slate-300",
-        summary: "点击“刷新”加载完备性状态",
-        scaleLabel: "--",
-        dateLabel: "截至 --（延迟 --）"
-      };
-    }
-
-    if (missing > 0) {
-      const missingRatio = applicable > 0 ? missing / applicable : 0;
-      return {
-        label: "高风险",
-        labelTone: "text-rose-700 dark:text-rose-300",
-        metricTone: "text-rose-700 dark:text-rose-300",
-        summary: `缺失 ${missing.toLocaleString()} 项（${formatPercent(missingRatio)}）`,
-        scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 × ${(totals?.checks ?? 0).toLocaleString()} 检查`,
-        dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
-      };
-    }
-
-    if (pending > 0) {
-      const pendingRatio = applicable > 0 ? pending / applicable : 0;
-      return {
-        label: "需关注",
-        labelTone: "text-amber-700 dark:text-amber-300",
-        metricTone: "text-amber-700 dark:text-amber-300",
-        summary: `待收敛 ${pending.toLocaleString()} 项（${formatPercent(pendingRatio)}）`,
-        scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 × ${(totals?.checks ?? 0).toLocaleString()} 检查`,
-        dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
-      };
-    }
-
-    return {
-      label: "健康",
-      labelTone: "text-emerald-700 dark:text-emerald-300",
-      metricTone: "text-emerald-700 dark:text-emerald-300",
-      summary: "无缺失与待收敛项（100.0%）",
-      scaleLabel: `${(totals?.entities ?? 0).toLocaleString()} 实体 × ${(totals?.checks ?? 0).toLocaleString()} 检查`,
-      dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
-    };
-  }, [coverageLoaded, props, targetCoverage]);
+  const sourceStatusSummary = useMemo(
+    () => buildCoverageSummary(coverageLoaded, sourceCoverage, props.formatCnDate),
+    [coverageLoaded, props.formatCnDate, sourceCoverage]
+  );
 
   const handleToggleTargetCheck = useCallback((checkId: string) => {
     setConfig((prev) => {
@@ -869,30 +819,81 @@ export function OtherDataManagementTargetTaskPanel(
       await window.mytrader.market.runCompletenessMaterialization({
         scopeId: "target_pool"
       });
-      await window.mytrader.market.runCompletenessMaterialization({
-        scopeId: "source_pool"
-      });
       await refreshCoverage();
-      if (statusPanelExpanded) {
-        await refreshStatusRows();
+      if (detailScopeId === "target_pool") {
+        await refreshStatusRows("target_pool");
       }
-      setNotice("完备性物化已触发，target/source 状态已刷新。");
+      setNotice("目标池完备性已写入并刷新。");
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setMaterializing(false);
     }
-  }, [refreshCoverage, refreshStatusRows, statusPanelExpanded]);
+  }, [detailScopeId, refreshCoverage, refreshStatusRows]);
 
-  const handleOpenSourceSupplyDetails = useCallback(() => {
-    setScopeFilter("source_pool");
+  const openStatusDetailModal = useCallback(async (scopeId: CompletenessScopeId) => {
+    const mytrader = window.mytrader;
+    if (!mytrader) return;
+    setDetailScopeId(scopeId);
     setCheckFilter("all");
     setStatusFilter("all");
-    setStatusPanelExpanded(true);
-  }, []);
+    setStatusOnlyExceptions(false);
+    setStatusKeywordInput("");
+    setStatusKeyword("");
+    setStatusPage(0);
+    setStatusRows(null);
+    setStatusLoading(true);
+    setError(null);
+    try {
+      if (scopeId === "source_pool") {
+        const probe = await mytrader.market.listCompletenessStatus({
+          scopeId: "source_pool",
+          checkId: null,
+          status: null,
+          keyword: null,
+          keywordFields: ["entity", "check", "module"],
+          onlyExceptions: false,
+          sortBy: "updatedAt",
+          sortOrder: "desc",
+          limit: 1,
+          offset: 0
+        });
+        if (probe.total <= 0) {
+          setNotice("供给状态首次写入中，请稍候…");
+          await mytrader.market.runCompletenessMaterialization({
+            scopeId: "source_pool"
+          });
+          await refreshCoverage();
+        }
+      }
+      const rows = await mytrader.market.listCompletenessStatus({
+        scopeId,
+        checkId: null,
+        status: null,
+        keyword: null,
+        keywordFields: ["entity", "check", "module"],
+        onlyExceptions: false,
+        sortBy: "updatedAt",
+        sortOrder: "desc",
+        limit: STATUS_PAGE_SIZE,
+        offset: 0
+      });
+      setStatusRows(rows);
+      setError(null);
+    } catch (err) {
+      setStatusRows(null);
+      setError(toErrorMessage(err));
+    } finally {
+      setStatusLoading(false);
+    }
+  }, [refreshCoverage]);
 
   const renderCoverageSection = useCallback(
-    (scopeId: CompletenessScopeId, coverage: PreviewCompletenessCoverageResult | null) => {
+    (
+      scopeId: CompletenessScopeId,
+      coverage: PreviewCompletenessCoverageResult | null,
+      options?: { showTitle?: boolean }
+    ) => {
       const checks = (config?.checks ?? [])
         .filter((check) => check.scopeId === scopeId)
         .filter((check) =>
@@ -932,9 +933,11 @@ export function OtherDataManagementTargetTaskPanel(
 
       return (
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-            {formatScopeLabel(scopeId)}
-          </div>
+          {options?.showTitle === false ? null : (
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+              {formatScopeLabel(scopeId)}
+            </div>
+          )}
 
           {enabledBuckets.length > 0 ? (
             <div className="max-h-[260px] overflow-auto pb-1">
@@ -965,10 +968,10 @@ export function OtherDataManagementTargetTaskPanel(
                         const value = column.bucketId
                           ? resolveStatusCountFromBucket(bucket, status)
                           : resolveStatusCountFromCoverage(coverage, status);
-                        const applicable = column.bucketId
-                          ? resolveApplicableCountFromBucket(bucket)
-                          : resolveApplicableCountFromCoverage(coverage);
-                        const statusRate = applicable > 0 ? value / applicable : null;
+                        const total = column.bucketId
+                          ? resolveTotalCountFromBucket(bucket)
+                          : resolveTotalCountFromCoverage(coverage);
+                        const statusRate = total > 0 ? value / total : null;
                         return (
                           <td
                             key={`${scopeId}-matrix-${status}-${column.key}`}
@@ -991,6 +994,25 @@ export function OtherDataManagementTargetTaskPanel(
                       })}
                     </tr>
                   ))}
+                  <tr className="border-t border-slate-300/70 dark:border-border-dark/80">
+                    <td className="w-20 min-w-[80px] px-2 py-1.5 font-semibold text-slate-700 dark:text-slate-200">
+                      总数
+                    </td>
+	                    {columns.map((column) => {
+	                      const bucket = column.bucketId ? byBucketMap.get(column.bucketId) ?? null : null;
+	                      const total = column.bucketId
+	                        ? resolveTotalCountFromBucket(bucket)
+	                        : resolveTotalCountFromCoverage(coverage);
+	                      return (
+	                        <td
+	                          key={`${scopeId}-matrix-total-${column.key}`}
+	                          className="px-2 py-1.5 text-right font-mono font-semibold text-slate-700 dark:text-slate-200"
+	                        >
+	                          {total.toLocaleString()}
+	                        </td>
+	                      );
+	                    })}
+	                  </tr>
                 </tbody>
               </table>
             </div>
@@ -1005,341 +1027,229 @@ export function OtherDataManagementTargetTaskPanel(
     [config?.checks, props, targetEnabledCheckIdSet]
   );
 
+  const statusTotalPages = useMemo(() => {
+    const total = statusRows?.total ?? 0;
+    return Math.max(1, Math.ceil(total / STATUS_PAGE_SIZE));
+  }, [statusRows?.total]);
+
+  const statusPageStart = useMemo(() => {
+    if (!statusRows || statusRows.total <= 0) return 0;
+    return statusRows.offset + 1;
+  }, [statusRows]);
+
+  const statusPageEnd = useMemo(() => {
+    if (!statusRows || statusRows.total <= 0) return 0;
+    return statusRows.offset + statusRows.items.length;
+  }, [statusRows]);
+
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold text-slate-900 dark:text-white inline-flex items-center gap-2">
-          <span>目标池数据完备性</span>
-          <HoverTooltip content={COMPLETENESS_DEFINITION_TOOLTIP}>
-            <span
-              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] font-semibold text-slate-500 dark:border-border-dark dark:text-slate-300 cursor-help"
-              aria-label={COMPLETENESS_DEFINITION_TOOLTIP}
-              tabIndex={0}
+      {isStatusPanel ? (
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-bold text-slate-900 dark:text-white">完备性状态</h3>
+          <div className="flex items-center gap-2">
+            <props.Button
+              variant="secondary"
+              size="sm"
+              icon="refresh"
+              onClick={() => {
+                void refreshOverview();
+                if (detailScopeId) {
+                  void refreshStatusRows(detailScopeId);
+                }
+              }}
+              disabled={loading || statusLoading || materializing}
             >
-              ?
-            </span>
-          </HoverTooltip>
-        </h3>
-        <div className="flex items-center gap-2">
-          <props.Button
-            variant="secondary"
-            size="sm"
-            icon="refresh"
-            onClick={() => {
-              void refreshOverview();
-              if (statusPanelExpanded) {
-                void refreshStatusRows();
-              }
-            }}
-            disabled={loading || statusLoading || materializing}
-          >
-            刷新
-          </props.Button>
-          <props.Button
-            variant="primary"
-            size="sm"
-            icon="play_arrow"
-            onClick={handleRunMaterialization}
-            disabled={materializing}
-          >
-            执行物化
-          </props.Button>
+              刷新
+            </props.Button>
+	            <props.Button
+	              variant="primary"
+	              size="sm"
+	              icon="save"
+	              onClick={handleRunMaterialization}
+	              disabled={materializing}
+	            >
+	              写入
+	            </props.Button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-bold text-slate-900 dark:text-white">目标检查项</h3>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+            展示 {targetCheckRows.length} / {targetChecks.length}
+          </div>
+        </div>
+      )}
 
-      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3">
-        <div className="overflow-x-auto pb-1">
-          <div className="min-w-max flex items-center gap-3 whitespace-nowrap text-xs leading-5 text-slate-600 dark:text-slate-300">
-            <div className="inline-flex items-center gap-2">
-              <span className={`font-semibold ${topStatusSummary.labelTone}`}>
-                [{topStatusSummary.label}]
-              </span>
-              <span className={`tabular-nums ${topStatusSummary.metricTone}`}>
-                {topStatusSummary.summary}
-              </span>
-              <span className="text-slate-400 dark:text-slate-500">|</span>
-              <span className="tabular-nums text-slate-600 dark:text-slate-300">
-                {topStatusSummary.scaleLabel}
-              </span>
-              <span className="text-slate-400 dark:text-slate-500">|</span>
-              <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                {topStatusSummary.dateLabel}
-              </span>
-            </div>
-            <div className="ml-auto inline-flex items-center gap-2">
-              <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                供给详情
+      {isStatusPanel ? (
+        <div className="space-y-3">
+          <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                数据源供给完备性
               </span>
               <props.Button
                 variant="secondary"
                 size="sm"
-                onClick={handleOpenSourceSupplyDetails}
+                onClick={() => void openStatusDetailModal("source_pool")}
                 disabled={statusLoading}
                 className="!px-2 !py-1 !text-[11px] !font-normal !bg-transparent !border-slate-200/70 !text-slate-700 hover:!bg-slate-50 dark:!border-border-dark/70 dark:!text-slate-200 dark:hover:!bg-surface-dark"
               >
                 查看供给详情
               </props.Button>
             </div>
-          </div>
-        </div>
-
-        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3">
-          {renderCoverageSection("target_pool", targetCoverage)}
-        </div>
-
-        <div className="mt-3 border-t border-slate-300/90 dark:border-border-dark/90" />
-
-        <div className="pt-3 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2 text-xs">
-              <span className="font-semibold text-slate-700 dark:text-slate-200">
-                目标检查项
-              </span>
-            </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              展示 {targetCheckRows.length} / {targetChecks.length}
-            </div>
-          </div>
-
-          <div className="overflow-hidden">
-            <div
-              className="min-h-[180px] max-h-[330px] overflow-y-hidden hover:overflow-y-auto focus-within:overflow-y-auto overflow-x-hidden overscroll-contain"
-              style={{ scrollbarGutter: "stable both-edges" }}
-            >
-              <table className="w-full table-fixed text-xs">
-                <thead className="sticky top-0 bg-white dark:bg-background-dark z-10">
-                  <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
-                    <th className="w-[14%] px-2 py-1.5 text-left font-semibold">
-                      目标名称
-                    </th>
-                    <th className="w-[20%] px-2 pr-4 py-1.5 text-left font-semibold">
-                      <div className="inline-flex items-center justify-start gap-1.5">
-                        <span>所属分类</span>
-                        <MultiSelectFilter
-                          label="分类"
-                          options={targetBucketFilterOptions}
-                          selectedValues={targetBucketFilters}
-                          onChangeValues={setTargetBucketFilters}
-                          disabled={saving}
-                          className="w-[116px]"
-                          buttonClassName="!h-7 !text-[11px]"
-                          showLabelPrefix={false}
-                        />
-                      </div>
-                    </th>
-                    <th className="w-[34%] pl-1 pr-2 py-1.5 text-left font-semibold">
-                      <div className="inline-flex items-center gap-1.5">
-                        <span>数据应用</span>
-                        <MultiSelectFilter
-                          label="应用域"
-                          options={targetApplicationDomainFilterOptions}
-                          selectedValues={targetApplicationDomainFilters}
-                          onChangeValues={setTargetApplicationDomainFilters}
-                          disabled={saving}
-                          className="w-[130px]"
-                          buttonClassName="!h-7 !text-[11px]"
-                          showLabelPrefix={false}
-                        />
-                      </div>
-                    </th>
-                    <th className="w-[23%] px-2 py-1.5 text-left font-semibold">
-                      功能
-                    </th>
-                    <th className="w-[9%] pl-2 pr-4 py-1.5 text-left font-semibold">
-                      开关
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {targetCheckRows.map((row) => {
-                    const check = row.check;
-                    const enabled = targetEnabledCheckIdSet.has(check.id);
-                    const uiApplicationSlots = splitToTagSlots(
-                      row.uiApplications,
-                      CHECK_TAG_SLOT_COUNT
-                    );
-                    const usageContextSlots = splitToTagSlots(
-                      row.usageContexts,
-                      CHECK_TAG_SLOT_COUNT
-                    );
-                    return (
-                      <tr
-                        key={`target-check-row-${check.id}`}
-                        className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
-                      >
-                        <td className="px-2 py-1.5">
-                          <div className="font-semibold text-slate-700 dark:text-slate-200">
-                            {check.label}
-                          </div>
-                        </td>
-                        <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">
-                          {formatBucketLabel(check.bucketId)}
-                        </td>
-                        <td className="pl-1 pr-2 py-1.5">
-                          <div className="flex flex-wrap items-start gap-0.5">
-                            {uiApplicationSlots.visibleItems.map((application) => (
-                              <HoverTooltip
-                                key={`${check.id}-${application.label}`}
-                                content={resolveUiApplicationDescription(
-                                  row.uiApplicationTooltips,
-                                  application
-                                )}
-                              >
-                                <span className="inline-flex w-fit max-w-full min-w-0 rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] leading-4 text-slate-600 dark:text-slate-300 cursor-help">
-                                  <span className="block max-w-full whitespace-normal break-words">
-                                    {application.label}
-                                  </span>
-                                </span>
-                              </HoverTooltip>
-                            ))}
-                            {uiApplicationSlots.overflowCount > 0 ? (
-                              <HoverTooltip
-                                content={`其余 ${uiApplicationSlots.overflowCount} 项：${uiApplicationSlots.overflowItems
-                                  .map((item) => item.label)
-                                  .join("、")}`}
-                              >
-                                <span className="inline-flex max-w-[88%] min-w-0 items-center justify-center rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] text-slate-500 dark:text-slate-400 cursor-help">
-                                  +{uiApplicationSlots.overflowCount}
-                                </span>
-                              </HoverTooltip>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <div className="flex flex-wrap items-start gap-0.5">
-                            {usageContextSlots.visibleItems.map((usage) => (
-                              <HoverTooltip
-                                key={`${check.id}-${usage}`}
-                                content={resolveUsageContextDescription(
-                                  row.usageContextTooltips,
-                                  usage
-                                )}
-                              >
-                                <span className="inline-flex w-fit max-w-full min-w-0 rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] leading-4 text-slate-600 dark:text-slate-300 cursor-help">
-                                  <span className="whitespace-normal break-words">{usage}</span>
-                                </span>
-                              </HoverTooltip>
-                            ))}
-                            {usageContextSlots.overflowCount > 0 ? (
-                              <HoverTooltip
-                                content={`其余 ${usageContextSlots.overflowCount} 项：${usageContextSlots.overflowItems.join(
-                                  "、"
-                                )}`}
-                              >
-                                <span className="inline-flex w-full min-w-0 items-center justify-center rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] text-slate-500 dark:text-slate-400 cursor-help">
-                                  +{usageContextSlots.overflowCount}
-                                </span>
-                              </HoverTooltip>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="pl-2 pr-4 py-1.5">
-                          <div className="flex items-center justify-start gap-2">
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={enabled}
-                                onChange={() => handleToggleTargetCheck(check.id)}
-                                disabled={saving}
-                                className="peer sr-only"
-                                aria-label={`${check.label}${enabled ? "：已启用" : "：已停用"}`}
-                              />
-                              <span className="h-5 w-10 rounded-full bg-slate-300 transition-colors peer-checked:bg-primary dark:bg-slate-600 dark:peer-checked:bg-primary/80 peer-disabled:opacity-60" />
-                              <span className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
-                            </label>
-                            <span
-                              className={`text-[11px] ${
-                                enabled
-                                  ? "text-primary"
-                                  : "text-slate-500 dark:text-slate-400"
-                              }`}
-                            >
-                              {enabled ? "启用" : "停用"}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {targetCheckRows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400"
-                      >
-                        当前筛选条件下无匹配检查项。
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3 space-y-2">
-          <button
-            type="button"
-            onClick={() => setStatusPanelExpanded((prev) => !prev)}
-            className="w-full flex items-center justify-between text-left"
-            aria-label={statusPanelExpanded ? "收起状态明细" : "展开状态明细"}
-          >
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-              状态明细
-            </span>
-            <span className="material-icons-outlined text-sm text-slate-500 dark:text-slate-400">
-              {statusPanelExpanded ? "expand_less" : "expand_more"}
-            </span>
-          </button>
-
-          {statusPanelExpanded ? (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <props.PopoverSelect
-                  value={scopeFilter}
-                  onChangeValue={(value: string) => setScopeFilter(value as ScopeFilter)}
-                  options={[
-                    { value: "all", label: "全部范围" },
-                    { value: "target_pool", label: "目标池" },
-                    { value: "source_pool", label: "数据源供给" }
-                  ]}
-                  className="w-[180px]"
-                  buttonClassName="h-8 text-xs"
-                />
-                <props.PopoverSelect
-                  value={checkFilter}
-                  onChangeValue={(value: string) => setCheckFilter(value as CheckFilter)}
-                  options={checkFilterOptions}
-                  className="w-[300px]"
-                  buttonClassName="h-8 text-xs"
-                />
-                <props.PopoverSelect
-                  value={statusFilter}
-                  onChangeValue={(value: string) => setStatusFilter(value as StatusFilter)}
-                  options={STATUS_FILTER_OPTIONS}
-                  className="w-[200px]"
-                  buttonClassName="h-8 text-xs"
-                />
-                <props.Button
-                  variant="secondary"
-                  size="sm"
-                  icon="refresh"
-                  onClick={() => void refreshStatusRows()}
-                  disabled={statusLoading}
-                >
-                  刷新状态
-                </props.Button>
+            <div className="overflow-x-auto pb-1">
+              <div className="min-w-max flex flex-nowrap items-center gap-3 whitespace-nowrap text-xs leading-5 text-slate-600 dark:text-slate-300">
+                <span className={`whitespace-nowrap font-semibold ${sourceStatusSummary.labelTone}`}>
+                  [{sourceStatusSummary.label}]
+                </span>
+                <span className={`whitespace-nowrap tabular-nums ${sourceStatusSummary.metricTone}`}>
+                  {sourceStatusSummary.summary}
+                </span>
+                <span className="text-slate-400 dark:text-slate-500">|</span>
+                <span className="tabular-nums text-slate-600 dark:text-slate-300">
+                  {sourceStatusSummary.scaleLabel}
+                </span>
+                <span className="text-slate-400 dark:text-slate-500">|</span>
+                <span className="tabular-nums text-slate-500 dark:text-slate-400">
+                  {sourceStatusSummary.dateLabel}
+                </span>
               </div>
+            </div>
+            {renderCoverageSection("source_pool", sourceCoverage, { showTitle: false })}
+          </section>
 
-              {statusLoading && (
-                <div className="text-xs text-slate-500 dark:text-slate-400">加载中...</div>
-              )}
-              {!statusLoading && (
-                <div className="max-h-[360px] overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70">
+          <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                目标池数据完备性
+              </span>
+              <props.Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void openStatusDetailModal("target_pool")}
+                disabled={statusLoading}
+                className="!px-2 !py-1 !text-[11px] !font-normal !bg-transparent !border-slate-200/70 !text-slate-700 hover:!bg-slate-50 dark:!border-border-dark/70 dark:!text-slate-200 dark:hover:!bg-surface-dark"
+              >
+                查看目标详情
+              </props.Button>
+            </div>
+            <div className="overflow-x-auto pb-1">
+              <div className="min-w-max flex flex-nowrap items-center gap-3 whitespace-nowrap text-xs leading-5 text-slate-600 dark:text-slate-300">
+                <span className={`whitespace-nowrap font-semibold ${targetStatusSummary.labelTone}`}>
+                  [{targetStatusSummary.label}]
+                </span>
+                <span className={`whitespace-nowrap tabular-nums ${targetStatusSummary.metricTone}`}>
+                  {targetStatusSummary.summary}
+                </span>
+                <span className="text-slate-400 dark:text-slate-500">|</span>
+                <span className="tabular-nums text-slate-600 dark:text-slate-300">
+                  {targetStatusSummary.scaleLabel}
+                </span>
+                <span className="text-slate-400 dark:text-slate-500">|</span>
+                <span className="tabular-nums text-slate-500 dark:text-slate-400">
+                  {targetStatusSummary.dateLabel}
+                </span>
+              </div>
+            </div>
+            {renderCoverageSection("target_pool", targetCoverage, { showTitle: false })}
+          </section>
+
+          <props.Modal
+            open={detailScopeId !== null}
+            title={detailScopeId === "source_pool" ? "供给状态明细" : "目标状态明细"}
+            onClose={() => setDetailScopeId(null)}
+            sizeClassName="max-w-[1100px]"
+          >
+            {detailScopeId ? (
+              <div className="space-y-3 min-h-[66vh]">
+                <div className="flex w-full items-center gap-2">
+                  <props.PopoverSelect
+                    value={checkFilter}
+                    onChangeValue={(value: string) => {
+                      setCheckFilter(value as CheckFilter);
+                      setStatusPage(0);
+                    }}
+                    options={detailCheckFilterOptions}
+                    className="w-[220px] shrink-0"
+                    buttonClassName="h-8 text-xs"
+                  />
+                  <props.PopoverSelect
+                    value={statusFilter}
+                    onChangeValue={(value: string) => {
+                      setStatusFilter(value as StatusFilter);
+                      setStatusPage(0);
+                    }}
+                    options={STATUS_FILTER_OPTIONS}
+                    className="w-[160px] shrink-0"
+                    buttonClassName="h-8 text-xs"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="mx-1 h-5 w-px shrink-0 bg-slate-300 dark:bg-border-dark/80"
+                  />
+                  <div className="min-w-[220px] flex-1">
+                    <props.Input
+                      value={statusKeywordInput}
+                      onChange={(event) => setStatusKeywordInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        const next = statusKeywordInput.trim();
+                        setStatusKeyword(next);
+                        setStatusPage(0);
+                      }}
+                      placeholder="搜索 Entity / Check / Module"
+                      className="h-8 w-full text-xs font-mono"
+                    />
+                  </div>
+                  <div className="inline-flex shrink-0 items-center gap-1.5 pl-1 text-xs text-slate-600 dark:text-slate-300">
+                    <span>仅异常</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={statusOnlyExceptions}
+                        onChange={(event) => {
+                          setStatusOnlyExceptions(event.target.checked);
+                          setStatusPage(0);
+                        }}
+                        className="peer sr-only"
+                        aria-label={statusOnlyExceptions ? "仅异常已开启" : "仅异常已关闭"}
+                      />
+                      <span className="h-5 w-10 rounded-full bg-slate-300 transition-colors peer-checked:bg-primary dark:bg-slate-600 dark:peer-checked:bg-primary/80" />
+                      <span className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
+                    </label>
+                  </div>
+                  <props.Button
+                    variant="secondary"
+                    size="sm"
+                    className="!px-2.5 shrink-0"
+                    onClick={() => {
+                      setStatusKeywordInput("");
+                      setStatusKeyword("");
+                      setStatusOnlyExceptions(false);
+                      setStatusPage(0);
+                    }}
+                    disabled={statusLoading}
+                  >
+                    清空
+                  </props.Button>
+                  <props.Button
+                    variant="secondary"
+                    size="sm"
+                    icon="refresh"
+                    className="!px-2.5 shrink-0"
+                    onClick={() => void refreshStatusRows(detailScopeId)}
+                    disabled={statusLoading}
+                  >
+                    刷新
+                  </props.Button>
+                </div>
+
+                <div className="relative max-h-[58vh] overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-white dark:bg-background-dark">
                       <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
-                        <th className="px-2 py-1.5 text-left font-semibold">Scope</th>
                         <th className="px-2 py-1.5 text-left font-semibold">Check</th>
                         <th className="px-2 py-1.5 text-left font-semibold">Entity</th>
                         <th className="px-2 py-1.5 text-left font-semibold">Bucket</th>
@@ -1354,9 +1264,6 @@ export function OtherDataManagementTargetTaskPanel(
                           key={`${item.scopeId}-${item.checkId}-${item.entityType}-${item.entityId}`}
                           className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
                         >
-                          <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">
-                            {formatScopeLabel(item.scopeId)}
-                          </td>
                           <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
                             {item.checkId}
                           </td>
@@ -1387,45 +1294,272 @@ export function OtherDataManagementTargetTaskPanel(
                       ))}
                     </tbody>
                   </table>
-                  {!statusRows || statusRows.items.length === 0 ? (
+                  {!statusLoading && (!statusRows || statusRows.items.length === 0) ? (
                     <div className="px-3 py-6 text-xs text-slate-500 dark:text-slate-400">
-                      暂无状态数据。
+                      {statusOnlyExceptions
+                        ? "当前仅展示异常记录；若暂无异常，可关闭“仅异常”查看全量状态。"
+                        : "暂无状态数据。"}
+                    </div>
+                  ) : null}
+                  {statusLoading ? (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/55 text-xs text-slate-500 backdrop-blur-[1px] dark:bg-surface-dark/45 dark:text-slate-300">
+                      加载中...
                     </div>
                   ) : null}
                 </div>
-              )}
 
-              {!statusLoading && statusRows ? (
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  展示 {statusRows.items.length} / {statusRows.total}
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              默认收起，展开后可按 scope/check/status 排查缺口。
+                {statusRows ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>
+                      展示 {statusPageStart} - {statusPageEnd} / {statusRows.total}
+                    </span>
+                    <div className="inline-flex items-center gap-2">
+                      <span>
+                        第 {statusPage + 1} / {statusTotalPages} 页
+                      </span>
+                      <props.Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setStatusPage((prev) => Math.max(0, prev - 1))}
+                        disabled={statusLoading || statusPage <= 0}
+                      >
+                        上一页
+                      </props.Button>
+                      <props.Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          setStatusPage((prev) =>
+                            Math.min(statusTotalPages - 1, prev + 1)
+                          )
+                        }
+                        disabled={statusLoading || statusPage >= statusTotalPages - 1}
+                      >
+                        下一页
+                      </props.Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </props.Modal>
+
+          {(error || notice) && (
+            <div
+              className={`text-xs ${
+                error
+                  ? "text-rose-700 dark:text-rose-300"
+                  : "text-emerald-700 dark:text-emerald-300"
+              }`}
+            >
+              {error ?? notice}
+            </div>
+          )}
+
+          {loading && (
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              完备性面板加载中...
             </div>
           )}
         </div>
-
-        {(error || notice) && (
-          <div
-            className={`mt-3 border-t pt-2 text-xs ${
-              error
-                ? "border-rose-200 text-rose-700 dark:border-rose-900/60 dark:text-rose-300"
-                : "border-emerald-200 text-emerald-700 dark:border-emerald-900/60 dark:text-emerald-300"
-            }`}
-          >
-            {error ?? notice}
+      ) : (
+        <div className="space-y-2">
+          <div className="space-y-0">
+            <div className="overflow-hidden">
+              <div
+                className="min-h-[180px] max-h-[330px] overflow-y-auto overflow-x-hidden overscroll-contain"
+                style={{ scrollbarGutter: "stable both-edges" }}
+              >
+                <table className="w-full table-fixed text-xs">
+                  <thead className="sticky top-0 bg-white dark:bg-background-dark z-10">
+                    <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
+                      <th className="w-[14%] px-2 py-1.5 text-left font-semibold">
+                        目标名称
+                      </th>
+                      <th className="w-[20%] px-2 pr-4 py-1.5 text-left font-semibold">
+                        <div className="inline-flex items-center justify-start gap-1.5">
+                          <span>所属分类</span>
+                          <MultiSelectFilter
+                            label="分类"
+                            options={targetBucketFilterOptions}
+                            selectedValues={targetBucketFilters}
+                            onChangeValues={setTargetBucketFilters}
+                            disabled={saving}
+                            className="w-[116px]"
+                            buttonClassName="!h-7 !text-[11px]"
+                            showLabelPrefix={false}
+                          />
+                        </div>
+                      </th>
+                      <th className="w-[34%] pl-1 pr-2 py-1.5 text-left font-semibold">
+                        <div className="inline-flex items-center gap-1.5">
+                          <span>数据应用</span>
+                          <MultiSelectFilter
+                            label="应用域"
+                            options={targetApplicationDomainFilterOptions}
+                            selectedValues={targetApplicationDomainFilters}
+                            onChangeValues={setTargetApplicationDomainFilters}
+                            disabled={saving}
+                            className="w-[130px]"
+                            buttonClassName="!h-7 !text-[11px]"
+                            showLabelPrefix={false}
+                          />
+                        </div>
+                      </th>
+                      <th className="w-[23%] px-2 py-1.5 text-left font-semibold">
+                        功能
+                      </th>
+                      <th className="w-[9%] pl-2 pr-4 py-1.5 text-left font-semibold">
+                        开关
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {targetCheckRows.map((row) => {
+                      const check = row.check;
+                      const enabled = targetEnabledCheckIdSet.has(check.id);
+                      const uiApplicationSlots = splitToTagSlots(
+                        row.uiApplications,
+                        CHECK_TAG_SLOT_COUNT
+                      );
+                      const usageContextSlots = splitToTagSlots(
+                        row.usageContexts,
+                        CHECK_TAG_SLOT_COUNT
+                      );
+                      return (
+                        <tr
+                          key={`target-check-row-${check.id}`}
+                          className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
+                        >
+                          <td className="px-2 py-1.5">
+                            <div className="font-semibold text-slate-700 dark:text-slate-200">
+                              {check.label}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">
+                            {formatBucketLabel(check.bucketId)}
+                          </td>
+                          <td className="pl-1 pr-2 py-1.5">
+                            <div className="flex flex-wrap items-start gap-0.5">
+                              {uiApplicationSlots.visibleItems.map((application) => (
+                                <span
+                                  key={`${check.id}-${application.label}`}
+                                  data-mt-tooltip={resolveUiApplicationDescription(
+                                    row.uiApplicationTooltips,
+                                    application
+                                  )}
+                                >
+                                  <span className="inline-flex w-fit max-w-full min-w-0 rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] leading-4 text-slate-600 dark:text-slate-300 cursor-help">
+                                    <span className="block max-w-full whitespace-normal break-words">
+                                      {application.label}
+                                    </span>
+                                  </span>
+                                </span>
+                              ))}
+                              {uiApplicationSlots.overflowCount > 0 ? (
+                                <span
+                                  data-mt-tooltip={`其余 ${uiApplicationSlots.overflowCount} 项：${uiApplicationSlots.overflowItems
+                                    .map((item) => item.label)
+                                    .join("、")}`}
+                                >
+                                  <span className="inline-flex max-w-[88%] min-w-0 items-center justify-center rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] text-slate-500 dark:text-slate-400 cursor-help">
+                                    +{uiApplicationSlots.overflowCount}
+                                  </span>
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex flex-wrap items-start gap-0.5">
+                              {usageContextSlots.visibleItems.map((usage) => (
+                                <span
+                                  key={`${check.id}-${usage}`}
+                                  data-mt-tooltip={resolveUsageContextDescription(
+                                    row.usageContextTooltips,
+                                    usage
+                                  )}
+                                >
+                                  <span className="inline-flex w-fit max-w-full min-w-0 rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] leading-4 text-slate-600 dark:text-slate-300 cursor-help">
+                                    <span className="whitespace-normal break-words">{usage}</span>
+                                  </span>
+                                </span>
+                              ))}
+                              {usageContextSlots.overflowCount > 0 ? (
+                                <span
+                                  data-mt-tooltip={`其余 ${usageContextSlots.overflowCount} 项：${usageContextSlots.overflowItems.join(
+                                    "、"
+                                  )}`}
+                                >
+                                  <span className="inline-flex w-full min-w-0 items-center justify-center rounded border border-slate-200/80 dark:border-border-dark/70 px-1 py-0.5 text-[10px] text-slate-500 dark:text-slate-400 cursor-help">
+                                    +{usageContextSlots.overflowCount}
+                                  </span>
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="pl-2 pr-4 py-1.5">
+                            <div className="flex items-center justify-start gap-2">
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={enabled}
+                                  onChange={() => handleToggleTargetCheck(check.id)}
+                                  disabled={saving}
+                                  className="peer sr-only"
+                                  aria-label={`${check.label}${enabled ? "：已启用" : "：已停用"}`}
+                                />
+                                <span className="h-5 w-10 rounded-full bg-slate-300 transition-colors peer-checked:bg-primary dark:bg-slate-600 dark:peer-checked:bg-primary/80 peer-disabled:opacity-60" />
+                                <span className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
+                              </label>
+                              <span
+                                className={`text-[11px] ${
+                                  enabled
+                                    ? "text-primary"
+                                    : "text-slate-500 dark:text-slate-400"
+                                }`}
+                              >
+                                {enabled ? "启用" : "停用"}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {targetCheckRows.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400"
+                        >
+                          当前筛选条件下无匹配检查项。
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        )}
 
-        {loading && (
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            完备性面板加载中...
-          </div>
-        )}
-      </div>
+          {(error || notice) && (
+            <div
+              className={`mt-2 text-xs ${
+                error
+                  ? "text-rose-700 dark:text-rose-300"
+                  : "text-emerald-700 dark:text-emerald-300"
+              }`}
+            >
+              {error ?? notice}
+            </div>
+          )}
+
+          {loading && (
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              目标检查项加载中...
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

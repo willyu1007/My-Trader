@@ -118,6 +118,10 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUNS_LIST, input ?? null),
     getIngestRunDetail: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUN_GET, input),
+    removeIngestRun: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUN_REMOVE, input),
+    clearIngestRuns: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUNS_CLEAR),
     triggerIngest: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_TRIGGER, input),
     getIngestControlStatus: () =>

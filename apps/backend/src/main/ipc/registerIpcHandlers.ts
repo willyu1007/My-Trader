@@ -14,6 +14,7 @@ import type {
   CreateAccountInput,
   GetDailyBarsInput,
   GetIngestRunDetailInput,
+  RemoveIngestRunInput,
   GetQuotesInput,
   GetTagMembersInput,
   GetTagSeriesInput,
@@ -164,8 +165,10 @@ import {
 } from "../storage/watchlistRepository";
 import { previewTargets, previewTargetsDraft } from "../market/targetsService";
 import {
+  clearIngestRunsHistory,
   getIngestRunById,
-  listIngestRuns
+  listIngestRuns,
+  removeIngestRunById
 } from "../market/ingestRunsRepository";
 import { getMarketProvider } from "../market/providers";
 import { validateDataSourceReadiness } from "../market/dataSourceReadinessService";
@@ -1244,6 +1247,20 @@ export async function registerIpcHandlers() {
       };
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INGEST_RUN_REMOVE,
+    async (_event, input: RemoveIngestRunInput) => {
+      const marketDb = requireMarketCacheDb();
+      const id = normalizeRequiredString(input?.id, "id");
+      await removeIngestRunById(marketDb, id);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_RUNS_CLEAR, async () => {
+    const marketDb = requireMarketCacheDb();
+    await clearIngestRunsHistory(marketDb);
+  });
 
   ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_TRIGGER, async (_event, input) => {
     const scope = input?.scope;

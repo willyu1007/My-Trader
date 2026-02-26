@@ -6,6 +6,7 @@ const TOOLTIP_GUTTER = 8;
 const TOOLTIP_OFFSET = 8;
 const TOOLTIP_MAX_WIDTH = 360;
 const TOOLTIP_ESTIMATED_HEIGHT = 56;
+const POINTER_SUPPRESS_AFTER_SCROLL_MS = 120;
 
 type TooltipLayout = {
   top: number;
@@ -73,6 +74,7 @@ export function GlobalHoverTooltipLayer() {
   const [visible, setVisible] = useState(false);
   const activeElementRef = useRef<HTMLElement | null>(null);
   const timerRef = useRef<number | null>(null);
+  const lastScrollTsRef = useRef(0);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -89,10 +91,17 @@ export function GlobalHoverTooltipLayer() {
   }, [clearTimer]);
 
   const releaseActiveElement = useCallback(() => {
+    if (!activeElementRef.current && timerRef.current === null && !visible) return;
     restoreNativeTitle(activeElementRef.current);
     activeElementRef.current = null;
     hideTooltip();
-  }, [hideTooltip]);
+  }, [hideTooltip, visible]);
+
+  const shouldSuppressPointerHandling = useCallback(() => {
+    const last = lastScrollTsRef.current;
+    if (!last) return false;
+    return Date.now() - last < POINTER_SUPPRESS_AFTER_SCROLL_MS;
+  }, []);
 
   const activateTooltip = useCallback(
     (element: HTMLElement, tooltipText: string) => {
@@ -114,10 +123,13 @@ export function GlobalHoverTooltipLayer() {
 
   useEffect(() => {
     const onPointerOver = (event: Event) => {
+      if (shouldSuppressPointerHandling()) return;
       const host = resolveTooltipHost(event.target);
       const tooltipText = resolveTooltipText(host);
       if (!host || !tooltipText) {
-        releaseActiveElement();
+        if (activeElementRef.current) {
+          releaseActiveElement();
+        }
         return;
       }
       if (activeElementRef.current === host) return;
@@ -125,6 +137,7 @@ export function GlobalHoverTooltipLayer() {
     };
 
     const onPointerOut = (event: Event) => {
+      if (shouldSuppressPointerHandling()) return;
       const active = activeElementRef.current;
       if (!active) return;
       const related = (event as MouseEvent).relatedTarget as Node | null;
@@ -166,6 +179,7 @@ export function GlobalHoverTooltipLayer() {
     };
 
     const onViewportChange = () => {
+      lastScrollTsRef.current = Date.now();
       const active = activeElementRef.current;
       if (!active || !visible) return;
       setLayout(computeLayout(active));
@@ -188,7 +202,7 @@ export function GlobalHoverTooltipLayer() {
       window.removeEventListener("keydown", onEscape);
       releaseActiveElement();
     };
-  }, [activateTooltip, releaseActiveElement, visible]);
+  }, [activateTooltip, releaseActiveElement, shouldSuppressPointerHandling, visible]);
 
   if (!visible || !layout || !text) return null;
 

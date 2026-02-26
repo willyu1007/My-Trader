@@ -186,12 +186,14 @@ export function Modal({
   open,
   title,
   onClose,
-  children
+  children,
+  sizeClassName
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  sizeClassName?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -213,7 +215,11 @@ export function Modal({
         aria-label="关闭弹层"
         onClick={onClose}
       />
-      <div className="ui-modal-panel relative w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-xl shadow-2xl">
+      <div
+        className={`ui-modal-panel relative w-full ${
+          sizeClassName ?? "max-w-3xl"
+        } max-h-[85vh] overflow-hidden rounded-xl shadow-2xl`}
+      >
         <div className="ui-modal-header flex items-center justify-between px-4 py-3 backdrop-blur">
           <div className="text-sm font-semibold text-[color:var(--mt-text)]">
             {title}

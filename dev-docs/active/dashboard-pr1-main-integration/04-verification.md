@@ -206,3 +206,19 @@ order by check_id, status;
   - `other/data-management` 与 `data-status` 往返切换 10 次的主线程峰值卡顿。
   - 完备性面板连续滚轮 20s 掉帧观察。
   - 退出耗时（目标 < 2s）与无挂起进程。
+
+## 2026-02-25 Status Detail Search (P0) Runs
+- `pnpm -C packages/shared run typecheck` -> ✅ pass
+- `pnpm -C apps/backend run typecheck` -> ✅ pass
+- `pnpm -C apps/frontend run typecheck` -> ✅ pass
+- `pnpm -C apps/backend run build` -> ✅ pass
+- `pnpm -C apps/frontend run build` -> ✅ pass
+- `pnpm -C apps/backend run verify:completeness-v2` -> ✅ pass
+
+## 2026-02-25 Scroll Performance Follow-up Runs
+- `pnpm -C apps/frontend run typecheck` -> ✅ pass
+- `pnpm -C apps/frontend run build` -> ✅ pass
+
+## 2026-02-25 Global Tooltip Scroll Suppression Runs
+- `pnpm -C apps/frontend run typecheck` -> ✅ pass
+- `pnpm -C apps/frontend run build` -> ✅ pass

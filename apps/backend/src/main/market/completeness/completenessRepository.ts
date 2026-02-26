@@ -117,6 +117,8 @@ export async function listCompletenessStatusRows(
 ): Promise<ListCompletenessStatusResult> {
   const where: string[] = [];
   const params: Array<string | number> = [];
+  const keyword = input?.keyword?.trim() ?? "";
+  const keywordFields = normalizeKeywordFields(input?.keywordFields);
 
   if (input?.scopeId) {
     where.push("scope_id = ?");
@@ -138,10 +140,52 @@ export async function listCompletenessStatusRows(
     where.push("bucket_id = ?");
     params.push(input.bucketId);
   }
+  if (input?.domainId) {
+    where.push("domain_id = ?");
+    params.push(input.domainId);
+  }
+  if (input?.moduleId?.trim()) {
+    where.push("module_id = ?");
+    params.push(input.moduleId.trim());
+  }
+  if (input?.asOfTradeDate?.trim()) {
+    where.push("as_of_trade_date = ?");
+    params.push(input.asOfTradeDate.trim());
+  }
+  if (input?.onlyExceptions && !input.status) {
+    where.push(`status in ('missing', 'partial', 'not_started')`);
+  }
+  if (keyword && keywordFields.length > 0) {
+    const pattern = `%${escapeLikePattern(keyword.toLowerCase())}%`;
+    const clauses: string[] = [];
+    if (keywordFields.includes("entity")) {
+      clauses.push(`lower(entity_id) like ? escape '\\'`);
+      params.push(pattern);
+    }
+    if (keywordFields.includes("check")) {
+      clauses.push(`lower(check_id) like ? escape '\\'`);
+      params.push(pattern);
+    }
+    if (keywordFields.includes("module")) {
+      clauses.push(`lower(ifnull(module_id, '')) like ? escape '\\'`);
+      params.push(pattern);
+    }
+    if (clauses.length > 0) {
+      where.push(`(${clauses.join(" or ")})`);
+    }
+  }
+  if (where.length === 0) {
+    throw new Error(
+      "状态明细查询至少需要一个过滤条件；若需全局异常扫描，请开启 onlyExceptions。"
+    );
+  }
 
   const whereSql = where.length > 0 ? `where ${where.join(" and ")}` : "";
-  const limit = Math.max(1, Math.min(1000, Math.floor(input?.limit ?? 200)));
+  const limit = Math.max(1, Math.min(100_000, Math.floor(input?.limit ?? 200)));
   const offset = Math.max(0, Math.floor(input?.offset ?? 0));
+  const sortBy = input?.sortBy ?? "updatedAt";
+  const sortOrder = input?.sortOrder === "asc" ? "asc" : "desc";
+  const orderBySql = resolveOrderBySql(sortBy, sortOrder);
 
   const rows = await all<PersistedCompletenessRow>(
     db,
@@ -163,7 +207,7 @@ export async function listCompletenessStatusRows(
         updated_at
       from completeness_status_v2
       ${whereSql}
-      order by updated_at desc, check_id asc, entity_id asc
+      order by ${orderBySql}
       limit ?
       offset ?
     `,
@@ -186,6 +230,46 @@ export async function listCompletenessStatusRows(
     limit,
     offset
   };
+}
+
+function normalizeKeywordFields(
+  raw: ListCompletenessStatusInput["keywordFields"] | undefined
+): Array<"entity" | "check" | "module"> {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return ["entity", "check", "module"];
+  }
+  const values = new Set<"entity" | "check" | "module">();
+  raw.forEach((item) => {
+    if (item === "entity" || item === "check" || item === "module") {
+      values.add(item);
+    }
+  });
+  if (values.size === 0) return ["entity", "check", "module"];
+  return [...values];
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function resolveOrderBySql(
+  sortBy: NonNullable<ListCompletenessStatusInput["sortBy"]>,
+  sortOrder: "asc" | "desc"
+): string {
+  if (sortBy === "asOfTradeDate") {
+    return `coalesce(as_of_trade_date, '') ${sortOrder}, updated_at desc, check_id asc, entity_id asc`;
+  }
+  if (sortBy === "status") {
+    return `case status
+      when 'missing' then 1
+      when 'partial' then 2
+      when 'not_started' then 3
+      when 'complete' then 4
+      when 'not_applicable' then 5
+      else 6
+    end ${sortOrder}, updated_at desc, check_id asc, entity_id asc`;
+  }
+  return `updated_at ${sortOrder}, check_id asc, entity_id asc`;
 }
 
 export async function previewCompletenessCoverage(

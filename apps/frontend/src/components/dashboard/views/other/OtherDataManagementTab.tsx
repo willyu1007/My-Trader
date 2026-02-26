@@ -133,6 +133,7 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
   const targetTaskPanelProps = {
     Button: props.Button,
     Input: props.Input,
+    Modal: props.Modal,
     PopoverSelect: props.PopoverSelect,
     formatCnDate: props.formatCnDate
   } satisfies OtherDataManagementTargetTaskPanelProps;

@@ -1090,6 +1090,8 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
     if (options.otherTab === "data-management") {
       options.refreshMarketTargets().catch(() => undefined);
       options.refreshMarketUniversePool().catch(() => undefined);
+      options.refreshMarketSchedulerConfig().catch(() => undefined);
+      options.refreshMarketIngestControl().catch(() => undefined);
       return undefined;
     }
 

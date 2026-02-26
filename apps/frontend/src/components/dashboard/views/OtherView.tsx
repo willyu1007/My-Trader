@@ -228,26 +228,23 @@ export function OtherView(props: OtherViewProps) {
   } satisfies OtherInstrumentManagementTabProps;
   const dataStatusTabProps = {
     Button: props.Button,
-    dataQuality: props.dataQuality,
+    Input: props.Input,
+    Modal: props.Modal,
+    PopoverSelect: props.PopoverSelect,
+    formatCnDate: props.formatCnDate,
     formatDateTime: props.formatDateTime,
     formatDurationMs: props.formatDurationMs,
     formatIngestRunModeLabel: props.formatIngestRunModeLabel,
     formatIngestRunScopeLabel: props.formatIngestRunScopeLabel,
     formatIngestRunStatusLabel: props.formatIngestRunStatusLabel,
     formatIngestRunTone: props.formatIngestRunTone,
-    formatMarketTokenSource: props.formatMarketTokenSource,
-    formatPctNullable: props.formatPctNullable,
-    handleTriggerMarketIngest: props.handleTriggerMarketIngest,
     marketIngestRuns: props.marketIngestRuns,
     marketIngestRunsLoading: props.marketIngestRunsLoading,
-    marketIngestTriggering: props.marketIngestTriggering,
     marketSelectedIngestRun: props.marketSelectedIngestRun,
     marketSelectedIngestRunId: props.marketSelectedIngestRunId,
     marketSelectedIngestRunLoading: props.marketSelectedIngestRunLoading,
-    marketTokenStatus: props.marketTokenStatus,
     refreshMarketIngestRunDetail: props.refreshMarketIngestRunDetail,
-    refreshMarketIngestRuns: props.refreshMarketIngestRuns,
-    snapshot: props.snapshot
+    refreshMarketIngestRuns: props.refreshMarketIngestRuns
   } satisfies OtherDataStatusTabProps;
   const testTabProps = {
     Button: props.Button,

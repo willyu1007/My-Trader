@@ -559,6 +559,10 @@ export interface ListIngestRunsInput {
   limit?: number | null;
 }
 
+export interface RemoveIngestRunInput {
+  id: string;
+}
+
 export type MarketTokenSource = "env" | "local" | "none";
 
 export interface MarketTokenStatus {
@@ -967,6 +971,14 @@ export interface ListCompletenessStatusInput {
   status?: CompletenessStatus | null;
   entityType?: CompletenessEntityType | null;
   bucketId?: CompletenessBucketId | null;
+  domainId?: DataDomainId | null;
+  moduleId?: string | null;
+  asOfTradeDate?: string | null;
+  keyword?: string | null;
+  keywordFields?: Array<"entity" | "check" | "module"> | null;
+  onlyExceptions?: boolean | null;
+  sortBy?: "updatedAt" | "asOfTradeDate" | "status" | null;
+  sortOrder?: "asc" | "desc" | null;
   limit?: number | null;
   offset?: number | null;
 }
@@ -1205,6 +1217,8 @@ export interface MyTraderApi {
     openProviderHomepage(input: OpenMarketProviderInput): Promise<void>;
     listIngestRuns(input?: ListIngestRunsInput): Promise<MarketIngestRun[]>;
     getIngestRunDetail(input: GetIngestRunDetailInput): Promise<MarketIngestRun | null>;
+    removeIngestRun(input: RemoveIngestRunInput): Promise<void>;
+    clearIngestRuns(): Promise<void>;
     triggerIngest(input: TriggerMarketIngestInput): Promise<void>;
     getIngestControlStatus(): Promise<MarketIngestControlStatus>;
     pauseIngest(): Promise<MarketIngestControlStatus>;
@@ -1320,6 +1334,8 @@ export const IPC_CHANNELS = {
   MARKET_PROVIDER_OPEN: "market:provider:open",
   MARKET_INGEST_RUNS_LIST: "market:ingestRuns:list",
   MARKET_INGEST_RUN_GET: "market:ingestRuns:get",
+  MARKET_INGEST_RUN_REMOVE: "market:ingestRuns:remove",
+  MARKET_INGEST_RUNS_CLEAR: "market:ingestRuns:clear",
   MARKET_INGEST_TRIGGER: "market:ingest:trigger",
   MARKET_INGEST_CONTROL_STATUS: "market:ingest:controlStatus",
   MARKET_INGEST_CONTROL_PAUSE: "market:ingest:pause",
