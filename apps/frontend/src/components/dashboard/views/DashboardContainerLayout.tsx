@@ -16,6 +16,7 @@ import {
   analysisTabs,
   assetClassLabels,
   ledgerEventTypeOptions,
+  marketCategoryTabs,
   marketChartRanges,
   navItems,
   otherTabs,
@@ -293,6 +294,14 @@ export function DashboardContainerLayout({
             onSelect: () => setAnalysisTab(tab.key),
             title: tab.description
           }))
+        : activeView === "market"
+          ? marketCategoryTabs.map((tab) => ({
+              key: tab.key,
+              label: tab.label,
+              active: marketState.marketCategoryTab === tab.key,
+              onSelect: () => marketState.setMarketCategoryTab(tab.key),
+              title: tab.description
+            }))
         : activeView === "other"
           ? otherTabs.map((tab) => ({
               key: tab.key,

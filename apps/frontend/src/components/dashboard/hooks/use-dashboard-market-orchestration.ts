@@ -8,6 +8,7 @@ import type {
 } from "@mytrader/shared";
 
 import type { AnalysisTab, MarketScope, OtherTab, WorkspaceView } from "../types";
+import { marketCategoryPresets } from "../constants";
 import {
   useDashboardMarketManagementActions,
   useDashboardMarketRuntimeEffects
@@ -172,6 +173,7 @@ type MarketStateForManagementActions = Pick<
 
 type MarketStateForRuntimeEffects = Pick<
   UseDashboardMarketRuntimeEffectsOptions<MarketScope>,
+  | "marketCategoryTab"
   | "marketSelectedSymbol"
   | "marketSelectedTag"
   | "marketSearchQuery"
@@ -186,6 +188,7 @@ type MarketStateForRuntimeEffects = Pick<
   | "setMarketSelectedIngestRun"
   | "setMarketScope"
 > & {
+  marketTagMembers: string[];
   marketWatchlistItems: WatchlistItem[];
   marketTargetsTagDraft: string;
   setMarketTargetsTagDraft: Dispatch<SetStateAction<string>>;
@@ -247,6 +250,14 @@ export function useDashboardMarketOrchestration(
     setMarketFilterMarket: options.marketState.setMarketFilterMarket,
     setMarketFilterAssetClasses: options.marketState.setMarketFilterAssetClasses,
     setMarketFilterKinds: options.marketState.setMarketFilterKinds,
+    resolveFilterResetPreset: () => {
+      const preset = marketCategoryPresets[options.marketState.marketCategoryTab];
+      return {
+        filterMarket: preset.filterMarket,
+        filterAssetClasses: [...preset.filterAssetClasses],
+        filterKinds: [...preset.filterKinds]
+      };
+    },
     setMarketQuotesLoading: options.marketState.setMarketQuotesLoading,
     setMarketQuotesBySymbol: options.marketState.setMarketQuotesBySymbol,
     setMarketTargetsLoading: options.marketState.setMarketTargetsLoading,
@@ -500,6 +511,7 @@ export function useDashboardMarketOrchestration(
     otherTab: options.otherTab,
     analysisInstrumentViewActive:
       options.activeView === "data-analysis" && options.analysisTab === "instrument",
+    marketCategoryTab: options.marketState.marketCategoryTab,
     marketEffectiveScope: options.marketEffectiveScope,
     holdingsScopeValue: "holdings",
     searchScopeValue: "search",
@@ -511,6 +523,7 @@ export function useDashboardMarketOrchestration(
     marketSelectedTag: options.marketState.marketSelectedTag,
     marketSearchQuery: options.marketState.marketSearchQuery,
     marketTagManagementQuery: options.marketState.marketTagManagementQuery,
+    marketTagMembersCount: options.marketState.marketTagMembers.length,
     marketWatchlistCount: options.marketState.marketWatchlistItems.length,
     marketInstrumentDetailsOpen: options.marketState.marketInstrumentDetailsOpen,
     marketIngestRuns: options.marketState.marketIngestRuns,

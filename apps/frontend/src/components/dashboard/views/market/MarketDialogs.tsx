@@ -3,6 +3,10 @@ import type { ChangeEvent } from "react";
 import type { TagSummary } from "@mytrader/shared";
 
 import type { MarketTagFacetItem, MarketViewProps } from "../MarketView";
+import type {
+  MarketCategoryTab,
+  MarketFilterMarket
+} from "../../types";
 
 export type MarketDialogsProps = Pick<
   MarketViewProps,
@@ -27,6 +31,8 @@ export type MarketDialogsProps = Pick<
   | "marketFilterAssetClasses"
   | "marketFilterKinds"
   | "marketFilterMarket"
+  | "marketCategoryTab"
+  | "marketCategoryPreset"
   | "marketFiltersActiveCount"
   | "marketFiltersOpen"
   | "marketInstrumentDetailsOpen"
@@ -70,7 +76,46 @@ export type MarketDialogsProps = Pick<
   | "sortTagMembersByChangePct"
 >;
 
+function resolveMarketOptions(tab: MarketCategoryTab): Array<{ key: MarketFilterMarket; label: string }> {
+  if (tab === "forex") {
+    return [
+      { key: "all", label: "全部" },
+      { key: "FX", label: "FX" }
+    ];
+  }
+  return [
+    { key: "all", label: "全部" },
+    { key: "CN", label: "CN" }
+  ];
+}
+
+function resolveAssetClassOptions(tab: MarketCategoryTab): Array<{ key: "stock" | "etf"; label: string }> {
+  if (tab === "stock") return [{ key: "stock", label: "stock" }];
+  if (tab === "etf") return [{ key: "etf", label: "etf" }];
+  return [];
+}
+
+function resolveKindOptions(tab: MarketCategoryTab): Array<{
+  key: "stock" | "fund" | "index" | "futures" | "spot" | "forex";
+  label: string;
+}> {
+  if (tab === "stock") return [{ key: "stock", label: "stock" }];
+  if (tab === "etf") return [{ key: "fund", label: "fund" }];
+  if (tab === "index") return [{ key: "index", label: "index" }];
+  if (tab === "futures") return [{ key: "futures", label: "futures" }];
+  if (tab === "spot") return [{ key: "spot", label: "spot" }];
+  if (tab === "forex") return [{ key: "forex", label: "forex" }];
+  return [];
+}
+
 export function MarketDialogs(props: MarketDialogsProps) {
+  const isConstructionTab =
+    props.marketCategoryPreset?.construction ?? false;
+  const marketOptions = resolveMarketOptions(props.marketCategoryTab);
+  const assetClassOptions = resolveAssetClassOptions(props.marketCategoryTab);
+  const kindOptions = resolveKindOptions(props.marketCategoryTab);
+  const canEditFilters = !isConstructionTab;
+
   return (
     <>
       <props.Modal
@@ -83,22 +128,26 @@ export function MarketDialogs(props: MarketDialogsProps) {
             当前筛选对「搜索 / 持仓」生效；集合成分（Tags）暂不做元数据筛选。
           </div>
 
+          {!canEditFilters && (
+            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
+              当前分类处于建设中，筛选暂不开放编辑。
+            </div>
+          )}
+
           <props.FormGroup label="市场（market）">
             <div className="flex items-center gap-2">
-              {([
-                { key: "all", label: "全部" },
-                { key: "CN", label: "CN" }
-              ] as const).map((item) => {
+              {marketOptions.map((item) => {
                 const isActive = props.marketFilterMarket === item.key;
                 return (
                   <button
                     key={item.key}
                     type="button"
+                    disabled={!canEditFilters}
                     className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
                       isActive
                         ? "bg-primary/20 text-primary dark:bg-white/20 dark:text-white"
                         : "bg-slate-100 dark:bg-background-dark/80 text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
-                    }`}
+                    } ${!canEditFilters ? "cursor-not-allowed opacity-60" : ""}`}
                     onClick={() => props.setMarketFilterMarket(item.key)}
                   >
                     {item.label}
@@ -110,14 +159,17 @@ export function MarketDialogs(props: MarketDialogsProps) {
 
           <props.FormGroup label="资产类别（assetClass）">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
-              {([
-                { key: "stock", label: "stock" },
-                { key: "etf", label: "etf" }
-              ] as const).map((item) => (
+              {assetClassOptions.length === 0 && (
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  当前分类无可用资产类别筛选。
+                </div>
+              )}
+              {assetClassOptions.map((item) => (
                 <label key={item.key} className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     name="marketFilterAssetClasses"
+                    disabled={!canEditFilters}
                     checked={props.marketFilterAssetClasses.includes(item.key)}
                     onChange={() =>
                       props.setMarketFilterAssetClasses((prev) =>
@@ -135,14 +187,17 @@ export function MarketDialogs(props: MarketDialogsProps) {
 
           <props.FormGroup label="标的类型（kind，仅搜索结果）">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
-              {([
-                { key: "stock", label: "stock" },
-                { key: "fund", label: "fund" }
-              ] as const).map((item) => (
+              {kindOptions.length === 0 && (
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  当前分类无可用标的类型筛选。
+                </div>
+              )}
+              {kindOptions.map((item) => (
                 <label key={item.key} className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     name="marketFilterKinds"
+                    disabled={!canEditFilters}
                     checked={props.marketFilterKinds.includes(item.key)}
                     onChange={() =>
                       props.setMarketFilterKinds((prev) =>
@@ -164,7 +219,7 @@ export function MarketDialogs(props: MarketDialogsProps) {
               size="sm"
               icon="restart_alt"
               onClick={props.resetMarketFilters}
-              disabled={props.marketFiltersActiveCount === 0}
+              disabled={!canEditFilters || props.marketFiltersActiveCount === 0}
             >
               重置
             </props.Button>

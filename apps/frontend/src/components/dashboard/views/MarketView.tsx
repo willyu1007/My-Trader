@@ -93,6 +93,23 @@ export function MarketView(props: MarketViewProps) {
     handleMarketExplorerResizeKeyDown,
     handleMarketExplorerResizePointerDown
   } = props;
+  if (props.marketCategoryIsConstruction) {
+    return (
+      <div className="h-full min-h-0 p-6">
+        <div className="h-full rounded-xl border border-dashed border-slate-300 dark:border-border-dark bg-white/70 dark:bg-panel-dark/70 flex items-center justify-center">
+          <div className="max-w-xl text-center space-y-3 px-6">
+            <div className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              {props.marketCategoryConstructionTitle ?? "分类建设中"}
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              {props.marketCategoryConstructionDescription ??
+                "当前分类暂未接入可用行情链路，后续版本将补齐数据采集、口径定义与详情视图。"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   const sidebarProps = {
     Button: props.Button,
     IconButton: props.IconButton,
@@ -218,6 +235,8 @@ export function MarketView(props: MarketViewProps) {
     marketFilterAssetClasses: props.marketFilterAssetClasses,
     marketFilterKinds: props.marketFilterKinds,
     marketFilterMarket: props.marketFilterMarket,
+    marketCategoryTab: props.marketCategoryTab,
+    marketCategoryPreset: props.marketCategoryPreset,
     marketFiltersActiveCount: props.marketFiltersActiveCount,
     marketFiltersOpen: props.marketFiltersOpen,
     marketInstrumentDetailsOpen: props.marketInstrumentDetailsOpen,

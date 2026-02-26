@@ -10,6 +10,7 @@
     "start": "node scripts/start.mjs",
     "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
     "phase-r2:gate-snapshot": "node scripts/phase-r2-gate-snapshot.mjs",
+    "verify:fts5": "pnpm run build && node scripts/verify-fts5.mjs",
     "verify:position-engine": "pnpm run build && node dist/verify-position-engine.js",
     "verify:completeness-v2": "pnpm run build && node dist/verify-completeness-v2.js"
   },

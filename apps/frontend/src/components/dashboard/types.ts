@@ -2,6 +2,7 @@ import type {
   AssetClass,
   AccountSummary,
   CorporateActionKind,
+  InstrumentKind,
   InstrumentProfile,
   InstrumentProfileSummary,
   LedgerEntry,
@@ -169,6 +170,15 @@ export interface LedgerFormState {
 
 export type LedgerFilter = "all" | LedgerEventType;
 export type MarketScope = "tags" | "holdings" | "search";
+export type MarketCategoryTab =
+  | "stock"
+  | "etf"
+  | "index"
+  | "spot"
+  | "forex"
+  | "futures"
+  | "bond"
+  | "rate";
 export type MarketChartRangeKey =
   | "1D"
   | "1W"
@@ -180,7 +190,17 @@ export type MarketChartRangeKey =
   | "2Y"
   | "5Y"
   | "10Y";
-export type MarketFilterMarket = "all" | "CN";
+export type MarketFilterMarket = "all" | "CN" | "FX";
+export interface MarketCategoryPreset {
+  filterMarket: MarketFilterMarket;
+  filterAssetClasses: AssetClass[];
+  filterKinds: InstrumentKind[];
+  defaultScope: MarketScope;
+  defaultTag: string | null;
+  construction: boolean;
+  constructionTitle?: string;
+  constructionDescription?: string;
+}
 export type TargetPoolStatsScope = "universe" | "focus";
 export type UniversePoolBucketId = MarketUniversePoolBucketStatus["bucket"];
 

@@ -14,6 +14,7 @@ import type {
 } from "@mytrader/shared";
 
 import { buildManualThemeOptions } from "../shared";
+import type { MarketFilterMarket } from "../types";
 
 interface ManualSymbolPreview {
   addable: string[];
@@ -33,9 +34,14 @@ export interface UseDashboardMarketDataLoadersOptions {
   setMarketManualThemeLoading: Dispatch<SetStateAction<boolean>>;
   setMarketManualThemeOptions: Dispatch<SetStateAction<{ value: string; label: string }[]>>;
   setMarketManualThemeDraft: Dispatch<SetStateAction<string>>;
-  setMarketFilterMarket: Dispatch<SetStateAction<"all" | "CN">>;
+  setMarketFilterMarket: Dispatch<SetStateAction<MarketFilterMarket>>;
   setMarketFilterAssetClasses: Dispatch<SetStateAction<AssetClass[]>>;
   setMarketFilterKinds: Dispatch<SetStateAction<InstrumentKind[]>>;
+  resolveFilterResetPreset: () => {
+    filterMarket: MarketFilterMarket;
+    filterAssetClasses: AssetClass[];
+    filterKinds: InstrumentKind[];
+  };
   setMarketQuotesLoading: Dispatch<SetStateAction<boolean>>;
   setMarketQuotesBySymbol: Dispatch<SetStateAction<Record<string, MarketQuote>>>;
   setMarketTargetsLoading: Dispatch<SetStateAction<boolean>>;
@@ -123,10 +129,12 @@ export function useDashboardMarketDataLoaders(
   ]);
 
   const resetMarketFilters = useCallback(() => {
-    options.setMarketFilterMarket("all");
-    options.setMarketFilterAssetClasses([]);
-    options.setMarketFilterKinds([]);
+    const preset = options.resolveFilterResetPreset();
+    options.setMarketFilterMarket(preset.filterMarket);
+    options.setMarketFilterAssetClasses([...preset.filterAssetClasses]);
+    options.setMarketFilterKinds([...preset.filterKinds]);
   }, [
+    options.resolveFilterResetPreset,
     options.setMarketFilterAssetClasses,
     options.setMarketFilterKinds,
     options.setMarketFilterMarket

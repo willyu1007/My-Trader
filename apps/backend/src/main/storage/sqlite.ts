@@ -6,6 +6,7 @@ import path from "node:path";
 export type SqliteDatabase = SqlJsDatabase;
 
 let SQL: Awaited<ReturnType<typeof initSqlJs>> | null = null;
+let fts5ProbeDone = false;
 
 const WASM_FILENAME = "sql-wasm.wasm";
 const FLUSH_DEBOUNCE_MS = 250;
@@ -77,6 +78,18 @@ async function getSqlJs() {
   return SQL;
 }
 
+function ensureFts5Ready(db: SqlJsDatabase): void {
+  if (fts5ProbeDone) return;
+  try {
+    db.exec(`create virtual table if not exists mytrader_fts5_probe using fts5(content);`);
+    db.exec(`drop table if exists mytrader_fts5_probe;`);
+    fts5ProbeDone = true;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`[mytrader] 当前 sqlite 运行时未启用 FTS5：${detail}`);
+  }
+}
+
 export async function openSqliteDatabase(filePath: string): Promise<SqlJsDatabase> {
   const sqlJs = await getSqlJs();
 
@@ -93,6 +106,7 @@ export async function openSqliteDatabase(filePath: string): Promise<SqlJsDatabas
     db = new sqlJs.Database();
   }
 
+  ensureFts5Ready(db);
   dbFilePaths.set(db, filePath);
   return db;
 }

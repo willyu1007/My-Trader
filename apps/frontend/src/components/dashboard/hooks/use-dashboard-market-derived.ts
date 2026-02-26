@@ -13,6 +13,7 @@ import type {
   WatchlistItem
 } from "@mytrader/shared";
 
+import type { MarketFilterMarket } from "../types";
 import {
   computeFifoUnitCost,
   computeTagAggregate,
@@ -24,7 +25,7 @@ export type MarketScope = "tags" | "holdings" | "search";
 
 export interface UseDashboardMarketDerivedOptions {
   snapshot: PortfolioSnapshot | null;
-  marketFilterMarket: "all" | "CN";
+  marketFilterMarket: MarketFilterMarket;
   marketFilterAssetClasses: AssetClass[];
   marketFilterKinds: InstrumentKind[];
   marketSelectedSymbol: string | null;

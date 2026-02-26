@@ -25,6 +25,19 @@ import type {
 } from "@mytrader/shared";
 
 import type { PopoverSelectOption } from "../shared";
+import type { MarketCategoryPreset, MarketCategoryTab } from "../types";
+
+interface MarketCategorySnapshot<
+  TMarketScope extends string,
+  TMarketFilterMarket extends string
+> {
+  scope: TMarketScope;
+  filterMarket: TMarketFilterMarket;
+  filterAssetClasses: AssetClass[];
+  filterKinds: InstrumentKind[];
+  searchQuery: string;
+  selectedTag: string | null;
+}
 
 export interface UseDashboardMarketOptions<
   TMarketScope extends string,
@@ -34,6 +47,8 @@ export interface UseDashboardMarketOptions<
   TTargetPoolStructureStats
 > {
   clampNumber: (value: number, min: number, max: number) => number;
+  defaultMarketCategoryTab: MarketCategoryTab;
+  marketCategoryPresets: Record<MarketCategoryTab, MarketCategoryPreset>;
   defaultMarketScope: TMarketScope;
   defaultMarketFilterMarket: TMarketFilterMarket;
   defaultMarketChartRange: TMarketChartRangeKey;
@@ -94,6 +109,10 @@ export function useDashboardMarket<
     TTargetPoolStructureStats
   >
 ) {
+  const initialCategoryPreset =
+    options.marketCategoryPresets[options.defaultMarketCategoryTab];
+  const [marketCategoryTab, setMarketCategoryTabState] =
+    useState<MarketCategoryTab>(options.defaultMarketCategoryTab);
   const [marketCatalogSyncing, setMarketCatalogSyncing] = useState(false);
   const [marketCatalogSyncSummary, setMarketCatalogSyncSummary] = useState<
     string | null
@@ -106,8 +125,17 @@ export function useDashboardMarket<
   const [marketSearchLoading, setMarketSearchLoading] = useState(false);
 
   const [marketScope, setMarketScope] = useState<TMarketScope>(
-    options.defaultMarketScope
+    (initialCategoryPreset.defaultScope as TMarketScope) ??
+      options.defaultMarketScope
   );
+  const marketPerTabStateRef = useRef<
+    Partial<
+      Record<
+        MarketCategoryTab,
+        MarketCategorySnapshot<TMarketScope, TMarketFilterMarket>
+      >
+    >
+  >({});
   const [marketExplorerWidth, setMarketExplorerWidth] = useState<number>(() => {
     if (typeof window === "undefined" || !window.localStorage) {
       return options.marketExplorerDefaultWidth;
@@ -148,19 +176,24 @@ export function useDashboardMarket<
   const [marketTagPickerOpen, setMarketTagPickerOpen] = useState(false);
   const [marketTagPickerQuery, setMarketTagPickerQuery] = useState("");
 
-  const [marketSelectedTag, setMarketSelectedTag] = useState<string | null>(null);
+  const [marketSelectedTag, setMarketSelectedTag] = useState<string | null>(
+    initialCategoryPreset.defaultTag
+  );
   const [marketTagMembers, setMarketTagMembers] = useState<string[]>([]);
   const [marketTagMembersLoading, setMarketTagMembersLoading] = useState(false);
 
   const [marketFiltersOpen, setMarketFiltersOpen] = useState(false);
   const [marketFilterMarket, setMarketFilterMarket] =
-    useState<TMarketFilterMarket>(options.defaultMarketFilterMarket);
-  const [marketFilterAssetClasses, setMarketFilterAssetClasses] = useState<
-    AssetClass[]
-  >([]);
-  const [marketFilterKinds, setMarketFilterKinds] = useState<InstrumentKind[]>(
-    []
+    useState<TMarketFilterMarket>(
+      (initialCategoryPreset.filterMarket as TMarketFilterMarket) ??
+        options.defaultMarketFilterMarket
+    );
+  const [marketFilterAssetClasses, setMarketFilterAssetClasses] = useState<AssetClass[]>(
+    [...initialCategoryPreset.filterAssetClasses]
   );
+  const [marketFilterKinds, setMarketFilterKinds] = useState<InstrumentKind[]>([
+    ...initialCategoryPreset.filterKinds
+  ]);
 
   const [marketQuotesBySymbol, setMarketQuotesBySymbol] = useState<
     Record<string, MarketQuote>
@@ -357,6 +390,75 @@ export function useDashboardMarket<
     setMarketChartHoverDate(null);
     setMarketChartHoverPrice(null);
   }, [marketSelectedSymbol]);
+
+  const setMarketCategoryTab = useCallback(
+    (next: SetStateAction<MarketCategoryTab>) => {
+      const nextTab =
+        typeof next === "function"
+          ? (next as (prev: MarketCategoryTab) => MarketCategoryTab)(
+              marketCategoryTab
+            )
+          : next;
+      if (nextTab === marketCategoryTab) return;
+
+      marketPerTabStateRef.current[marketCategoryTab] = {
+        scope: marketScope,
+        filterMarket: marketFilterMarket,
+        filterAssetClasses: [...marketFilterAssetClasses],
+        filterKinds: [...marketFilterKinds],
+        searchQuery: marketSearchQuery,
+        selectedTag: marketSelectedTag
+      };
+
+      const remembered = marketPerTabStateRef.current[nextTab];
+      const preset = options.marketCategoryPresets[nextTab];
+
+      if (remembered) {
+        setMarketScope(remembered.scope);
+        setMarketFilterMarket(remembered.filterMarket);
+        setMarketFilterAssetClasses([...remembered.filterAssetClasses]);
+        setMarketFilterKinds([...remembered.filterKinds]);
+        setMarketSearchQuery(remembered.searchQuery);
+        setMarketSelectedTag(remembered.selectedTag);
+      } else {
+        setMarketScope((preset.defaultScope as TMarketScope) ?? options.defaultMarketScope);
+        setMarketFilterMarket(
+          (preset.filterMarket as TMarketFilterMarket) ??
+            options.defaultMarketFilterMarket
+        );
+        setMarketFilterAssetClasses([...preset.filterAssetClasses]);
+        setMarketFilterKinds([...preset.filterKinds]);
+        setMarketSearchQuery("");
+        setMarketSelectedTag(preset.defaultTag);
+      }
+
+      setMarketSearchResults([]);
+      setMarketSelectedSymbol(null);
+      setMarketSelectedProfile(null);
+      setMarketSelectedUserTags([]);
+      setMarketShowProviderData(false);
+      setMarketTagMembers([]);
+      setMarketChartBars([]);
+      setMarketChartHoverDate(null);
+      setMarketChartHoverPrice(null);
+      setMarketTagChartHoverDate(null);
+      setMarketTagChartHoverPrice(null);
+      setMarketFiltersOpen(false);
+      setMarketCategoryTabState(nextTab);
+    },
+    [
+      marketCategoryTab,
+      marketFilterAssetClasses,
+      marketFilterKinds,
+      marketFilterMarket,
+      marketScope,
+      marketSearchQuery,
+      marketSelectedTag,
+      options.defaultMarketFilterMarket,
+      options.defaultMarketScope,
+      options.marketCategoryPresets
+    ]
+  );
 
   useEffect(() => {
     setMarketTagChartHoverDate(null);
@@ -561,6 +663,16 @@ export function useDashboardMarket<
   ]);
 
   return {
+    marketCategoryTab,
+    setMarketCategoryTab,
+    marketCategoryPreset: options.marketCategoryPresets[marketCategoryTab],
+    marketCategoryIsConstruction:
+      options.marketCategoryPresets[marketCategoryTab]?.construction ?? false,
+    marketCategoryConstructionTitle:
+      options.marketCategoryPresets[marketCategoryTab]?.constructionTitle ?? null,
+    marketCategoryConstructionDescription:
+      options.marketCategoryPresets[marketCategoryTab]?.constructionDescription ??
+      null,
     marketCatalogSyncing,
     setMarketCatalogSyncing,
     marketCatalogSyncSummary,
@@ -1034,6 +1146,7 @@ export interface UseDashboardMarketRuntimeEffectsOptions<TMarketScope extends st
   activeView: string;
   otherTab: string;
   analysisInstrumentViewActive: boolean;
+  marketCategoryTab: MarketCategoryTab;
   marketEffectiveScope: TMarketScope;
   holdingsScopeValue: TMarketScope;
   searchScopeValue: TMarketScope;
@@ -1043,6 +1156,7 @@ export interface UseDashboardMarketRuntimeEffectsOptions<TMarketScope extends st
   loadMarketQuotes: (symbols: string[]) => Promise<void>;
   marketSelectedSymbol: string | null;
   marketSelectedTag: string | null;
+  marketTagMembersCount: number;
   marketSearchQuery: string;
   marketTagManagementQuery: string;
   marketWatchlistCount: number;
@@ -1082,6 +1196,7 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
   const marketDataManagementPrevViewRef = useRef(options.activeView);
   const marketDataManagementPrevOtherTabRef = useRef(options.otherTab);
   const marketDataManagementNavigationGuardRef = useRef(false);
+  const marketAutoHydratedTagRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (options.activeView !== "other") return;
@@ -1342,28 +1457,23 @@ export function useDashboardMarketRuntimeEffects<TMarketScope extends string>(
 
   useEffect(() => {
     if (options.activeView !== "market") return;
-    if (options.marketSelectedSymbol || options.marketSelectedTag) return;
-    if (options.marketSearchQuery.trim()) return;
-
-    if (options.holdingsSymbols.length > 0) {
-      options.setMarketScope(options.holdingsScopeValue);
+    if (options.marketEffectiveScope !== options.tagsScopeValue) return;
+    if (!options.marketSelectedTag) return;
+    if (options.marketTagMembersCount > 0) {
+      marketAutoHydratedTagRef.current = options.marketSelectedTag;
       return;
     }
-
-    if (options.marketWatchlistCount > 0) {
-      options.setMarketScope(options.tagsScopeValue);
-      void options.selectDefaultTag("watchlist:all");
-    }
+    if (marketAutoHydratedTagRef.current === options.marketSelectedTag) return;
+    marketAutoHydratedTagRef.current = options.marketSelectedTag;
+    void options.selectDefaultTag(options.marketSelectedTag);
   }, [
     options.activeView,
-    options.holdingsScopeValue,
-    options.holdingsSymbols,
-    options.marketSearchQuery,
-    options.marketSelectedSymbol,
+    options.marketCategoryTab,
+    options.marketEffectiveScope,
     options.marketSelectedTag,
-    options.marketWatchlistCount,
+    options.marketTagMembersCount,
     options.selectDefaultTag,
-    options.setMarketScope,
     options.tagsScopeValue
   ]);
+
 }

@@ -6,6 +6,8 @@ import type {
 
 import type {
   AnalysisTab,
+  MarketCategoryPreset,
+  MarketCategoryTab,
   PositionFormState,
   RiskFormState,
   TargetPoolStructureStats,
@@ -49,9 +51,9 @@ export const navItems = [
   },
   {
     key: "index-tracking",
-    label: "指数跟踪",
-    meta: "指数/对标",
-    description: "跟踪核心指数与对标走势。",
+    label: "行业跟踪",
+    meta: "行业/景气",
+    description: "跟踪行业轮动、景气变化与板块对比。",
     icon: "track_changes"
   },
   {
@@ -142,6 +144,95 @@ export const analysisTabs: {
   { key: "index", label: "指数", icon: "show_chart", description: "指数趋势、区间对比与成分分析（待实现）。" },
   { key: "sector", label: "板块", icon: "grid_view", description: "板块热度、走势与聚合对比（待实现）。" }
 ];
+
+export const marketCategoryTabs: {
+  key: MarketCategoryTab;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  { key: "stock", label: "股票", icon: "candlestick_chart", description: "A 股股票列表与详情。" },
+  { key: "etf", label: "ETF", icon: "view_timeline", description: "ETF 行情与持仓关联。" },
+  { key: "index", label: "指数", icon: "show_chart", description: "指数标的与对标走势。" },
+  { key: "spot", label: "现货", icon: "inventory_2", description: "现货品种与成交概览。" },
+  { key: "forex", label: "汇率", icon: "currency_exchange", description: "外汇对行情与波动。" },
+  { key: "futures", label: "期货", icon: "monitoring", description: "期货合约行情与变动。" },
+  { key: "bond", label: "债券", icon: "account_balance", description: "债券行情（建设中）。" },
+  { key: "rate", label: "利率", icon: "percent", description: "利率曲线与利率资产（建设中）。" }
+];
+
+export const marketCategoryPresets: Record<MarketCategoryTab, MarketCategoryPreset> = {
+  stock: {
+    filterMarket: "CN",
+    filterAssetClasses: ["stock"],
+    filterKinds: ["stock"],
+    defaultScope: "holdings",
+    defaultTag: null,
+    construction: false
+  },
+  etf: {
+    filterMarket: "CN",
+    filterAssetClasses: ["etf"],
+    filterKinds: ["fund"],
+    defaultScope: "holdings",
+    defaultTag: null,
+    construction: false
+  },
+  index: {
+    filterMarket: "CN",
+    filterAssetClasses: [],
+    filterKinds: ["index"],
+    defaultScope: "tags",
+    defaultTag: "kind:index",
+    construction: false
+  },
+  spot: {
+    filterMarket: "CN",
+    filterAssetClasses: [],
+    filterKinds: ["spot"],
+    defaultScope: "tags",
+    defaultTag: "kind:spot",
+    construction: false
+  },
+  forex: {
+    filterMarket: "FX",
+    filterAssetClasses: [],
+    filterKinds: ["forex"],
+    defaultScope: "tags",
+    defaultTag: "kind:forex",
+    construction: false
+  },
+  futures: {
+    filterMarket: "CN",
+    filterAssetClasses: [],
+    filterKinds: ["futures"],
+    defaultScope: "tags",
+    defaultTag: "kind:futures",
+    construction: false
+  },
+  bond: {
+    filterMarket: "CN",
+    filterAssetClasses: [],
+    filterKinds: [],
+    defaultScope: "tags",
+    defaultTag: null,
+    construction: true,
+    constructionTitle: "债券行情建设中",
+    constructionDescription:
+      "债券分类已纳入导航，但当前版本暂未接入债券行情链路。后续将补齐债券标的模型与数据采集。"
+  },
+  rate: {
+    filterMarket: "CN",
+    filterAssetClasses: [],
+    filterKinds: [],
+    defaultScope: "tags",
+    defaultTag: null,
+    construction: true,
+    constructionTitle: "利率行情建设中",
+    constructionDescription:
+      "利率分类已纳入导航，但当前版本暂未接入利率市场视图。后续将接入利率曲线与相关资产映射。"
+  }
+};
 
 export const marketChartRanges = [
   { key: "1W", label: "1周" },

@@ -26,6 +26,7 @@ import {
   UNIVERSE_POOL_BUCKET_ORDER,
   emptyPositionForm,
   emptyRiskForm,
+  marketCategoryPresets,
   schedulerTimezoneDefaults
 } from "./constants";
 import type {
@@ -141,6 +142,8 @@ export function Dashboard({
 
   const marketState = useDashboardMarket({
     clampNumber,
+    defaultMarketCategoryTab: "stock",
+    marketCategoryPresets,
     defaultMarketScope: "holdings" as MarketScope,
     defaultMarketFilterMarket: "all" as MarketFilterMarket,
     defaultMarketChartRange: "6M" as MarketChartRangeKey,
