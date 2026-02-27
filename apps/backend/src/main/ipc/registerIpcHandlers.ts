@@ -13,6 +13,7 @@ import type {
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
+  CreateInsightFactInput,
   CreateManualTagInput,
   CreateCustomValuationMethodInput,
   CreateInsightInput,
@@ -25,12 +26,14 @@ import type {
   RemoveIngestRunInput,
   RemoveInsightEffectChannelInput,
   RemoveInsightEffectPointInput,
+  RemoveInsightFactInput,
   RemoveInsightInput,
   RemoveInsightScopeRuleInput,
   GetQuotesInput,
   GetTagMembersInput,
   GetTagSeriesInput,
   ListCompletenessStatusInput,
+  ListInsightFactsInput,
   ListInsightsInput,
   ListInstrumentRegistryInput,
   ListValuationMethodsInput,
@@ -171,11 +174,13 @@ import {
 } from "../services/marketService";
 import {
   cloneBuiltinValuationMethod,
+  createInsightFact,
   createCustomValuationMethod,
   createInsight,
   excludeInsightTarget,
   getInsightDetail,
   getValuationMethodDetail,
+  listInsightFacts,
   listInsights,
   listValuationMethods,
   previewMaterializeInsightTargets,
@@ -185,6 +190,7 @@ import {
   removeInsight,
   removeInsightEffectChannel,
   removeInsightEffectPoint,
+  removeInsightFact,
   removeInsightScopeRule,
   searchInsights,
   setActiveValuationMethodVersion,
@@ -1644,6 +1650,30 @@ export async function registerIpcHandlers() {
     void triggerAutoIngest("positions");
     return await getMarketTargetsConfig(businessDb);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_FACT_LIST,
+    async (_event, input: ListInsightFactsInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listInsightFacts(businessDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_FACT_CREATE,
+    async (_event, input: CreateInsightFactInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await createInsightFact(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_FACT_DELETE,
+    async (_event, input: RemoveInsightFactInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await removeInsightFact(businessDb, input);
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.INSIGHTS_LIST,

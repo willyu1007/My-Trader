@@ -2,7 +2,7 @@ import { all, exec, execVolatile, get, run, transaction } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await execVolatile(db, "pragma foreign_keys = on;");
@@ -725,6 +725,35 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
             updated_at = excluded.updated_at
         `,
         [now, now, now, now]
+      );
+
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
+    if (currentVersion < 8) {
+      currentVersion = 8;
+
+      await exec(
+        db,
+        `
+          create table if not exists insight_facts (
+            id text primary key not null,
+            content text not null,
+            created_at integer not null,
+            updated_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists insight_facts_created_at
+          on insight_facts (created_at desc, id asc);
+        `
       );
 
       await run(

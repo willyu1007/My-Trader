@@ -2,12 +2,14 @@ import crypto from "node:crypto";
 
 import type {
   CloneBuiltinValuationMethodInput,
+  CreateInsightFactInput,
   CreateCustomValuationMethodInput,
   CreateInsightInput,
   DataDomainId,
   GetInsightInput,
   GetValuationMethodInput,
   Insight,
+  InsightFact,
   InsightDetail,
   InsightEffectChannel,
   InsightEffectOperator,
@@ -23,6 +25,8 @@ import type {
   InsightTargetUnexcludeInput,
   ListInsightsInput,
   ListInsightsResult,
+  ListInsightFactsInput,
+  ListInsightFactsResult,
   ListValuationMethodsInput,
   ListValuationMethodsResult,
   MaterializeInsightTargetsInput,
@@ -31,6 +35,7 @@ import type {
   RemoveInsightEffectChannelInput,
   RemoveInsightEffectPointInput,
   RemoveInsightInput,
+  RemoveInsightFactInput,
   RemoveInsightScopeRuleInput,
   SearchInsightsInput,
   SearchInsightsResult,
@@ -114,6 +119,13 @@ interface InsightRow {
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
+}
+
+interface InsightFactRow {
+  id: string;
+  content: string;
+  created_at: number;
+  updated_at: number;
 }
 
 interface ScopeRuleRow {
@@ -234,6 +246,72 @@ interface SymbolScopeRow {
   insight_id: string;
   source_scope_type: string;
   source_scope_key: string;
+}
+
+export async function listInsightFacts(
+  businessDb: SqliteDatabase,
+  input?: ListInsightFactsInput
+): Promise<ListInsightFactsResult> {
+  const limit = Math.max(1, Math.min(500, Math.floor(input?.limit ?? 200)));
+  const offset = Math.max(0, Math.floor(input?.offset ?? 0));
+  const rows = await all<InsightFactRow>(
+    businessDb,
+    `
+      select id, content, created_at, updated_at
+      from insight_facts
+      order by created_at desc, id asc
+      limit ?
+      offset ?
+    `,
+    [limit, offset]
+  );
+  const totalRow = await get<{ total: number }>(
+    businessDb,
+    `select count(*) as total from insight_facts`
+  );
+  return {
+    items: rows.map(toInsightFact),
+    total: Number(totalRow?.total ?? 0),
+    limit,
+    offset
+  };
+}
+
+export async function createInsightFact(
+  businessDb: SqliteDatabase,
+  input: CreateInsightFactInput
+): Promise<InsightFact> {
+  const id = crypto.randomUUID();
+  const content = normalizeRequiredString(input.content, "content");
+  const now = Date.now();
+  await run(
+    businessDb,
+    `
+      insert into insight_facts (id, content, created_at, updated_at)
+      values (?, ?, ?, ?)
+    `,
+    [id, content, now, now]
+  );
+  const row = await get<InsightFactRow>(
+    businessDb,
+    `
+      select id, content, created_at, updated_at
+      from insight_facts
+      where id = ?
+      limit 1
+    `,
+    [id]
+  );
+  if (!row) throw new Error("Failed to read created insight fact.");
+  return toInsightFact(row);
+}
+
+export async function removeInsightFact(
+  businessDb: SqliteDatabase,
+  input: RemoveInsightFactInput
+): Promise<void> {
+  const id = normalizeRequiredString(input.id, "id");
+  await run(businessDb, `delete from insight_facts where id = ?`, [id]);
 }
 
 export async function listInsights(
@@ -1980,6 +2058,15 @@ function pickPrimaryValue(metrics: Record<string, number | null>): number | null
     if (value !== null) return value;
   }
   return null;
+}
+
+function toInsightFact(row: InsightFactRow): InsightFact {
+  return {
+    id: row.id,
+    content: row.content,
+    createdAt: Number(row.created_at ?? 0),
+    updatedAt: Number(row.updated_at ?? 0)
+  };
 }
 
 function toInsight(row: InsightRow): Insight {

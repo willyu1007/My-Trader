@@ -97,6 +97,72 @@
 - `2026-02-27` `pnpm -C apps/backend typecheck && pnpm typecheck`
   - Result: pass
   - Notes: 改动 `dev.mjs` / `tsup.config.ts` 后，全量类型检查与 theme contract 通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（insights 双 tab + 事实草稿生成）
+  - Result: pass
+  - Notes: `InsightsView` 双 tab 重构、管理列表维度补充、资讯搜索预留 UI 后前端编译检查通过。
+- `2026-02-27` `pnpm typecheck`（insights 双 tab round）
+  - Result: pass
+  - Notes: shared/backend/frontend 类型检查与 `verify:theme` 全部通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（insights 顶部 tab 迁移）
+  - Result: pass
+  - Notes: 顶部栏接入 `生成/管理`、`InsightsView` 改为受控 tab 后前端编译通过。
+- `2026-02-27` `pnpm typecheck`（insights 顶部 tab 迁移）
+  - Result: pass
+  - Notes: shared/backend/frontend 类型检查与 `verify:theme` 均通过。
+- `2026-02-27` `pnpm -C packages/shared build`（insight facts IPC 契约）
+  - Result: pass
+  - Notes: shared 类型与 IPC 渠道新增后编译通过。
+- `2026-02-27` `pnpm -C apps/backend typecheck`（insight facts backend）
+  - Result: pass
+  - Notes: schema v8、insightService facts CRUD、ipc handlers 新增后后端类型检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（生成页事实列表化）
+  - Result: pass
+  - Notes: 生成页改为持久化事实列表（新增/删除/草稿生成）并移除顶部文案+刷新按钮后前端编译通过。
+- `2026-02-27` `pnpm typecheck`（facts round）
+  - Result: pass
+  - Notes: shared/backend/frontend 类型检查与 `verify:theme` 均通过。
+- `2026-02-27` `pnpm -C apps/backend verify:insights-e2e`
+  - Result: fail
+  - Notes: 失败于 `tsup.config.ts:23` 语法错误（`Expected ";" but found ")"`）；该错误位于既有构建配置文件，非本次 facts/UI 改动引入，故本轮未扩展修复。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（insights 去卡片化重排）
+  - Result: pass
+  - Notes: 生成/管理分栏 + 表格 + 详情工作区二级 tab 改造后前端编译通过。
+- `2026-02-27` `pnpm -C apps/backend typecheck && pnpm -C packages/shared build`
+  - Result: pass
+  - Notes: UI 重排后后端与 shared 契约编译保持通过。
+- `2026-02-27` `pnpm typecheck`（insights 去卡片化 round）
+  - Result: pass
+  - Notes: shared/backend/frontend 类型检查与 theme contract 均通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（insights 提示 3 秒淡出 + 分栏断点修正）
+  - Result: pass
+  - Notes: `error/notice` 自动淡出逻辑与 `md` 左右分栏断点调整后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（生成页三分区 + 事实全选批量删除）
+  - Result: pass
+  - Notes: 生成页重排为“事实录入/事实列表/观点草稿”三区结构，并新增全选与批量删除后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（观点草稿区去卡片外框）
+  - Result: pass
+  - Notes: 移除“观点草稿”外层卡片边框/圆角/背景容器后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（事实录入/资讯搜索上下分区）
+  - Result: pass
+  - Notes: 左侧输入区改为上下分段，并将资讯搜索按钮改为独立操作行后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（观点描述高度下调 + textarea 禁止拖拽）
+  - Result: pass
+  - Notes: 观点描述输入框高度收敛，并统一 `textarea` 为固定高度（`resize-none`）后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（资讯搜索按钮改名并上移到标题行）
+  - Result: pass
+  - Notes: “资讯搜索”区按钮文案改为“搜索”并与标题同行后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（观点草稿标签内置多选 + 日期输入同交易流水）
+  - Result: pass
+  - Notes: 标签输入改为内置下拉多选，日期输入改为交易流水同款 `type=date` 区间样式，且与标题同行后前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（观点草稿头部右侧对齐修正）
+  - Result: pass
+  - Notes: 日期区间与标签多选从“标题输入行”移至“观点草稿”标题行右侧后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（观点草稿头部控件简约化）
+  - Result: pass
+  - Notes: 日期区间与标签触发器去外框、改为轻量样式后，前端编译检查通过。
+- `2026-02-27` `pnpm -C apps/frontend typecheck`（观点默认有效期：当前日期至一年后）
+  - Result: pass
+  - Notes: 生成页默认 `valid_from/valid_to` 与创建后重置逻辑更新后，前端编译检查通过。
 
 ## Manual checks
 - [x] backend 运行时可创建 FTS5 virtual table

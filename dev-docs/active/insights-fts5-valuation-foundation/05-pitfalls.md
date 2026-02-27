@@ -96,3 +96,15 @@
   - 改为 `pnpm exec vite --port <port>` 与 `pnpm exec tsup --watch --no-clean`。
 - Prevention:
   - 对 `pnpm exec` 命令参数做最小化传递，避免不必要的 `--`；修改后必须验证“期望端口 == Vite 实际端口”。
+
+### Pitfall 8: 事实草稿重复生成导致论述无限追加
+- Symptom:
+  - 在“生成”tab 连续点击“生成观点草稿”后，`thesis` 中“事实记录”区块被重复追加，文案快速膨胀。
+- Root cause:
+  - 初版实现采用“直接 append”策略，未识别已有事实区块。
+- What was tried:
+  - 保留 append 行为并提示用户手工清理，交互负担高。
+- Fix/workaround:
+  - 增加 marker 替换逻辑：若 `thesis` 已存在“事实记录（手动）”区块，则只替换该区块；否则才追加。
+- Prevention:
+  - 所有“从原始输入生成草稿”路径都应具备幂等更新语义，避免重复点击导致内容堆积。

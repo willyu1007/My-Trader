@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { AnalysisTab, OtherTab, WorkspaceView } from "../types";
+import type { AnalysisTab, InsightsTab, OtherTab, WorkspaceView } from "../types";
 
 export interface UseDashboardUiResult {
   error: string | null;
@@ -14,6 +14,8 @@ export interface UseDashboardUiResult {
   setOtherTab: Dispatch<SetStateAction<OtherTab>>;
   analysisTab: AnalysisTab;
   setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
+  insightsTab: InsightsTab;
+  setInsightsTab: Dispatch<SetStateAction<InsightsTab>>;
   isNavCollapsed: boolean;
   setIsNavCollapsed: Dispatch<SetStateAction<boolean>>;
 }
@@ -39,6 +41,7 @@ export function useDashboardUi(options?: UseDashboardUiOptions): UseDashboardUiR
   const [activeView, setActiveView] = useState<WorkspaceView>("portfolio");
   const [otherTab, setOtherTab] = useState<OtherTab>("data-management");
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("portfolio");
+  const [insightsTab, setInsightsTab] = useState<InsightsTab>("generate");
   const [isNavCollapsedState, setIsNavCollapsedState] = useState(false);
   const isNavCollapsedControlled = typeof options?.navCollapsed === "boolean";
   const isNavCollapsed = isNavCollapsedControlled
@@ -92,6 +95,8 @@ export function useDashboardUi(options?: UseDashboardUiOptions): UseDashboardUiR
     setOtherTab,
     analysisTab,
     setAnalysisTab,
+    insightsTab,
+    setInsightsTab,
     isNavCollapsed,
     setIsNavCollapsed
   };

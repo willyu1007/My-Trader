@@ -6,6 +6,7 @@ import type {
 
 import type {
   AnalysisTab,
+  InsightsTab,
   MarketCategoryPreset,
   MarketCategoryTab,
   PositionFormState,
@@ -144,6 +145,16 @@ export const analysisTabs: {
   { key: "instrument", label: "个股", icon: "candlestick_chart", description: "个股走势、指标与事件分析（待实现）。" },
   { key: "index", label: "指数", icon: "show_chart", description: "指数趋势、区间对比与成分分析（待实现）。" },
   { key: "sector", label: "板块", icon: "grid_view", description: "板块热度、走势与聚合对比（待实现）。" }
+];
+
+export const insightsTabs: {
+  key: InsightsTab;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  { key: "generate", label: "生成", icon: "auto_awesome", description: "记录事实并生成观点草稿。" },
+  { key: "manage", label: "管理", icon: "view_list", description: "查看观点列表并维护作用参数。" }
 ];
 
 export const marketCategoryTabs: {

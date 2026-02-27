@@ -1162,6 +1162,33 @@ export type InsightEffectStage =
   | "risk";
 export type InsightEffectOperator = "set" | "add" | "mul" | "min" | "max";
 
+export interface InsightFact {
+  id: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListInsightFactsInput {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListInsightFactsResult {
+  items: InsightFact[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CreateInsightFactInput {
+  content: string;
+}
+
+export interface RemoveInsightFactInput {
+  id: string;
+}
+
 export interface Insight {
   id: string;
   title: string;
@@ -1672,6 +1699,9 @@ export interface MyTraderApi {
     ): Promise<void>;
   };
   insights: {
+    listFacts(input?: ListInsightFactsInput): Promise<ListInsightFactsResult>;
+    createFact(input: CreateInsightFactInput): Promise<InsightFact>;
+    removeFact(input: RemoveInsightFactInput): Promise<void>;
     list(input?: ListInsightsInput): Promise<ListInsightsResult>;
     get(input: GetInsightInput): Promise<InsightDetail | null>;
     create(input: CreateInsightInput): Promise<InsightDetail>;
@@ -1820,6 +1850,9 @@ export const IPC_CHANNELS = {
     "market:instrumentRegistry:setAutoIngest",
   MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST:
     "market:instrumentRegistry:batchSetAutoIngest",
+  INSIGHTS_FACT_LIST: "insights:fact:list",
+  INSIGHTS_FACT_CREATE: "insights:fact:create",
+  INSIGHTS_FACT_DELETE: "insights:fact:delete",
   INSIGHTS_LIST: "insights:list",
   INSIGHTS_GET: "insights:get",
   INSIGHTS_CREATE: "insights:create",

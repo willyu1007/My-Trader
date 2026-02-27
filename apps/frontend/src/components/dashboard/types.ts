@@ -62,12 +62,14 @@ export type OtherTab =
   | "test";
 
 export type AnalysisTab = "portfolio" | "instrument" | "index" | "sector";
+export type InsightsTab = "generate" | "manage";
 
 export interface DashboardUiState {
   activeView: WorkspaceView;
   portfolioTab: PortfolioTab;
   otherTab: OtherTab;
   analysisTab: AnalysisTab;
+  insightsTab: InsightsTab;
   isNavCollapsed: boolean;
   error: string | null;
   notice: string | null;

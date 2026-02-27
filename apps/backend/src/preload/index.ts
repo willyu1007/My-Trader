@@ -212,6 +212,9 @@ const api: MyTraderApi = {
       )
   },
   insights: {
+    listFacts: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_FACT_LIST, input ?? null),
+    createFact: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_FACT_CREATE, input),
+    removeFact: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_FACT_DELETE, input),
     list: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_LIST, input ?? null),
     get: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_GET, input),
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_CREATE, input),

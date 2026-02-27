@@ -15,6 +15,7 @@ import {
   UNIVERSE_POOL_BUCKET_ORDER,
   analysisTabs,
   assetClassLabels,
+  insightsTabs,
   ledgerEventTypeOptions,
   marketCategoryTabs,
   marketChartRanges,
@@ -82,6 +83,7 @@ import {
 } from "../shared";
 import type {
   AnalysisTab,
+  InsightsTab,
   DashboardProps,
   LedgerFilter,
   LedgerFormState,
@@ -155,6 +157,8 @@ interface DashboardContainerLayoutProps {
   setOtherTab: Dispatch<SetStateAction<OtherTab>>;
   analysisTab: AnalysisTab;
   setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
+  insightsTab: InsightsTab;
+  setInsightsTab: Dispatch<SetStateAction<InsightsTab>>;
   portfolioTab: PortfolioTab;
   setPortfolioTab: Dispatch<SetStateAction<PortfolioTab>>;
   snapshot: PortfolioSnapshot | null;
@@ -219,6 +223,8 @@ export function DashboardContainerLayout({
   setOtherTab,
   analysisTab,
   setAnalysisTab,
+  insightsTab,
+  setInsightsTab,
   portfolioTab,
   setPortfolioTab,
   snapshot,
@@ -310,6 +316,14 @@ export function DashboardContainerLayout({
               active: otherTab === tab.key,
               onSelect: () => setOtherTab(tab.key)
             }))
+          : activeView === "insights"
+            ? insightsTabs.map((tab) => ({
+                key: tab.key,
+                label: tab.label,
+                active: insightsTab === tab.key,
+                onSelect: () => setInsightsTab(tab.key),
+                title: tab.description
+              }))
           : null;
   const resolvedTopTabs:
     | {
@@ -790,6 +804,8 @@ export function DashboardContainerLayout({
               Button={Button}
               Panel={Panel}
               formatDateTime={formatDateTime}
+              insightsTab={insightsTab}
+              setInsightsTab={setInsightsTab}
             />
           )}
 

@@ -4,6 +4,7 @@ export type {
   AnalysisTab,
   DashboardProps,
   DashboardUiState,
+  InsightsTab,
   MarketDomainState,
   MarketViewModel,
   OtherTab,
