@@ -7,6 +7,7 @@
 - 作用冲突必须先收敛到 symbol 再合并，避免行业/概念层优先级直接裁决。
 - 时间轴必须执行“区间外无影响”，防止长期残留偏移污染估值。
 - 前端 JSON 编辑器直接 `JSON.parse` 后不能裸传给强类型接口，需做 `assetScope/graph` 结构归一化。
+- dev 模式下 Electron 不能在 watcher 首轮构建前启动，否则可能触发 preload 竞态与窗口抖动。
 
 ## Entries
 ### Pitfall 1: 尝试使用 docker 路径编译 sql.js（失败）
@@ -69,3 +70,29 @@
   - 改为稳定关键词（`scope`）进行断言，避免符号歧义。
 - Prevention:
   - FTS MATCH 验证用例优先使用无操作符歧义的 token；如需短语检索需显式转义/引用。
+
+### Pitfall 6: dev 启动期 watcher 抖动导致窗口反复弹出/关闭
+- Symptom:
+  - 启动 `pnpm dev` 时出现窗口反复弹出关闭，日志出现多次 `preload 已注入`。
+- Root cause:
+  - Electron 在 watcher 首轮构建尚未稳定时启动，触发 preload 读写竞态与重启风暴。
+- What was tried:
+  - 仅缩短/延长重启抑制窗口，无法彻底消除启动抖动。
+- Fix/workaround:
+  - 在 `apps/backend/scripts/dev.mjs` 中先等待 shared/backend watcher 首轮输出预热完成，再启动 Electron。
+  - 将热重启能力延后到启动稳定窗口之后启用，并加入重启冷却时间。
+  - 将重启触发改为“构建产物内容哈希变化”而非单纯文件事件，避免无效抖动。
+- Prevention:
+  - 任何 dev orchestration 调整都必须验证“冷启动日志只出现一次 preload 注入”。
+
+### Pitfall 7: `pnpm exec` 误用 `--` 导致参数失效
+- Symptom:
+  - 日志出现 `Timed out waiting for http://localhost:5174`，但 Vite 实际运行在 `5173`。
+- Root cause:
+  - `pnpm exec vite -- --port <port>` / `pnpm exec tsup -- --watch` 中多余的 `--` 导致参数传递异常。
+- What was tried:
+  - 先仅调整重启防抖窗口，问题仍偶发。
+- Fix/workaround:
+  - 改为 `pnpm exec vite --port <port>` 与 `pnpm exec tsup --watch --no-clean`。
+- Prevention:
+  - 对 `pnpm exec` 命令参数做最小化传递，避免不必要的 `--`；修改后必须验证“期望端口 == Vite 实际端口”。

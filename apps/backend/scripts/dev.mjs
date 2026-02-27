@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import fs from "node:fs";
 import net from "node:net";
+import { createHash } from "node:crypto";
 
 const backendDir = process.cwd();
 const frontendDir = path.resolve(backendDir, "../frontend");
@@ -42,10 +43,7 @@ function checkPortAvailable(port) {
   return new Promise((resolve) => {
     const server = net.createServer();
     server.unref();
-    server.once("error", (err) => {
-      if (err && err.code === "EADDRINUSE") resolve(false);
-      else resolve(false);
-    });
+    server.once("error", () => resolve(false));
     server.listen({ port, host: "127.0.0.1" }, () => {
       server.close(() => resolve(true));
     });
@@ -100,7 +98,7 @@ function waitForExitOk(child, name) {
 }
 
 function watchBuildOutputs(dir, files, onChange) {
-  const watcher = fs.watch(dir, (event, filename) => {
+  const watcher = fs.watch(dir, (_event, filename) => {
     const name = typeof filename === "string" ? filename : filename?.toString();
     if (!name || !files.includes(name)) return;
     onChange(name);
@@ -109,6 +107,8 @@ function watchBuildOutputs(dir, files, onChange) {
 }
 
 async function run() {
+  const STARTUP_STABILIZE_MS = 12000;
+  const RESTART_COOLDOWN_MS = 2000;
   const basePort = Number(process.env.MYTRADER_DEV_PORT ?? 5173);
   const devPort = await findAvailablePort(basePort, 30);
   const devServerUrl = `http://localhost:${devPort}`;
@@ -120,7 +120,7 @@ async function run() {
 
   const vite = spawnChild(
     pnpmCmd,
-    ["exec", "vite", "--", "--port", String(devPort)],
+    ["exec", "vite", "--port", String(devPort)],
     { cwd: frontendDir }
   );
   const build = spawnChild(pnpmCmd, ["run", "build"], { cwd: backendDir });
@@ -134,6 +134,12 @@ async function run() {
   let isRestarting = false;
   let sharedWarm = false;
   let backendWarm = false;
+  let watchWarmResolved = false;
+  let resolveWatchWarm;
+  const outputHashByPath = new Map();
+  const watchWarmReady = new Promise((resolve) => {
+    resolveWatchWarm = resolve;
+  });
   const stopWatchers = [];
 
   const exit = (code) => {
@@ -158,9 +164,15 @@ async function run() {
   const childEnv = { ...process.env, MYTRADER_DEV_SERVER_URL: devServerUrl };
   delete childEnv.ELECTRON_RUN_AS_NODE;
 
-  const armRestart = () => {
+  const armRestart = (suppressMs = 1500) => {
     restartArmed = true;
-    restartSuppressUntil = Date.now() + 1500;
+    restartSuppressUntil = Date.now() + suppressMs;
+  };
+
+  const markWatchWarmReady = () => {
+    if (watchWarmResolved) return;
+    watchWarmResolved = true;
+    resolveWatchWarm();
   };
 
   const scheduleRestart = () => {
@@ -175,7 +187,7 @@ async function run() {
   };
 
   sharedWatch = spawnChild(pnpmCmd, ["run", "dev"], { cwd: sharedDir });
-  backendWatch = spawnChild(pnpmCmd, ["exec", "tsup", "--", "--watch"], {
+  backendWatch = spawnChild(pnpmCmd, ["exec", "tsup", "--watch", "--no-clean"], {
     cwd: backendDir
   });
 
@@ -191,21 +203,57 @@ async function run() {
     if (!restartArmed) {
       if (source === "backend") backendWarm = true;
       if (source === "shared") sharedWarm = true;
-      if (backendWarm && sharedWarm) armRestart();
+      if (backendWarm && sharedWarm) {
+        markWatchWarmReady();
+      }
       return;
     }
     if (Date.now() < restartSuppressUntil) return;
     scheduleRestart();
   };
 
+  const toOutputHash = (filePath) => {
+    try {
+      const content = fs.readFileSync(filePath);
+      return createHash("sha1").update(content).digest("hex");
+    } catch {
+      return null;
+    }
+  };
+
+  const handleBuildOutputWithHash = (source, filePath) => {
+    const hash = toOutputHash(filePath);
+    if (!hash) return;
+    const prev = outputHashByPath.get(filePath);
+    if (prev === hash) return;
+    outputHashByPath.set(filePath, hash);
+
+    handleBuildOutput(source);
+  };
+
+  const watchedBackendFiles = ["main.js", "preload.js"];
+  const watchedSharedFiles = ["index.js", "ipc.js"];
+
   stopWatchers.push(
-    watchBuildOutputs(backendDistDir, ["main.js", "preload.js"], () =>
-      handleBuildOutput("backend")
+    watchBuildOutputs(backendDistDir, watchedBackendFiles, (name) =>
+      handleBuildOutputWithHash("backend", path.join(backendDistDir, name))
     ),
-    watchBuildOutputs(sharedDistDir, ["index.js", "ipc.js"], () =>
-      handleBuildOutput("shared")
+    watchBuildOutputs(sharedDistDir, watchedSharedFiles, (name) =>
+      handleBuildOutputWithHash("shared", path.join(sharedDistDir, name))
     )
   );
+
+  // Prime output hashes so initial watcher churn with unchanged content won't trigger restarts.
+  for (const file of watchedBackendFiles) {
+    const filePath = path.join(backendDistDir, file);
+    const hash = toOutputHash(filePath);
+    if (hash) outputHashByPath.set(filePath, hash);
+  }
+  for (const file of watchedSharedFiles) {
+    const filePath = path.join(sharedDistDir, file);
+    const hash = toOutputHash(filePath);
+    if (hash) outputHashByPath.set(filePath, hash);
+  }
 
   const startElectron = () => {
     electron = spawnChild(electronPath, ["."], {
@@ -217,6 +265,7 @@ async function run() {
     electron.on("exit", (code) => {
       if (isRestarting) {
         isRestarting = false;
+        armRestart(RESTART_COOLDOWN_MS);
         startElectron();
         return;
       }
@@ -224,10 +273,16 @@ async function run() {
     });
   };
 
-  startElectron();
   setTimeout(() => {
-    armRestart();
+    markWatchWarmReady();
   }, 10000);
+
+  await watchWarmReady;
+  startElectron();
+  // Enable hot-restart only after startup settles to avoid launch-time restart storms.
+  setTimeout(() => {
+    armRestart(RESTART_COOLDOWN_MS);
+  }, STARTUP_STABILIZE_MS);
 
   process.on("SIGINT", () => exit(130));
   process.on("SIGTERM", () => exit(143));

@@ -9,5 +9,5 @@ script = ""
 name = "Run"
 icon = "run"
 command = '''
-pnpm dev
+pnpm run dev:run-action
 '''

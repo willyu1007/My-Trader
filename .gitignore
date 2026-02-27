@@ -34,3 +34,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local run-action runtime files
+.mytrader-dev.log
+.mytrader-dev.pid

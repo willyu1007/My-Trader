@@ -20,4 +20,4 @@ export default defineConfig({
   external: ["electron"],
   noExternal: ["@mytrader/shared"],
   onSuccess: "node scripts/copy-sql-wasm.mjs"
-});
+}));

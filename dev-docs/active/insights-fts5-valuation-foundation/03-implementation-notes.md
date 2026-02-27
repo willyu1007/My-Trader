@@ -49,6 +49,18 @@
   - 版本差异视图简化为“仅展示发生变化的参数项（current vs previous）”；自定义方法默认隐藏（可切换显示），避免偏离“方法认知/调参”为主的目标。
   - 在 `MarketDetailWorkspace` 增加“当前值 vs 调整后值”价值判断卡片，展示应用链路并支持按观点从标的侧解除影响。
   - 统一移除信息界面中与当前模块/子 tab 重复的页面标题文案（如“观点管理”“估值方法管理”“标的管理”“数据分析”），避免与顶部导航/子 tab 重复。
+- tooling:
+  - 修复 Codex `Run action` 卡住问题：原动作为长驻 `pnpm dev`，执行器会持续等待。
+  - 新增后台启动脚本 `scripts/dev-run-action-start.mjs`，支持 PID 文件幂等保护与日志落盘（`.mytrader-dev.log`）。
+  - 新增 `status/stop` 脚本（`scripts/dev-run-action-status.mjs`、`scripts/dev-run-action-stop.mjs`）。
+  - 更新根脚本与 `.codex/environments/environment.toml`，将 Run 动作改为 `pnpm run dev:run-action`（快速返回，不阻塞动作执行）。
+  - 修复 dev 启动期窗口抖动（反复弹窗）：
+    - 在 `apps/backend/scripts/dev.mjs` 中将 watcher 首轮输出视为预热，先等待预热完成再启动 Electron；
+    - 将热重启能力延后到启动稳定窗口之后再开启；
+    - 增加重启冷却时间，避免连续触发重启。
+  - 修复 `pnpm exec` 参数传递错误：去掉多余 `--`，确保 `vite --port` 与 `tsup --watch --no-clean` 真实生效。
+  - 热重启改为“内容哈希门控”：仅当 `dist/main.js|preload.js|shared dist(index/ipc)` 内容发生变化时才触发重启，避免无效抖动，同时保留“改代码自动生效”。
+  - 清理 run-action 过渡逻辑：移除已废弃的环境变量分支（禁用重启模式），统一为“哈希门控 + 自动热重启”单一路径。
 - smoke:
   - 新增 `apps/backend/src/main/verifyInsightsE2E.ts` 端到端冒烟脚本，覆盖：
     - 观点生命周期（create/update）

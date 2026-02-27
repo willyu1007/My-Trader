@@ -73,6 +73,30 @@
 - `2026-02-26` `pnpm typecheck`（valuation-methods ui reshape）
   - Result: pass
   - Notes: shared/backend/frontend 类型检查与 theme contract 均通过。
+- `2026-02-27` `pnpm run dev:run-action:status && pnpm run dev:run-action && sleep 2 && pnpm run dev:run-action:status && pnpm run dev:run-action && pnpm run dev:run-action:stop && pnpm run dev:run-action:status`
+  - Result: pass
+  - Notes: Run action 新链路验证通过；后台启动可快速返回，重复触发幂等，停止与状态检查均正常。
+- `2026-02-27` `pnpm dev`（startup loop reproduce）
+  - Result: fail
+  - Notes: 启动日志出现多次 `preload 已注入`，确认存在启动期重启抖动。
+- `2026-02-27` `pnpm run dev:run-action && sleep 26 && tail -n 140 .mytrader-dev.log`
+  - Result: pass
+  - Notes: 修复后日志仅出现一次 `preload 已注入` / `auto-ingest scheduled`，未再复现连环启动弹窗。
+- `2026-02-27` `pnpm run dev:run-action && sleep 95 && rg -n "preload 已注入|Timed out waiting|ELIFECYCLE" .mytrader-dev.log`
+  - Result: fail
+  - Notes: 发现 `Timed out waiting for http://localhost:5174`，同时 Vite 实际启动在 `5173`；定位到 `pnpm exec` 参数多余 `--` 导致端口参数未生效。
+- `2026-02-27` `pnpm run dev:run-action && sleep 140 && rg -n "preload 已注入|Timed out waiting|ELIFECYCLE" .mytrader-dev.log`
+  - Result: pass
+  - Notes: 修复 `pnpm exec` 参数后，长时间运行仅 1 次 `preload 已注入`，无超时/退出。
+- `2026-02-27` `echo "// restart-probe" >> apps/backend/dist/main.js && sleep 5 && rg -n "preload 已注入" .mytrader-dev.log`
+  - Result: pass
+  - Notes: 日志中 `preload 已注入` 从 1 次增加到 2 次，验证“改动后自动重启”仍可用，无需手动重新 Run。
+- `2026-02-27` `pnpm run dev:run-action && sleep 75 && rg -n "preload 已注入|Timed out waiting|ELIFECYCLE" .mytrader-dev.log && echo "// restart-probe-2" >> apps/backend/dist/main.js && sleep 5 && rg -n "preload 已注入|Timed out waiting|ELIFECYCLE" .mytrader-dev.log && pnpm run dev:run-action:stop`
+  - Result: pass
+  - Notes: 长时间稳态仅 1 次 preload 注入；注入 probe 后增加为 2 次，确认“无抖动 + 改动自动重启”同时成立。
+- `2026-02-27` `pnpm -C apps/backend typecheck && pnpm typecheck`
+  - Result: pass
+  - Notes: 改动 `dev.mjs` / `tsup.config.ts` 后，全量类型检查与 theme contract 通过。
 
 ## Manual checks
 - [x] backend 运行时可创建 FTS5 virtual table

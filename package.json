@@ -11,6 +11,9 @@
   "scripts": {
     "build": "pnpm -C packages/shared build && pnpm -C apps/frontend build && pnpm -C apps/backend build",
     "dev": "pnpm -C apps/backend dev",
+    "dev:run-action": "node scripts/dev-run-action-start.mjs",
+    "dev:run-action:status": "node scripts/dev-run-action-status.mjs",
+    "dev:run-action:stop": "node scripts/dev-run-action-stop.mjs",
     "start": "pnpm build && pnpm -C apps/backend start",
     "verify:pr1-guardrails": "node scripts/verify-pr1-integration-guardrails.mjs",
     "lint": "echo \"Add lint script\"",
