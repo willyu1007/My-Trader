@@ -2,7 +2,7 @@ import { all, exec, execVolatile, get, run, transaction } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await execVolatile(db, "pragma foreign_keys = on;");
@@ -674,6 +674,58 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
       );
 
       await seedBuiltinValuationMethods(db);
+
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
+    if (currentVersion < 7) {
+      currentVersion = 7;
+      const now = Date.now();
+
+      await exec(
+        db,
+        `
+          create table if not exists manual_tags (
+            tag text primary key not null,
+            name text not null,
+            description text,
+            color text not null,
+            is_reserved integer not null default 0,
+            created_at integer not null,
+            updated_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists manual_tags_reserved_name
+          on manual_tags (is_reserved desc, name asc);
+        `
+      );
+
+      await run(
+        db,
+        `
+          insert into manual_tags (
+            tag, name, description, color, is_reserved, created_at, updated_at
+          )
+          values
+            ('user:自选', '自选', '系统保留标签，用于核心自选观察。', '#64748B', 1, ?, ?),
+            ('user:重点关注', '重点关注', '系统保留标签，用于重点跟踪标的。', '#0EA5E9', 1, ?, ?)
+          on conflict(tag) do update set
+            name = excluded.name,
+            description = excluded.description,
+            color = excluded.color,
+            is_reserved = 1,
+            updated_at = excluded.updated_at
+        `,
+        [now, now, now, now]
+      );
 
       await run(
         db,

@@ -13,6 +13,7 @@ import type {
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
+  CreateManualTagInput,
   CreateCustomValuationMethodInput,
   CreateInsightInput,
   GetDailyBarsInput,
@@ -40,6 +41,7 @@ import type {
   CreateRiskLimitInput,
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
+  ListManualTagsInput,
   ListTagsInput,
   MarketTargetTaskMatrixConfig,
   MaterializeInsightTargetsInput,
@@ -66,6 +68,7 @@ import type {
   TushareIngestInput,
   UpdateCustomValuationMethodInput,
   UpdateInsightInput,
+  UpdateManualTagInput,
   UpsertInsightEffectChannelInput,
   UpsertInsightEffectPointInput,
   UpsertInsightScopeRuleInput,
@@ -76,6 +79,7 @@ import type {
   UpdatePositionInput,
   UpdateRiskLimitInput,
   UnlockAccountInput,
+  DeleteManualTagsInput,
   ValidateDataSourceReadinessInput
 } from "@mytrader/shared";
 import { ensureBusinessSchema } from "../storage/businessSchema";
@@ -88,6 +92,7 @@ import {
   setInstrumentAutoIngest,
   upsertInstruments
 } from "../market/marketRepository";
+import { listInstrumentProfileBasicsBySymbols } from "../market/instrumentCatalogRepository";
 import {
   startAutoIngest,
   stopAutoIngest,
@@ -158,7 +163,11 @@ import {
   getMarketTagMembers,
   getMarketTagSeries,
   seedMarketDemoData,
-  listMarketTags
+  listMarketTags,
+  listMarketManualTags,
+  createMarketManualTag,
+  updateMarketManualTag,
+  deleteMarketManualTags
 } from "../services/marketService";
 import {
   cloneBuiltinValuationMethod,
@@ -1026,6 +1035,46 @@ export async function registerIpcHandlers() {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.MARKET_MANUAL_TAGS_LIST,
+    async (_event, input: ListManualTagsInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listMarketManualTags(businessDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_MANUAL_TAGS_CREATE,
+    async (_event, input: CreateManualTagInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const created = await createMarketManualTag(businessDb, input);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
+      void triggerAutoIngest("positions");
+      return created;
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_MANUAL_TAGS_UPDATE,
+    async (_event, input: UpdateManualTagInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await updateMarketManualTag(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_MANUAL_TAGS_DELETE,
+    async (_event, input: DeleteManualTagsInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const result = await deleteMarketManualTags(businessDb, input);
+      await refreshAllInsightMaterializations(businessDb, marketDb);
+      void triggerAutoIngest("positions");
+      return result;
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.MARKET_GET_TAG_MEMBERS,
     async (_event, input: GetTagMembersInput) => {
       const businessDb = requireActiveBusinessDb();
@@ -1524,9 +1573,17 @@ export async function registerIpcHandlers() {
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST, async () => {
     const businessDb = requireActiveBusinessDb();
+    const marketDb = requireMarketCacheDb();
     const items = await listTempTargetSymbols(businessDb);
+    const profileBySymbol = await listInstrumentProfileBasicsBySymbols(
+      marketDb,
+      items.map((item) => item.symbol)
+    );
     return items.map((item) => ({
       symbol: item.symbol,
+      name: profileBySymbol[item.symbol]?.name ?? null,
+      kind: profileBySymbol[item.symbol]?.kind ?? null,
+      createdAt: item.createdAt,
       expiresAt: item.expiresAt,
       updatedAt: item.updatedAt
     }));
@@ -1534,13 +1591,21 @@ export async function registerIpcHandlers() {
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_TOUCH, async (_event, input) => {
     const businessDb = requireActiveBusinessDb();
+    const marketDb = requireMarketCacheDb();
     const symbol = typeof input?.symbol === "string" ? input.symbol : "";
     const ttlDaysRaw = input?.ttlDays;
     const ttlDays =
       typeof ttlDaysRaw === "number" && Number.isFinite(ttlDaysRaw) ? ttlDaysRaw : 7;
     const items = await touchTempTargetSymbol(businessDb, symbol, ttlDays);
+    const profileBySymbol = await listInstrumentProfileBasicsBySymbols(
+      marketDb,
+      items.map((item) => item.symbol)
+    );
     return items.map((item) => ({
       symbol: item.symbol,
+      name: profileBySymbol[item.symbol]?.name ?? null,
+      kind: profileBySymbol[item.symbol]?.kind ?? null,
+      createdAt: item.createdAt,
       expiresAt: item.expiresAt,
       updatedAt: item.updatedAt
     }));
@@ -1548,10 +1613,18 @@ export async function registerIpcHandlers() {
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_REMOVE, async (_event, input) => {
     const businessDb = requireActiveBusinessDb();
+    const marketDb = requireMarketCacheDb();
     const symbol = typeof input?.symbol === "string" ? input.symbol : "";
     const items = await removeTempTargetSymbol(businessDb, symbol);
+    const profileBySymbol = await listInstrumentProfileBasicsBySymbols(
+      marketDb,
+      items.map((item) => item.symbol)
+    );
     return items.map((item) => ({
       symbol: item.symbol,
+      name: profileBySymbol[item.symbol]?.name ?? null,
+      kind: profileBySymbol[item.symbol]?.kind ?? null,
+      createdAt: item.createdAt,
       expiresAt: item.expiresAt,
       updatedAt: item.updatedAt
     }));

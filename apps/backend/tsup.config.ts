@@ -1,5 +1,7 @@
 import { defineConfig } from "tsup";
 
+const isWatchMode = process.argv.includes("--watch");
+
 export default defineConfig({
   entry: {
     main: "src/main/index.ts",
@@ -12,7 +14,8 @@ export default defineConfig({
   target: "es2022",
   outDir: "dist",
   sourcemap: true,
-  clean: true,
+  // Keep dist artifacts during watch rebuilds to avoid Electron restart races.
+  clean: !isWatchMode,
   dts: false,
   external: ["electron"],
   noExternal: ["@mytrader/shared"],

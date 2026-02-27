@@ -349,6 +349,45 @@ export interface ListTagsInput {
   limit?: number | null;
 }
 
+export interface ManualTagSummary {
+  tag: string;
+  name: string;
+  description: string | null;
+  color: string;
+  memberCount: number;
+  reserved: boolean;
+  editable: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListManualTagsInput {
+  query?: string | null;
+  limit?: number | null;
+}
+
+export interface CreateManualTagInput {
+  name: string;
+  description?: string | null;
+  color?: string | null;
+}
+
+export interface UpdateManualTagInput {
+  tag: string;
+  description?: string | null;
+  color?: string | null;
+}
+
+export interface DeleteManualTagsInput {
+  tags: string[];
+}
+
+export interface DeleteManualTagsResult {
+  deletedTags: number;
+  removedBindings: number;
+  skippedTags: string[];
+}
+
 export interface GetTagMembersInput {
   tag: string;
   limit?: number | null;
@@ -1089,6 +1128,9 @@ export interface GetIngestRunDetailInput {
 
 export interface TempTargetSymbol {
   symbol: string;
+  name: string | null;
+  kind: string | null;
+  createdAt: number;
   expiresAt: number;
   updatedAt: number;
 }
@@ -1540,6 +1582,10 @@ export interface MyTraderApi {
     addInstrumentTag(symbol: string, tag: string): Promise<void>;
     removeInstrumentTag(symbol: string, tag: string): Promise<void>;
     listTags(input: ListTagsInput): Promise<TagSummary[]>;
+    listManualTags(input?: ListManualTagsInput): Promise<ManualTagSummary[]>;
+    createManualTag(input: CreateManualTagInput): Promise<ManualTagSummary>;
+    updateManualTag(input: UpdateManualTagInput): Promise<ManualTagSummary>;
+    deleteManualTags(input: DeleteManualTagsInput): Promise<DeleteManualTagsResult>;
     getTagMembers(input: GetTagMembersInput): Promise<string[]>;
     getTagSeries(input: GetTagSeriesInput): Promise<MarketTagSeriesResult>;
     getQuotes(input: GetQuotesInput): Promise<MarketQuote[]>;
@@ -1712,6 +1758,10 @@ export const IPC_CHANNELS = {
   MARKET_TAGS_ADD: "market:tags:add",
   MARKET_TAGS_REMOVE: "market:tags:remove",
   MARKET_LIST_TAGS: "market:listTags",
+  MARKET_MANUAL_TAGS_LIST: "market:manualTags:list",
+  MARKET_MANUAL_TAGS_CREATE: "market:manualTags:create",
+  MARKET_MANUAL_TAGS_UPDATE: "market:manualTags:update",
+  MARKET_MANUAL_TAGS_DELETE: "market:manualTags:delete",
   MARKET_GET_TAG_MEMBERS: "market:getTagMembers",
   MARKET_GET_TAG_SERIES: "market:getTagSeries",
   MARKET_GET_QUOTES: "market:getQuotes",

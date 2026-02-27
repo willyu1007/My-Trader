@@ -50,6 +50,7 @@ type PersistedUniversePoolState = {
 
 export type TempTargetSymbolRow = {
   symbol: string;
+  createdAt: number;
   expiresAt: number;
   updatedAt: number;
 };
@@ -257,14 +258,19 @@ export async function touchTempTargetSymbol(
   let updated = false;
   for (const item of existing) {
     if (item.symbol === key) {
-      next.push({ symbol: key, expiresAt, updatedAt: now });
+      next.push({
+        symbol: key,
+        createdAt: item.createdAt,
+        expiresAt,
+        updatedAt: now
+      });
       updated = true;
     } else {
       next.push(item);
     }
   }
   if (!updated) {
-    next.push({ symbol: key, expiresAt, updatedAt: now });
+    next.push({ symbol: key, createdAt: now, expiresAt, updatedAt: now });
   }
 
   next.sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -310,12 +316,18 @@ function safeParseTempTargets(value: string): TempTargetSymbolRow[] | null {
     return items
       .map((item) => {
         const symbol = typeof item?.symbol === "string" ? item.symbol.trim() : "";
+        const createdAtRaw = Number(item?.createdAt);
         const expiresAt = Number(item?.expiresAt);
         const updatedAt = Number(item?.updatedAt);
         if (!symbol) return null;
-        if (!Number.isFinite(expiresAt) || expiresAt <= 0) return null;
         if (!Number.isFinite(updatedAt) || updatedAt <= 0) return null;
-        return { symbol, expiresAt, updatedAt } satisfies TempTargetSymbolRow;
+        const createdAt =
+          Number.isFinite(createdAtRaw) && createdAtRaw > 0
+            ? createdAtRaw
+            : updatedAt;
+        if (!Number.isFinite(createdAt) || createdAt <= 0) return null;
+        if (!Number.isFinite(expiresAt) || expiresAt <= 0) return null;
+        return { symbol, createdAt, expiresAt, updatedAt } satisfies TempTargetSymbolRow;
       })
       .filter((item): item is TempTargetSymbolRow => Boolean(item));
   } catch {

@@ -75,6 +75,14 @@ const api: MyTraderApi = {
     removeInstrumentTag: (symbol, tag) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TAGS_REMOVE, symbol, tag),
     listTags: (input) => ipcRenderer.invoke(IPC_CHANNELS.MARKET_LIST_TAGS, input),
+    listManualTags: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_MANUAL_TAGS_LIST, input ?? null),
+    createManualTag: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_MANUAL_TAGS_CREATE, input),
+    updateManualTag: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_MANUAL_TAGS_UPDATE, input),
+    deleteManualTags: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_MANUAL_TAGS_DELETE, input),
     getTagMembers: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_TAG_MEMBERS, input),
     getTagSeries: (input) =>

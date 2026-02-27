@@ -211,6 +211,7 @@ export function OtherView(props: OtherViewProps) {
   const instrumentManagementTabProps = {
     Button: props.Button,
     Input: props.Input,
+    Modal: props.Modal,
     formatDateTime: props.formatDateTime,
     formatTagSourceLabel: props.formatTagSourceLabel,
     handleBatchExtendTempTargets: props.handleBatchExtendTempTargets,

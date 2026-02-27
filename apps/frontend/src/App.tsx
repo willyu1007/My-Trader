@@ -48,7 +48,6 @@ export function App() {
 
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
-  const [activePortfolioName, setActivePortfolioName] = useState<string | null>(null);
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode());
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
     resolveTheme(getThemeMode())
@@ -69,6 +68,7 @@ export function App() {
   const [unlockPassword, setUnlockPassword] = useState("");
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isThemeMenuExpanded, setIsThemeMenuExpanded] = useState(false);
   const [dashboardActiveView, setDashboardActiveView] =
     useState<WorkspaceView>("portfolio");
 
@@ -88,8 +88,15 @@ export function App() {
   useEffect(() => {
     if (state.kind !== "unlocked") {
       setIsSettingsOpen(false);
+      setIsThemeMenuExpanded(false);
     }
   }, [state.kind]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) {
+      setIsThemeMenuExpanded(false);
+    }
+  }, [isSettingsOpen]);
 
   const accounts = useMemo(() => {
     if (state.kind !== "locked") return [];
@@ -274,18 +281,14 @@ export function App() {
   }, [refreshAccounts, state]);
 
   const handleActivePortfolioChange = useCallback(
-    (portfolio: { id: string | null; name: string | null }) => {
-      setActivePortfolioName((prev) =>
-        prev === portfolio.name ? prev : portfolio.name
-      );
-    },
+    (_portfolio: { id: string | null; name: string | null }) => {},
     []
   );
 
-  const themeOptions: { value: ThemeMode; label: string; icon: string }[] = [
-    { value: "system", label: "跟随系统", icon: "desktop_windows" },
-    { value: "light", label: "浅色", icon: "light_mode" },
-    { value: "dark", label: "深色", icon: "dark_mode" }
+  const themeOptions: { value: ThemeMode; label: string }[] = [
+    { value: "system", label: "跟随系统" },
+    { value: "light", label: "浅色" },
+    { value: "dark", label: "深色" }
   ];
   const isNavToggleDisabled = dashboardActiveView === "market";
 
@@ -648,70 +651,102 @@ export function App() {
         <div className="fixed inset-0 z-50" onClick={() => setIsSettingsOpen(false)}>
           <div className="absolute inset-0 bg-black/20 dark:bg-black/35" />
           <section
-            className="absolute left-3 bottom-3 w-[254px] max-w-[calc(100vw-24px)] rounded-lg border border-slate-200 dark:border-border-dark bg-white/95 dark:bg-surface-dark/95 backdrop-blur-xl shadow-xl p-3 space-y-3 topbarControl"
+            className="absolute left-3 bottom-3 w-[220px] max-w-[calc(100vw-24px)] rounded-lg border border-slate-200 dark:border-border-dark bg-white/95 dark:bg-surface-dark/95 backdrop-blur-xl shadow-xl p-2 space-y-1.5 topbarControl"
             role="dialog"
             aria-modal="true"
-            aria-label="设置"
+            aria-label="快捷设置"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-end">
+            <div className="space-y-0">
+              <div className="h-8 px-1 grid grid-cols-[22px_minmax(0,1fr)] items-center gap-x-1.5 text-slate-800 dark:text-slate-100">
+                <span className="inline-flex h-5 w-[22px] items-center justify-center">
+                  <span className="material-icons-outlined text-[16px] leading-none text-slate-500 dark:text-slate-400">
+                    account_circle
+                  </span>
+                </span>
+                <span className="text-[13px] leading-5 font-semibold truncate" title={state.account.label}>
+                  {state.account.label}
+                </span>
+              </div>
+              <div className="h-7 px-1 grid grid-cols-[22px_minmax(0,1fr)] items-center gap-x-1.5 text-slate-500 dark:text-slate-400">
+                <span className="inline-flex h-5 w-[22px] items-center justify-center">
+                  <span className="material-icons-outlined text-[16px] leading-none">badge</span>
+                </span>
+                <span className="text-[12px] leading-5">个人账号</span>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-200/80 dark:border-border-dark/80 mx-[-2px]" />
+
+            <div className="space-y-0">
               <button
                 type="button"
-                className="topbarControl p-1 rounded-md text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-background-dark/80 transition-colors"
-                onClick={() => setIsSettingsOpen(false)}
-                aria-label="关闭设置"
+                className="topbarControl w-full h-8 px-1 inline-grid grid-cols-[22px_minmax(0,1fr)_16px] items-center gap-x-1.5 rounded-md text-[13px] leading-5 text-slate-900 dark:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-background-dark/70 transition-colors"
+                onClick={() => setIsThemeMenuExpanded((prev) => !prev)}
+                aria-expanded={isThemeMenuExpanded}
               >
-                <span className="material-icons-outlined text-base">close</span>
+                <span className="inline-flex h-5 w-[22px] items-center justify-center">
+                  <span className="material-icons-outlined text-[16px] leading-none text-slate-600 dark:text-slate-300">
+                    palette
+                  </span>
+                </span>
+                <span className="text-left truncate">主题</span>
+                <span
+                  className={`inline-flex h-5 w-4 items-center justify-center material-icons-outlined text-[16px] text-slate-500 transition-transform ${
+                    isThemeMenuExpanded ? "rotate-180" : ""
+                  }`}
+                >
+                  expand_more
+                </span>
+              </button>
+              {isThemeMenuExpanded && (
+                <div
+                  className="ml-[32px] mr-1 mb-0.5 rounded-md border border-slate-200/80 dark:border-border-dark/80 p-0.5 space-y-0.5"
+                  role="group"
+                  aria-label="主题模式"
+                >
+                  {themeOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`topbarControl w-full h-6 px-1.5 rounded text-left text-[12px] leading-4 transition-colors ${
+                        themeMode === option.value
+                          ? "bg-primary/12 text-primary dark:bg-primary/20"
+                          : "text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-background-dark/70"
+                      }`}
+                      onClick={() => setThemeModeState(option.value)}
+                      title={
+                        option.value === "system"
+                          ? `跟随系统（当前：${resolvedTheme === "dark" ? "深色" : "浅色"}）`
+                          : option.label
+                      }
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="border-t border-slate-200/80 dark:border-border-dark/80 mx-[-2px] my-0.5" />
+
+              <button
+                type="button"
+                className="topbarControl w-full h-8 px-1 inline-grid grid-cols-[22px_minmax(0,1fr)] items-center gap-x-1.5 rounded-md text-[13px] leading-5 text-slate-900 dark:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-background-dark/70 transition-colors"
+                onClick={() => {
+                  const shouldLogout = window.confirm("确认退出登录？");
+                  if (!shouldLogout) return;
+                  void handleLock();
+                  setIsSettingsOpen(false);
+                }}
+              >
+                <span className="inline-flex h-5 w-[22px] items-center justify-center">
+                  <span className="material-icons-outlined text-[16px] leading-none text-slate-600 dark:text-slate-300">
+                    logout
+                  </span>
+                </span>
+                <span className="text-left truncate">退出登录</span>
               </button>
             </div>
-
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                主题
-              </div>
-              <div className="themeModeSwitch topbarControl" role="group" aria-label="主题模式">
-                {themeOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`themeModeButton topbarControl ${themeMode === option.value ? "isActive" : ""}`}
-                    onClick={() => setThemeModeState(option.value)}
-                    title={
-                      option.value === "system"
-                        ? `跟随系统（当前：${resolvedTheme === "dark" ? "深色" : "浅色"}）`
-                        : option.label
-                    }
-                    aria-pressed={themeMode === option.value}
-                  >
-                    <span className="material-icons-outlined text-[12px]">{option.icon}</span>
-                    <span className="themeModeButtonLabel">{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-[48px_1fr] items-center gap-x-2 gap-y-1.5 text-xs">
-              <span className="text-slate-500 dark:text-slate-400">组合</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
-                {activePortfolioName ?? "--"}
-              </span>
-              <span className="text-slate-500 dark:text-slate-400">账号</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
-                {state.account.label}
-              </span>
-            </div>
-
-            <button
-              type="button"
-              className="topbarControl w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 dark:border-border-dark bg-white dark:bg-background-dark/70 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-dark transition-colors"
-              onClick={() => {
-                void handleLock();
-                setIsSettingsOpen(false);
-              }}
-            >
-              <span className="material-icons-outlined text-sm">lock</span>
-              锁定并返回登录
-            </button>
           </section>
         </div>
       )}

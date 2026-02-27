@@ -232,6 +232,48 @@ export async function getInstrumentProfile(
   };
 }
 
+export async function listInstrumentProfileBasicsBySymbols(
+  db: SqliteDatabase,
+  symbols: string[]
+): Promise<Record<string, { name: string | null; kind: string | null }>> {
+  const uniqueSymbols = Array.from(
+    new Set(symbols.map((item) => item.trim()).filter(Boolean))
+  );
+  if (uniqueSymbols.length === 0) return {};
+
+  const rows: Array<{ symbol: string; name: string | null; kind: string | null }> = [];
+  const chunkSize = 500;
+  for (let idx = 0; idx < uniqueSymbols.length; idx += chunkSize) {
+    const chunk = uniqueSymbols.slice(idx, idx + chunkSize);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const chunkRows = await all<{
+      symbol: string;
+      name: string | null;
+      kind: string | null;
+    }>(
+      db,
+      `
+        select symbol, name, kind
+        from instrument_profiles
+        where symbol in (${placeholders})
+      `,
+      chunk
+    );
+    rows.push(...chunkRows);
+  }
+
+  return rows.reduce<Record<string, { name: string | null; kind: string | null }>>(
+    (acc, row) => {
+      acc[row.symbol] = {
+        name: row.name ?? null,
+        kind: row.kind ?? null
+      };
+      return acc;
+    },
+    {}
+  );
+}
+
 export async function listInstrumentSymbolsByTag(
   db: SqliteDatabase,
   tag: string,

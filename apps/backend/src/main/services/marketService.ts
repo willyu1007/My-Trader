@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 
 import type {
+  CreateManualTagInput,
+  DeleteManualTagsInput,
+  DeleteManualTagsResult,
   GetDailyBarsInput,
   GetQuotesInput,
   GetTagMembersInput,
@@ -8,6 +11,8 @@ import type {
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
   ListTagsInput,
+  ListManualTagsInput,
+  ManualTagSummary,
   MarketDailyBar,
   MarketImportResult,
   MarketQuote,
@@ -16,7 +21,8 @@ import type {
   SeedMarketDemoDataInput,
   SeedMarketDemoDataResult,
   TagSummary,
-  TushareIngestInput
+  TushareIngestInput,
+  UpdateManualTagInput
 } from "@mytrader/shared";
 
 import { parseHoldingsCsv, parsePricesCsv } from "../market/csvImport";
@@ -32,6 +38,12 @@ import {
   searchInstrumentProfiles,
   upsertInstrumentProfiles
 } from "../market/instrumentCatalogRepository";
+import {
+  createManualTag,
+  deleteManualTags,
+  listManualTags,
+  updateManualTag
+} from "../storage/manualTagRepository";
 import { upsertInstruments, upsertPrices } from "../market/marketRepository";
 import { getMarketProvider } from "../market/providers";
 import { config } from "../config";
@@ -40,6 +52,34 @@ import { upsertBaselineLedgerFromPosition } from "../storage/ledgerBaseline";
 import { all, run, transaction } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 import { upsertWatchlistItem } from "../storage/watchlistRepository";
+
+export async function listMarketManualTags(
+  businessDb: SqliteDatabase,
+  input?: ListManualTagsInput | null
+): Promise<ManualTagSummary[]> {
+  return await listManualTags(businessDb, input);
+}
+
+export async function createMarketManualTag(
+  businessDb: SqliteDatabase,
+  input: CreateManualTagInput
+): Promise<ManualTagSummary> {
+  return await createManualTag(businessDb, input);
+}
+
+export async function updateMarketManualTag(
+  businessDb: SqliteDatabase,
+  input: UpdateManualTagInput
+): Promise<ManualTagSummary> {
+  return await updateManualTag(businessDb, input);
+}
+
+export async function deleteMarketManualTags(
+  businessDb: SqliteDatabase,
+  input: DeleteManualTagsInput
+): Promise<DeleteManualTagsResult> {
+  return await deleteManualTags(businessDb, input);
+}
 
 export async function importHoldingsCsv(
   businessDb: SqliteDatabase,
@@ -257,6 +297,10 @@ export async function listMarketTags(
         `,
     query ? [like, safeLimit] : [safeLimit]
   );
+  const manualTags = await listManualTags(businessDb, {
+    query: query || null,
+    limit: safeLimit
+  });
 
   await ensureInstrumentProfileTagsBackfilled(marketDb);
   const providerTags = await all<{ tag: string; member_count: number }>(
@@ -280,20 +324,35 @@ export async function listMarketTags(
     query ? [like, safeLimit] : [safeLimit]
   );
 
-  const combined: TagSummary[] = [
-    ...watchlistTags,
-    ...userTags.map(
-      (row): TagSummary => ({
+  const userTagMap = new Map<string, TagSummary>();
+  for (const row of userTags) {
+    userTagMap.set(row.tag, {
       tag: row.tag,
       source: "user",
       memberCount: row.member_count ?? 0
-      })
-    ),
+    });
+  }
+  for (const row of manualTags) {
+    const existing = userTagMap.get(row.tag);
+    if (!existing) {
+      userTagMap.set(row.tag, {
+        tag: row.tag,
+        source: "user",
+        memberCount: row.memberCount
+      });
+      continue;
+    }
+    existing.memberCount = Math.max(existing.memberCount, row.memberCount);
+  }
+
+  const combined: TagSummary[] = [
+    ...watchlistTags,
+    ...Array.from(userTagMap.values()),
     ...providerTags.map(
       (row): TagSummary => ({
-      tag: row.tag,
-      source: "provider",
-      memberCount: row.member_count ?? 0
+        tag: row.tag,
+        source: "provider",
+        memberCount: row.member_count ?? 0
       })
     )
   ].filter((row) => (query ? row.tag.includes(query) : true));

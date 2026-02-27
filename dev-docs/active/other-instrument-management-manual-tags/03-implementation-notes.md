@@ -1,0 +1,35 @@
+# 03-implementation-notes
+
+## Notes
+- Shared contract (`packages/shared/src/ipc.ts`)
+  - Added manual tag DTOs and IPC channels:
+    - `MARKET_MANUAL_TAGS_LIST/CREATE/UPDATE/DELETE`
+  - `TempTargetSymbol` extended with `name/kind/createdAt`.
+- Backend
+  - Added `manual_tags` schema migration (`schema_version` 7) with reserved tags seed.
+  - Added `manualTagRepository` CRUD:
+    - list/create/update/delete manual tags
+    - reserved tags protected from delete/edit
+    - delete removes `instrument_tags` bindings
+    - backfill manual tags from existing `instrument_tags user:*`.
+  - Added service wrappers in `marketService`.
+  - `listMarketTags` now merges persisted manual tags so empty manual tags are still visible.
+  - IPC handlers wired for manual tag APIs.
+  - Temp target IPC response enriched with profile `name/kind`, and storage now persists `createdAt`.
+- Frontend (`OtherInstrumentManagementTab`)
+  - Rebuilt tag area as two equal-width columns.
+  - Provider list:
+    - search input moved to title row
+    - removed duplicate full-tag line
+  - Manual list:
+    - same row semantics as provider side
+    - add modal (`名称/描述/颜色色卡`)
+    - delete selection mode + batch delete
+    - tag detail modal for description/color viewing and editing
+    - reserved tags marked fixed; only editable tags allow save/delete
+  - Temp target area:
+    - counts moved to title right
+    - action group moved into table frame right
+    - left table columns: `标的代码/标的名称/标的类型/添加时间/剩余时间`.
+- OtherView
+  - Passed `Modal` prop into instrument-management tab.
