@@ -23,6 +23,7 @@ type AssetGroupKey =
   | "generic";
 
 type GraphLayer = "top" | "first_order" | "second_order" | "output" | "risk";
+type StructureDetailTabKey = "input_schema" | "metric_graph";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ASSET_GROUPS: Array<{ key: AssetGroupKey; label: string }> = [
@@ -424,6 +425,9 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
   const [draftParamValues, setDraftParamValues] = useState<Record<string, string>>({});
   const [draftInputSchema, setDraftInputSchema] = useState<ValuationMethodInputField[]>([]);
   const [versionDetailOpen, setVersionDetailOpen] = useState(false);
+  const [structureDetailOpen, setStructureDetailOpen] = useState(false);
+  const [structureDetailTab, setStructureDetailTab] =
+    useState<StructureDetailTabKey>("input_schema");
 
   const marketApi = window.mytrader?.insights;
 
@@ -521,20 +525,23 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
 
   useEffect(() => {
     setVersionDetailOpen(false);
+    setStructureDetailOpen(false);
+    setStructureDetailTab("input_schema");
   }, [selectedMethodKey]);
 
   useEffect(() => {
-    if (!versionDetailOpen) return;
+    if (!versionDetailOpen && !structureDetailOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setVersionDetailOpen(false);
+        setStructureDetailOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [versionDetailOpen]);
+  }, [structureDetailOpen, versionDetailOpen]);
 
   const visibleMethods = useMemo(() => {
     if (showCustomMethods) return methods;
@@ -959,8 +966,21 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
                 </div>
 
                 <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-2">
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                    输入与输出指标
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                      输入与输出指标
+                    </div>
+                    <props.Button
+                      variant="secondary"
+                      size="sm"
+                      icon="info"
+                      onClick={() => {
+                        setStructureDetailTab("input_schema");
+                        setStructureDetailOpen(true);
+                      }}
+                    >
+                      详情
+                    </props.Button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -1000,24 +1020,80 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
                   </div>
                 </div>
 
-                <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                      输入定义（客观 / 主观 / 派生）
-                    </div>
-                    {!detail.method.isBuiltin && (
-                      <props.Button
-                        variant="secondary"
-                        size="sm"
-                        icon="save"
-                        onClick={() => void handleSaveInputSchema()}
-                        disabled={saving}
-                      >
-                        保存输入定义
-                      </props.Button>
-                    )}
-                  </div>
+              </>
+            )}
+          </section>
+        </div>
+      </div>
 
+      {structureDetailOpen && detail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/35"
+            onClick={() => setStructureDetailOpen(false)}
+            aria-label="关闭结构详情"
+          />
+          <div className="relative z-10 w-[min(1080px,92vw)] max-h-[86vh] rounded-lg border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark shadow-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-border-dark flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                  详情
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  {detail.method.name}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-xs px-2.5 py-1.5 rounded border border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
+                onClick={() => setStructureDetailOpen(false)}
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-border-dark flex items-center gap-2">
+              <button
+                type="button"
+                className={`px-2.5 py-1.5 rounded border text-xs transition-colors ${
+                  structureDetailTab === "input_schema"
+                    ? "border-primary/40 bg-primary/15 text-primary"
+                    : "border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
+                }`}
+                onClick={() => setStructureDetailTab("input_schema")}
+              >
+                输入定义
+              </button>
+              <button
+                type="button"
+                className={`px-2.5 py-1.5 rounded border text-xs transition-colors ${
+                  structureDetailTab === "metric_graph"
+                    ? "border-primary/40 bg-primary/15 text-primary"
+                    : "border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
+                }`}
+                onClick={() => setStructureDetailTab("metric_graph")}
+              >
+                指标层级图
+              </button>
+              {!detail.method.isBuiltin && structureDetailTab === "input_schema" && (
+                <div className="ml-auto">
+                  <props.Button
+                    variant="secondary"
+                    size="sm"
+                    icon="save"
+                    onClick={() => void handleSaveInputSchema()}
+                    disabled={saving}
+                  >
+                    保存输入定义
+                  </props.Button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(86vh-108px)]">
+              {structureDetailTab === "input_schema" && (
+                <>
                   {(["objective", "subjective", "derived"] as const).map((kind) => {
                     const items = groupedInputSchema[kind];
                     if (items.length === 0) return null;
@@ -1089,47 +1165,46 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
                       当前版本未定义输入结构。
                     </div>
                   )}
-                </div>
+                </>
+              )}
 
-                <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-2">
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                    指标层级图（顶层/一阶/二阶/风险）
-                  </div>
-                  <div className="space-y-2">
-                    {GRAPH_LAYER_ORDER.map((layer) => {
-                      const nodes = graphByLayer[layer];
-                      if (nodes.length === 0) return null;
-                      return (
-                        <div key={layer} className="rounded border border-slate-200 dark:border-border-dark">
-                          <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/40">
-                            {GRAPH_LAYER_LABELS[layer]}
-                          </div>
-                          <div className="max-h-28 overflow-y-auto">
-                            {nodes.map((node) => (
-                              <div
-                                key={node.key}
-                                className="px-2 py-1.5 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0"
-                              >
-                                <div className="font-mono text-[11px] text-slate-900 dark:text-slate-100">
-                                  {node.key}
-                                </div>
-                                <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                  depends: {node.dependsOn.join(", ") || "--"} · unit: {node.unit}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+              {structureDetailTab === "metric_graph" && (
+                <div className="space-y-2">
+                  {GRAPH_LAYER_ORDER.map((layer) => {
+                    const nodes = graphByLayer[layer];
+                    if (nodes.length === 0) return null;
+                    return (
+                      <div key={layer} className="rounded border border-slate-200 dark:border-border-dark">
+                        <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/40">
+                          {GRAPH_LAYER_LABELS[layer]}
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="max-h-28 overflow-y-auto">
+                          {nodes.map((node) => (
+                            <div
+                              key={node.key}
+                              className="px-2 py-1.5 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0"
+                            >
+                              <div className="font-mono text-[11px] text-slate-900 dark:text-slate-100">
+                                {node.key}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                depends: {node.dependsOn.join(", ") || "--"} · unit: {node.unit}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {GRAPH_LAYER_ORDER.every((layer) => graphByLayer[layer].length === 0) && (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">暂无层级节点。</div>
+                  )}
                 </div>
-
-              </>
-            )}
-          </section>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {versionDetailOpen && detail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
