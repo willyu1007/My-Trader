@@ -12,6 +12,8 @@ export interface DailyBasicInput {
   peTtm: number | null;
   pb: number | null;
   psTtm: number | null;
+  evEbitdaTtm?: number | null;
+  evSalesTtm?: number | null;
   dvTtm: number | null;
   turnoverRate: number | null;
   source: MarketDataSource;
@@ -25,6 +27,8 @@ export interface DailyBasicRow {
   pe_ttm: number | null;
   pb: number | null;
   ps_ttm: number | null;
+  ev_ebitda_ttm: number | null;
+  ev_sales_ttm: number | null;
   dv_ttm: number | null;
   turnover_rate: number | null;
   source: MarketDataSource;
@@ -49,15 +53,17 @@ export async function upsertDailyBasics(
         db,
         `
           insert into daily_basics (
-            symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
+            symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, ev_ebitda_ttm, ev_sales_ttm, dv_ttm, turnover_rate, source, ingested_at
           )
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(symbol, trade_date) do update set
             circ_mv = excluded.circ_mv,
             total_mv = excluded.total_mv,
             pe_ttm = excluded.pe_ttm,
             pb = excluded.pb,
             ps_ttm = excluded.ps_ttm,
+            ev_ebitda_ttm = excluded.ev_ebitda_ttm,
+            ev_sales_ttm = excluded.ev_sales_ttm,
             dv_ttm = excluded.dv_ttm,
             turnover_rate = excluded.turnover_rate,
             source = excluded.source,
@@ -71,6 +77,8 @@ export async function upsertDailyBasics(
           input.peTtm,
           input.pb,
           input.psTtm,
+          input.evEbitdaTtm ?? null,
+          input.evSalesTtm ?? null,
           input.dvTtm,
           input.turnoverRate,
           input.source,
@@ -94,6 +102,8 @@ export async function getDailyBasicsByDate(
       peTtm: number | null;
       pb: number | null;
       psTtm: number | null;
+      evEbitdaTtm: number | null;
+      evSalesTtm: number | null;
       dvTtm: number | null;
       turnoverRate: number | null;
     }
@@ -104,7 +114,20 @@ export async function getDailyBasicsByDate(
   const rows = await all<DailyBasicRow>(
     db,
     `
-      select symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
+      select
+        symbol,
+        trade_date,
+        circ_mv,
+        total_mv,
+        pe_ttm,
+        pb,
+        ps_ttm,
+        ev_ebitda_ttm,
+        ev_sales_ttm,
+        dv_ttm,
+        turnover_rate,
+        source,
+        ingested_at
       from daily_basics
       where trade_date = ?
         and symbol in (${placeholders})
@@ -121,6 +144,8 @@ export async function getDailyBasicsByDate(
       peTtm: number | null;
       pb: number | null;
       psTtm: number | null;
+      evEbitdaTtm: number | null;
+      evSalesTtm: number | null;
       dvTtm: number | null;
       turnoverRate: number | null;
     }
@@ -132,6 +157,8 @@ export async function getDailyBasicsByDate(
       peTtm: row.pe_ttm ?? null,
       pb: row.pb ?? null,
       psTtm: row.ps_ttm ?? null,
+      evEbitdaTtm: row.ev_ebitda_ttm ?? null,
+      evSalesTtm: row.ev_sales_ttm ?? null,
       dvTtm: row.dv_ttm ?? null,
       turnoverRate: row.turnover_rate ?? null
     });

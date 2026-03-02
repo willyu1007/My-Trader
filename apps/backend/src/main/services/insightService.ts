@@ -141,7 +141,7 @@ const VALUATION_QUALITY_SET = new Set<ValuationMetricQuality>([
 ]);
 const PRIMARY_VALUE_KEYS = ["output.fair_value", "valuation.fair_value", "market.price"];
 const SUBJECTIVE_BASELINE_MAPPINGS: Array<{
-  metricKey: "pe_ttm" | "pb" | "ps_ttm" | "dv_ttm";
+  metricKey: "pe_ttm" | "pb" | "ps_ttm" | "ev_ebitda_ttm" | "dv_ttm";
   methodKey: string;
   inputKey: string;
 }> = [
@@ -161,7 +161,7 @@ const SUBJECTIVE_BASELINE_MAPPINGS: Array<{
     inputKey: "targetPs"
   },
   {
-    metricKey: "pe_ttm",
+    metricKey: "ev_ebitda_ttm",
     methodKey: "builtin.stock.ev_ebitda.relative.v1",
     inputKey: "targetEvEbitda"
   },
@@ -388,6 +388,8 @@ interface DailyBasicSnapshotRow {
   pe_ttm: number | null;
   pb: number | null;
   ps_ttm: number | null;
+  ev_ebitda_ttm: number | null;
+  ev_sales_ttm: number | null;
   dv_ttm: number | null;
   turnover_rate: number | null;
 }
@@ -398,6 +400,7 @@ interface SubjectiveBaselineSeedRow {
   pe_ttm: number | null;
   pb: number | null;
   ps_ttm: number | null;
+  ev_ebitda_ttm: number | null;
   dv_ttm: number | null;
 }
 
@@ -2086,6 +2089,7 @@ async function refreshValuationSubjectiveBaselines(
         b.pe_ttm,
         b.pb,
         b.ps_ttm,
+        b.ev_ebitda_ttm,
         b.dv_ttm
       from instrument_profiles p
       left join latest l on l.symbol = p.symbol
@@ -2234,7 +2238,16 @@ async function collectObjectiveMetricsForSymbol(
   const basics = await get<DailyBasicSnapshotRow>(
     marketDb,
     `
-      select trade_date, circ_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate
+      select
+        trade_date,
+        circ_mv,
+        pe_ttm,
+        pb,
+        ps_ttm,
+        ev_ebitda_ttm,
+        ev_sales_ttm,
+        dv_ttm,
+        turnover_rate
       from daily_basics
       where symbol = ?
         and trade_date <= ?
@@ -2261,6 +2274,8 @@ async function collectObjectiveMetricsForSymbol(
     "valuation.pe_ttm": toFiniteNumber(basics?.pe_ttm ?? null),
     "valuation.pb": toFiniteNumber(basics?.pb ?? null),
     "valuation.ps_ttm": toFiniteNumber(basics?.ps_ttm ?? null),
+    "valuation.ev_ebitda_ttm": toFiniteNumber(basics?.ev_ebitda_ttm ?? null),
+    "valuation.ev_sales_ttm": toFiniteNumber(basics?.ev_sales_ttm ?? null),
     "valuation.dv_ttm": toFiniteNumber(basics?.dv_ttm ?? null),
     "valuation.turnover_rate": toFiniteNumber(basics?.turnover_rate ?? null)
   };
@@ -3066,6 +3081,7 @@ function recomputeDerivedOutputs(
   const peTtm = metrics["valuation.pe_ttm"] ?? null;
   const pb = metrics["valuation.pb"] ?? null;
   const psTtm = metrics["valuation.ps_ttm"] ?? null;
+  const evEbitdaTtm = metrics["valuation.ev_ebitda_ttm"] ?? null;
 
   const runtimeTargetMultiple = toFiniteNumber(metrics["target.multiple"] ?? null);
   const runtimeGrowthRate = toFiniteNumber(metrics["growthRate"] ?? null);
@@ -3095,6 +3111,16 @@ function recomputeDerivedOutputs(
   const wacc = toFiniteNumber(paramSchema.wacc ?? 0.1);
   const momentumWeight = toFiniteNumber(paramSchema.momentumWeight ?? 0.6);
   const volatilityPenalty = toFiniteNumber(paramSchema.volatilityPenalty ?? 0.3);
+  const volatilityDiscountWeight = toFiniteNumber(paramSchema.volatilityDiscountWeight ?? 0.6);
+  const impliedVolatility = toFiniteNumber(
+    metrics["impliedVolatility"] ?? paramSchema.impliedVolatility
+  );
+  const vrpBeta = toFiniteNumber(paramSchema.vrpBeta ?? 0.8);
+  const volatilityPercentile = toFiniteNumber(
+    metrics["volatilityPercentile"] ?? paramSchema.volatilityPercentile
+  );
+  const percentileAnchor = toFiniteNumber(paramSchema.percentileAnchor ?? 0.5);
+  const percentileSensitivity = toFiniteNumber(paramSchema.percentileSensitivity ?? 0.4);
   const expectedBasisPct = toFiniteNumber(paramSchema.expectedBasisPct ?? 0.01);
   const rollYieldPct = toFiniteNumber(paramSchema.rollYieldPct ?? 0.005);
   const reversionStrength = toFiniteNumber(paramSchema.reversionStrength ?? 0.35);
@@ -3134,6 +3160,30 @@ function recomputeDerivedOutputs(
         price === null || expectedBasisPct === null || rollYieldPct === null
           ? null
           : price * (1 + expectedBasisPct + rollYieldPct);
+      break;
+    case "volatility_discount_v1":
+      fairValue =
+        price === null || volatilityDiscountWeight === null
+          ? null
+          : price * Math.max(0.05, 1 - clamp(vol, 0, 2) * volatilityDiscountWeight);
+      break;
+    case "volatility_risk_premium_v1": {
+      const rv = toFiniteNumber(vol);
+      const iv = impliedVolatility;
+      fairValue =
+        price === null || rv === null || iv === null || vrpBeta === null
+          ? null
+          : price * (1 + vrpBeta * (iv - rv));
+      break;
+    }
+    case "volatility_percentile_band_v1":
+      fairValue =
+        price === null ||
+        volatilityPercentile === null ||
+        percentileAnchor === null ||
+        percentileSensitivity === null
+          ? null
+          : price * (1 - percentileSensitivity * (volatilityPercentile - percentileAnchor));
       break;
     case "spot_carry_v1":
       fairValue = price === null ? null : price * (1 + carry);
@@ -3211,9 +3261,12 @@ function recomputeDerivedOutputs(
     }
     case "stock_ev_ebitda_relative_v1":
       fairValue =
-        price === null || peTtm === null || peTtm === 0 || targetEvEbitda === null
+        price === null ||
+        evEbitdaTtm === null ||
+        evEbitdaTtm === 0 ||
+        targetEvEbitda === null
           ? null
-          : price * (targetEvEbitda / peTtm);
+          : price * (targetEvEbitda / evEbitdaTtm);
       break;
     case "stock_ev_sales_relative_v1":
       fairValue =
@@ -4260,6 +4313,18 @@ function buildDefaultInputSchemaForFormula(
     displayOrder: 12,
     description: null
   };
+  const objectiveEvEbitda: ValuationMethodInputField = {
+    key: "valuation.ev_ebitda_ttm",
+    label: "EV/EBITDA(TTM)",
+    kind: "objective",
+    unit: "number",
+    editable: false,
+    objectiveSource: "market.daily_basics.ev_ebitda_ttm",
+    defaultPolicy: "none",
+    defaultValue: null,
+    displayOrder: 12,
+    description: null
+  };
   const objectiveDv: ValuationMethodInputField = {
     key: "valuation.dv_ttm",
     label: "股息率(TTM)",
@@ -4388,7 +4453,7 @@ function buildDefaultInputSchemaForFormula(
     case "stock_ev_ebitda_relative_v1":
       return normalizeInputSchema([
         ...common,
-        { ...objectivePe, displayOrder: 10 },
+        { ...objectiveEvEbitda, displayOrder: 10 },
         {
           key: "targetEvEbitda",
           label: "目标EV/EBITDA",
@@ -4594,6 +4659,87 @@ function buildDefaultInputSchemaForFormula(
           defaultPolicy: "market_median",
           defaultValue: 0.005,
           displayOrder: 21
+        }
+      ]);
+    case "volatility_discount_v1":
+      return normalizeInputSchema([
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "volatilityDiscountWeight",
+          label: "波动率折价系数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.6,
+          displayOrder: 20
+        }
+      ]);
+    case "volatility_risk_premium_v1":
+      return normalizeInputSchema([
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "impliedVolatility",
+          label: "隐含波动率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.28,
+          displayOrder: 20
+        },
+        {
+          key: "vrpBeta",
+          label: "风险溢价系数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.8,
+          displayOrder: 21
+        }
+      ]);
+    case "volatility_percentile_band_v1":
+      return normalizeInputSchema([
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "volatilityPercentile",
+          label: "波动率分位数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.5,
+          displayOrder: 20
+        },
+        {
+          key: "percentileAnchor",
+          label: "分位锚点",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "constant",
+          defaultValue: 0.5,
+          displayOrder: 21
+        },
+        {
+          key: "percentileSensitivity",
+          label: "分位敏感度",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.4,
+          displayOrder: 22
         }
       ]);
     case "spot_carry_v1":

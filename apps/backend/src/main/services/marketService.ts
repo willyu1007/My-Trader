@@ -572,6 +572,8 @@ export async function getMarketQuotes(
           peTtm: row.peTtm,
           pb: row.pb,
           psTtm: row.psTtm,
+          evEbitdaTtm: row.evEbitdaTtm,
+          evSalesTtm: row.evSalesTtm,
           dvTtm: row.dvTtm,
           turnoverRate: row.turnoverRate,
           source: "tushare"
@@ -1289,6 +1291,8 @@ function buildDemoDailyBasics(
   peTtm: number;
   pb: number;
   psTtm: number;
+  evEbitdaTtm: number;
+  evSalesTtm: number;
   dvTtm: number;
   turnoverRate: number;
   source: "csv";
@@ -1325,6 +1329,8 @@ function buildDemoDailyBasics(
         peTtm: profile.assetClass === "etf" ? 20 : 12 + (close % 18),
         pb: profile.assetClass === "etf" ? 2.1 : 1.4 + ((close % 10) / 10),
         psTtm: profile.assetClass === "etf" ? 2.8 : 1.8 + ((close % 15) / 10),
+        evEbitdaTtm: profile.assetClass === "etf" ? 14 : 8 + ((close % 14) / 2),
+        evSalesTtm: profile.assetClass === "etf" ? 3.2 : 1.6 + ((close % 12) / 10),
         dvTtm: profile.assetClass === "etf" ? 1.8 : 1 + ((close % 6) / 10),
         turnoverRate: profile.assetClass === "etf" ? 1.2 : 2.5 + ((close % 12) / 10),
         source: "csv"

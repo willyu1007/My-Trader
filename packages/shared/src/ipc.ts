@@ -489,6 +489,83 @@ export interface SeedMarketDemoDataInput {
   seedHoldings?: boolean;
 }
 
+export type MarketTestDataScenarioId =
+  | "portfolio.core"
+  | "market.multi_domain"
+  | "tags.watchlist.targets"
+  | "data_status.ingest_completeness"
+  | "valuation.ready"
+  | "insights.sample";
+
+export interface MarketTestDataScenarioSpec {
+  id: MarketTestDataScenarioId;
+  name: string;
+  description: string;
+  coverage: string[];
+  sizeLabel: string;
+  dependencies: MarketTestDataScenarioId[];
+  defaultSelected: boolean;
+}
+
+export interface ListMarketTestDataScenariosResult {
+  scenarios: MarketTestDataScenarioSpec[];
+  updatedAt: number;
+}
+
+export interface MarketTestDataStatusItem {
+  label: string;
+  count: number;
+}
+
+export interface MarketTestDataScenarioStatus {
+  scenarioId: MarketTestDataScenarioId;
+  injected: boolean;
+  totalCount: number;
+  breakdown: MarketTestDataStatusItem[];
+}
+
+export interface GetMarketTestDataStatusResult {
+  scenarios: MarketTestDataScenarioStatus[];
+  updatedAt: number;
+}
+
+export interface InjectMarketTestDataInput {
+  scenarioIds: MarketTestDataScenarioId[];
+  portfolioId?: PortfolioId | null;
+  includeDependencies?: boolean | null;
+}
+
+export interface CleanupMarketTestDataInput {
+  scenarioIds?: MarketTestDataScenarioId[] | null;
+  portfolioId?: PortfolioId | null;
+}
+
+export interface MarketTestDataScenarioExecution {
+  scenarioId: MarketTestDataScenarioId;
+  status: "success" | "skipped" | "failed";
+  inserted: number;
+  updated: number;
+  skipped: number;
+  deleted: number;
+  warnings: string[];
+  durationMs: number;
+}
+
+export interface MarketTestDataOperationResult {
+  operation: "inject" | "cleanup";
+  startedAt: number;
+  finishedAt: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  deleted: number;
+  warnings: string[];
+  scenarios: MarketTestDataScenarioExecution[];
+}
+
+export type InjectMarketTestDataResult = MarketTestDataOperationResult;
+export type CleanupMarketTestDataResult = MarketTestDataOperationResult;
+
 export interface TushareIngestItem {
   symbol: string;
   assetClass: AssetClass;
@@ -1815,6 +1892,14 @@ export interface MyTraderApi {
     getQuotes(input: GetQuotesInput): Promise<MarketQuote[]>;
     getDailyBars(input: GetDailyBarsInput): Promise<MarketDailyBar[]>;
     seedDemoData(input?: SeedMarketDemoDataInput): Promise<SeedMarketDemoDataResult>;
+    listTestDataScenarios(): Promise<ListMarketTestDataScenariosResult>;
+    getTestDataStatus(): Promise<GetMarketTestDataStatusResult>;
+    injectTestData(
+      input: InjectMarketTestDataInput
+    ): Promise<InjectMarketTestDataResult>;
+    cleanupTestData(
+      input?: CleanupMarketTestDataInput
+    ): Promise<CleanupMarketTestDataResult>;
     getTokenStatus(): Promise<MarketTokenStatus>;
     setToken(input: SetMarketTokenInput): Promise<MarketTokenStatus>;
     testToken(input?: TestMarketTokenInput): Promise<void>;
@@ -2028,6 +2113,10 @@ export const IPC_CHANNELS = {
   MARKET_GET_QUOTES: "market:getQuotes",
   MARKET_GET_DAILY_BARS: "market:getDailyBars",
   MARKET_SEED_DEMO_DATA: "market:seedDemoData",
+  MARKET_TEST_DATA_SCENARIOS_LIST: "market:testData:listScenarios",
+  MARKET_TEST_DATA_STATUS_GET: "market:testData:getStatus",
+  MARKET_TEST_DATA_INJECT: "market:testData:inject",
+  MARKET_TEST_DATA_CLEANUP: "market:testData:cleanup",
   MARKET_TOKEN_GET_STATUS: "market:token:getStatus",
   MARKET_TOKEN_SET: "market:token:set",
   MARKET_TOKEN_TEST: "market:token:test",

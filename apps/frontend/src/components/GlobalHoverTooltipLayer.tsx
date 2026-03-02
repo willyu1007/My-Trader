@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const GLOBAL_TOOLTIP_DELAY_MS = 200;
+const MAX_TOOLTIP_DELAY_MS = 5000;
 const TOOLTIP_GUTTER = 8;
 const TOOLTIP_OFFSET = 8;
 const TOOLTIP_MAX_WIDTH = 360;
@@ -27,6 +28,15 @@ function resolveTooltipText(element: HTMLElement | null): string | null {
   const native = element.getAttribute("title")?.trim();
   if (native) return native;
   return null;
+}
+
+function resolveTooltipDelayMs(element: HTMLElement | null): number {
+  if (!element) return GLOBAL_TOOLTIP_DELAY_MS;
+  const raw = element.getAttribute("data-mt-tooltip-delay-ms")?.trim();
+  if (!raw) return GLOBAL_TOOLTIP_DELAY_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return GLOBAL_TOOLTIP_DELAY_MS;
+  return Math.min(MAX_TOOLTIP_DELAY_MS, Math.max(0, Math.round(parsed)));
 }
 
 function suppressNativeTitle(element: HTMLElement): void {
@@ -104,7 +114,7 @@ export function GlobalHoverTooltipLayer() {
   }, []);
 
   const activateTooltip = useCallback(
-    (element: HTMLElement, tooltipText: string) => {
+    (element: HTMLElement, tooltipText: string, delayMs: number) => {
       if (activeElementRef.current && activeElementRef.current !== element) {
         restoreNativeTitle(activeElementRef.current);
       }
@@ -116,7 +126,7 @@ export function GlobalHoverTooltipLayer() {
         setText(tooltipText);
         setLayout(computeLayout(element));
         setVisible(true);
-      }, GLOBAL_TOOLTIP_DELAY_MS);
+      }, delayMs);
     },
     [clearTimer]
   );
@@ -133,7 +143,7 @@ export function GlobalHoverTooltipLayer() {
         return;
       }
       if (activeElementRef.current === host) return;
-      activateTooltip(host, tooltipText);
+      activateTooltip(host, tooltipText, resolveTooltipDelayMs(host));
     };
 
     const onPointerOut = (event: Event) => {
@@ -150,7 +160,7 @@ export function GlobalHoverTooltipLayer() {
       if (nextHost) {
         const nextText = resolveTooltipText(nextHost);
         if (nextText) {
-          activateTooltip(nextHost, nextText);
+          activateTooltip(nextHost, nextText, resolveTooltipDelayMs(nextHost));
           return;
         }
       }
@@ -161,7 +171,7 @@ export function GlobalHoverTooltipLayer() {
       const host = resolveTooltipHost(event.target);
       const tooltipText = resolveTooltipText(host);
       if (!host || !tooltipText) return;
-      activateTooltip(host, tooltipText);
+      activateTooltip(host, tooltipText, resolveTooltipDelayMs(host));
     };
 
     const onFocusOut = (event: Event) => {

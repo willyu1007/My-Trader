@@ -39,6 +39,8 @@ export type ProviderDailyBasic = {
   peTtm: number | null;
   pb: number | null;
   psTtm: number | null;
+  evEbitdaTtm: number | null;
+  evSalesTtm: number | null;
   dvTtm: number | null;
   turnoverRate: number | null;
   provider: MarketProviderId;

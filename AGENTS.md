@@ -54,3 +54,19 @@ mytrader - 跨平台桌面端个人交易工作台（本地优先）：风险/�
 - Before modifying code/config for a non-trivial task, apply the Decision Gate in `dev-docs/AGENTS.md` and create/update the dev-docs task bundle as required.
 - If the user asks for planning artifacts (plan/roadmap/milestones/implementation plan; 规划/方案/路线图/里程碑/实施计划) before coding, use `plan-maker` first, then ask for confirmation to proceed with implementation.
 - If the task needs context preservation (multi-session, handoff, 交接, 上下文恢复, 归档) or qualifies as complex, follow `dev-docs/AGENTS.md` and use dev-docs workflows (`create-dev-docs-plan`, `update-dev-docs-for-handoff`).
+
+## LaTeX 公式规范（MUST）
+
+- 原子参数命名：
+  - 时间窗口客观项使用下标，如 `EV_{ttm}`、`S_{ttm}`、`EPS_{ttm}`。
+  - 目标主观项使用星号上标，如 `EV^*`、`EBITDA^*`、`PE^*`。
+  - 输出项主展示使用 `FV`；`RG` 可用于内部计算，不强制主展示。
+- 公式构造：
+  - 复合指标必须展开为原子比值，不允许把复合符号当作原子参数。
+  - `(EV/EBITDA)_{ttm}` 必须写成 `\\frac{EV_{ttm}}{EBITDA_{ttm}}`。
+  - `PS_{ttm}` 必须写成 `\\frac{P}{S_{ttm}}`。
+- 展示与说明：
+  - 参数表只展示原子参数。
+  - 复合关系只在说明区呈现，格式为 `关系：A = B / C`（可用 LaTeX）。
+  - 公式右侧解释必须为纯文本业务说明，不混入数学变量符号。
+  - 解释中必须交代影响方向（上调/下调如何影响估值）。

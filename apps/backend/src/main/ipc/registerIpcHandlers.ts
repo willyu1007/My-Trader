@@ -9,6 +9,7 @@ import type {
   AccountSummary,
   BatchSetInstrumentAutoIngestInput,
   CloneBuiltinValuationMethodInput,
+  CleanupMarketTestDataInput,
   ClearMarketDomainTokenInput,
   CorporateActionCategory,
   CorporateActionMeta,
@@ -21,6 +22,7 @@ import type {
   GetIngestRunDetailInput,
   GetInsightInput,
   GetValuationMethodInput,
+  InjectMarketTestDataInput,
   InsightTargetExcludeInput,
   InsightTargetUnexcludeInput,
   RemoveIngestRunInput,
@@ -176,6 +178,12 @@ import {
   updateMarketManualTag,
   deleteMarketManualTags
 } from "../services/marketService";
+import {
+  cleanupMarketTestData,
+  getMarketTestDataStatus,
+  injectMarketTestData,
+  listMarketTestDataScenarios
+} from "../services/marketTestDataService";
 import {
   cloneBuiltinValuationMethod,
   createInsightFact,
@@ -1176,6 +1184,34 @@ export async function registerIpcHandlers() {
     const marketDb = requireMarketCacheDb();
     return await seedMarketDemoData(businessDb, marketDb, input ?? null);
   });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TEST_DATA_SCENARIOS_LIST, async () => {
+    return await listMarketTestDataScenarios();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_TEST_DATA_STATUS_GET, async () => {
+    const businessDb = requireActiveBusinessDb();
+    const marketDb = requireMarketCacheDb();
+    return await getMarketTestDataStatus(businessDb, marketDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TEST_DATA_INJECT,
+    async (_event, input: InjectMarketTestDataInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await injectMarketTestData(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_TEST_DATA_CLEANUP,
+    async (_event, input: CleanupMarketTestDataInput | null) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await cleanupMarketTestData(businessDb, marketDb, input ?? null);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TOKEN_GET_STATUS, async () => {
     const businessDb = requireActiveBusinessDb();

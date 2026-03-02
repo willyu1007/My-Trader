@@ -62,3 +62,84 @@
   - `toValuationMethodVersion` 返回派生图，避免前端拿到陈旧 `graph_json`。
   - 发布版本新增一致性阻断：若请求携带的 graph 与 spec 派生结果不一致，直接拒绝发布。
   - 更新输入定义时同步重建并落库 `graph_json`，保证存储层与派生结果一致。
+- 公式展示升级（前端）：
+  - 在估值方法页引入 `katex + react-katex`，将“计算逻辑”步骤改为 LaTeX 公式渲染。
+  - `FORMULA_GUIDES` 增加 `stepsLatex` 字段，保留原 `steps` 作为回退文本来源。
+  - 在公式区右侧新增“符号说明”，按方法显示符号与含义，提升公式可读性。
+- EV/EBITDA 语义与真源链路修正（按“先展示、后计算”两步落地）：
+  - 前端参数展示将 `EV/EBITDA`、`EV/Sales` 标记为“复合参数”，并在参数说明中显式展示“分子/分母”构成，避免被误读为单一原子参数。
+  - 将 `stock_ev_ebitda_relative_v1` 从 `pe_ttm` 占位切换为真实 `valuation.ev_ebitda_ttm` 输入：
+    - `daily_basics`（SQLite + DuckDB）扩列：`ev_ebitda_ttm`、`ev_sales_ttm`
+    - provider / ingest / repository 全链路透传新增字段
+    - `collectObjectiveMetricsForSymbol` 增加 `valuation.ev_ebitda_ttm` 指标采集
+    - 计算公式改为 `price * targetEvEbitda / valuation.ev_ebitda_ttm`
+  - builtin 方法与默认输入真源同步：
+    - `builtin.stock.ev_ebitda.relative.v1` 的 `metricSchema.required` 改为 `valuation.ev_ebitda_ttm`
+    - 默认 input schema 将 EV/EBITDA 方法客观输入改为 `market.daily_basics.ev_ebitda_ttm`
+    - 主观基准中位数刷新映射由 `pe_ttm -> targetEvEbitda` 改为 `ev_ebitda_ttm -> targetEvEbitda`
+  - business schema 升级到 v12，触发已有库重播 builtin seed，保证历史环境自动对齐新真源配置。
+
+## 2026-03-01
+- 落地“估值公式原子化规范与逐公式校准”前端改造（全资产域）：
+  - `OtherValuationMethodsTab.tsx` 中 `FORMULA_GUIDES` 全量校准为原子记法，重点方法改为展开表达：
+    - `stock_pe_relative_v1`：`PE_{ttm}` 展开为 `P / EPS_{ttm}`
+    - `stock_pb_relative_v1`：`PB` 展开为 `P / BPS`
+    - `stock_ps_relative_v1`：`PS_{ttm}` 展开为 `P / S_{ttm}`
+    - `stock_ev_ebitda_relative_v1`：`(EV/EBITDA)^*` 与 `(EV/EBITDA)_{ttm}` 均展开为原子比值
+    - `stock_fcff_twostage_v1`：改为显式两阶段公式（含 `y_{fcff}`、`N`、`g_1`、`g_2`、`WACC`）
+  - 公式右侧说明统一为纯文本业务解释，去除数学符号式描述。
+- 建立原子参数真源映射：
+  - 重构 `FORMULA_SYMBOL_HINT_LIBRARY`，去掉复合参数主展示，改为原子符号（含 `relationLatex` 与 `impactNote`）。
+  - 重构 `FORMULA_SYMBOL_HINT_KEYS` 为“按方法列出原子符号”。
+  - 重构 `PARAM_TO_SYMBOL_CANDIDATES`，支持一个字段映射多个原子符号（如 `targetEvEbitda -> EV^*, EBITDA^*`）。
+- 参数表改造为“原子参数主视图”：
+  - 重写 `unifiedSchemaRows` 生成逻辑，按原子符号展开行，不再生成复合参数行。
+  - 过滤掉不在当前公式符号集中的字段，避免出现公式之外的参数展示。
+  - 展开明细仅保留：`说明`、`关系`（LaTeX）、`影响`。
+- 新增“控制参数”区（与参数表同区域）：
+  - 从主观可编辑字段抽取控制项，支持输入与重置。
+  - 参数表取消内联编辑入口，状态文案改为“可在控制参数中调整/只读（内置）”。
+- 公式高亮行为修正：
+  - 输出行（derived）不再触发公式高亮。
+  - 高亮色改为 `\\textcolor{red}{...}`，通过前端主题契约检查（避免硬编码十六进制颜色）。
+- 根目录 `AGENTS.md` 新增“LaTeX 公式规范（MUST）”章节，明确原子命名、复合展开、展示与解释约束。
+- 参数区二次对齐（按最新评审）：
+  - 控制参数区整体下移到参数列表下方，避免打断“先看定义再调参”的阅读顺序。
+  - 控制参数符号改为 `InlineMath` 渲染，支持多符号项（如 `EV^*`, `EBITDA^*`）同时以 LaTeX 展示。
+  - 参数表行在同一公式内增加“符号级去重”策略（优先保留主观输入），避免 `stock_ddm_gordon_v1` 中 `d_y` 重复展示。
+  - 参数表增加“公式符号补齐”策略：若公式声明了符号但数据映射未命中，自动补一条说明项，避免 `stock_ev_ebitda_relative_v1` 缺失 `EV_{ttm}`、`EBITDA_{ttm}`。
+- 控制参数简化模式（本次）：
+  - 控制参数卡片精简为三段：参数名称（仅符号）、值设置、操作选项。
+  - 去除参数说明文案，仅保留符号（如 `d_y`）。
+  - “值设置”由内嵌输入框改为按钮触发（`window.prompt`），并保留“重置”操作。
+  - 容器改为 `lg` 断点三列布局，满足“一行放 3 个”要求。
+- 控制参数交互与状态补充（本次）：
+  - “值设置”从 `window.prompt` 升级为统一弹窗交互（输入框 + 取消/确认）。
+  - 每个控制参数新增状态说明：`可修改`、`只读`、`内置`（hover 展示细粒度状态说明）。
+  - 控制参数来源扩展为“全部主观输入”，包括规则只读项（不再仅展示 `field.editable=true`）。
+- 参数表格排版对齐（本次）：
+  - 去掉参数主表“说明”列，保留展开区说明内容。
+  - 将主表重排为 6 列并固定列宽：参数/名称/属性/当前值/基准值/状态。
+  - 增加 `min-w` 与横向滚动保护，并对“名称/属性”应用单行截断 + hover 完整提示，修复窄宽度下文本压叠。
+  - 属性前缀文案改为短语义：`客观`、`主观`、`输出`（不再显示“客观输入/派生输出”）。
+- 参数表无横向滚动对齐（本次）：
+  - 去掉表格 `min-w`，改为百分比列宽分配（14/28/24/12/12/10）。
+  - 容器改为 `overflow-y-auto overflow-x-hidden`，并收紧列内边距。
+  - 保持“名称/属性”单行截断策略，确保当前宽度下不触发横向滑动。
+- 控制参数行内化（本次）：
+  - 去除控制参数“操作项”中的重置按钮，仅保留参数符号、当前值、值设置、状态四段信息。
+  - 每个控制参数卡片改为单行布局（无换行堆叠），满足“一行展示所有内容”。
+- 估值方法逐项一致性校准（参数名称/状态/控制参数）：
+  - 新增 `SYMBOL_DISPLAY_META`，参数行名称按符号语义优先生成，修复复合字段拆分后同名问题（如 `EV^*` 与 `EBITDA^*`）。
+  - 新增白名单式 key-contains 别名匹配（`ev_ebitda_ttm`、`ev_sales_ttm`、`target_ev_ebitda`、`target_ev_sales`），降低符号映射漏判。
+  - 公式符号补齐分支状态从“说明项”调整为“待映射”，并使用语义化详情：`公式存在该符号，但输入定义未映射到该符号。`
+  - 控制参数支持复合符号展示：多符号字段按 `A / B` 形式渲染（如 `EV^* / EBITDA^*`、`EV^* / Sales^*`），不再只展示第一个符号。
+- 波动率间接估值方法扩展（本次）：
+  - 新增 3 个内置方法：
+    - `builtin.volatility.discount.v1`（`volatility_discount_v1`）
+    - `builtin.volatility.risk.premium.v1`（`volatility_risk_premium_v1`）
+    - `builtin.volatility.percentile.band.v1`（`volatility_percentile_band_v1`）
+  - 后端 `businessSchema.ts` 新增内置 seed、默认输入 schema 分支，并将 `CURRENT_SCHEMA_VERSION` 升级到 `13` 以触发自动重播 seed。
+  - 后端 `insightService.ts` 新增三套公式计算分支与默认输入 schema 分支，保持 preview/compute 统一行为。
+  - 前端 `OtherValuationMethodsTab.tsx` 新增三套公式展示（含 LaTeX）、符号映射与参数说明。
+  - 前端方法分组新增“波动率”一级域，并放在“通用”左侧；分组推断中 `methodKey/domain` 命中 `volatility` 时优先归入该域。

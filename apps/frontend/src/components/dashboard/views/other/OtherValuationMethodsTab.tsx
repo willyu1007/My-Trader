@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { BlockMath, InlineMath } from "react-katex";
+import "katex/dist/katex.min.css";
 
 import type {
   ValuationMethodInputField,
@@ -20,10 +22,12 @@ type AssetGroupKey =
   | "spot"
   | "forex"
   | "bond"
+  | "volatility"
   | "generic";
 
 type GraphLayer = "top" | "first_order" | "second_order" | "output" | "risk";
-type StructureDetailTabKey = "input_schema" | "metric_graph";
+type UnifiedInputKindFilter = "all" | "objective" | "subjective" | "derived";
+type UnifiedLayerFilter = "all" | GraphLayer;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ASSET_GROUPS: Array<{ key: AssetGroupKey; label: string }> = [
@@ -34,6 +38,7 @@ const ASSET_GROUPS: Array<{ key: AssetGroupKey; label: string }> = [
   { key: "spot", label: "现货/贵金属" },
   { key: "forex", label: "外汇" },
   { key: "bond", label: "债券/利率" },
+  { key: "volatility", label: "波动率" },
   { key: "generic", label: "通用" }
 ];
 
@@ -53,135 +58,540 @@ const GRAPH_LAYER_LABELS: Record<GraphLayer, string> = {
   risk: "风险指标"
 };
 
+const INPUT_KIND_LABELS: Record<"objective" | "subjective" | "derived", string> = {
+  objective: "客观输入",
+  subjective: "主观输入",
+  derived: "派生输出"
+};
+
+const INPUT_KIND_TRAIT_PREFIX_LABELS: Record<"objective" | "subjective" | "derived", string> = {
+  objective: "客观",
+  subjective: "主观",
+  derived: "输出"
+};
+
+const INPUT_KIND_ORDER: Record<"objective" | "subjective" | "derived", number> = {
+  objective: 0,
+  subjective: 1,
+  derived: 2
+};
+
 const FORMULA_GUIDES: Record<
   string,
   {
     summary: string;
     steps: string[];
+    stepsLatex: string[];
   }
 > = {
   equity_factor_v1: {
-    summary: "以市场价格为基准，结合动量与波动率惩罚得到公允值。",
+    summary: "先按趋势强弱上调价格，再按波动风险下调，得到风险调整后的公允值。",
     steps: [
       "fair_value = price * (1 + momentum) * (1 - volatility * 0.2)",
       "return_gap = fair_value / price - 1"
+    ],
+    stepsLatex: [
+      "FV = P(1 + m)(1 - 0.2\\sigma)",
+      "RG = \\frac{FV}{P} - 1"
     ]
   },
   futures_basis_v1: {
-    summary: "以基差修正现价，得到期货公允值估计。",
-    steps: ["fair_value = price + basis", "return_gap = fair_value / price - 1"]
+    summary: "将现货价格与基差直接相加，得到期货的理论公允值。",
+    steps: ["fair_value = price + basis", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P + b", "RG = \\frac{FV}{P} - 1"]
   },
   futures_trend_vol_v1: {
-    summary: "用趋势动量上修、波动率下修估算期货公允值。",
+    summary: "趋势因子正向抬升估值，波动风险负向压低估值，二者合并后得到结果。",
     steps: [
       "fair_value = price * (1 + momentum_weight * momentum - vol_penalty * volatility)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 + w_m m - w_{\\sigma}\\sigma)", "RG = \\frac{FV}{P} - 1"]
   },
   futures_term_structure_v1: {
-    summary: "根据预期基差与展期收益率估算期限结构公允值。",
+    summary: "以预期基差和展期收益的合计比例修正当前价格。",
     steps: [
       "fair_value = price * (1 + expected_basis_pct + roll_yield_pct)",
       "return_gap = fair_value / price - 1"
+    ],
+    stepsLatex: ["FV = P(1 + b_e + y_r)", "RG = \\frac{FV}{P} - 1"]
+  },
+  volatility_discount_v1: {
+    summary: "以实现波动率作为风险折价项，直接修正当前价格。",
+    steps: [
+      "fair_value = price * (1 - volatility_discount_weight * volatility_20d)",
+      "return_gap = fair_value / price - 1"
+    ],
+    stepsLatex: ["FV = P(1 - \\lambda_{vol}\\sigma_{20d})", "RG = \\frac{FV}{P} - 1"]
+  },
+  volatility_risk_premium_v1: {
+    summary: "用隐含与实现波动率之差衡量风险溢价，并映射到价格修正。",
+    steps: [
+      "fair_value = price * (1 + vrp_beta * (implied_volatility - realized_volatility))",
+      "return_gap = fair_value / price - 1"
+    ],
+    stepsLatex: [
+      "FV = P(1 + \\beta_{vrp}(\\sigma_{iv} - \\sigma_{rv}))",
+      "RG = \\frac{FV}{P} - 1"
     ]
   },
+  volatility_percentile_band_v1: {
+    summary: "以波动率历史分位相对锚点的偏离，生成区间化风险调整估值。",
+    steps: [
+      "fair_value = price * (1 - percentile_sensitivity * (volatility_percentile - percentile_anchor))",
+      "return_gap = fair_value / price - 1"
+    ],
+    stepsLatex: ["FV = P\\left(1 - k_q(q_{\\sigma} - q_0)\\right)", "RG = \\frac{FV}{P} - 1"]
+  },
   spot_carry_v1: {
-    summary: "用 carry 年化因子修正现价。",
-    steps: ["fair_value = price * (1 + carry)", "return_gap = fair_value / price - 1"]
+    summary: "按持有收益因子对现货价格进行比例修正。",
+    steps: ["fair_value = price * (1 + carry)", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P(1 + c)", "RG = \\frac{FV}{P} - 1"]
   },
   spot_mean_reversion_v1: {
-    summary: "用短期动量的均值回归项修正现货估值。",
+    summary: "当短期动量偏离均值时，按回归强度反向修正当前价格。",
     steps: [
       "fair_value = price * (1 - reversion_strength * momentum)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 - \\lambda m)", "RG = \\frac{FV}{P} - 1"]
   },
   spot_inventory_risk_v1: {
-    summary: "库存溢价上修 + 波动风险下修的联合估值。",
+    summary: "库存溢价提升估值，波动风险压低估值，两部分共同决定最终结果。",
     steps: [
       "fair_value = price * (1 + inventory_premium - volatility_penalty * volatility)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 + \\pi_{inv} - \\lambda_{\\sigma}\\sigma)", "RG = \\frac{FV}{P} - 1"]
   },
   forex_ppp_v1: {
-    summary: "基于 PPP 偏离与市场价得到汇率估值。",
-    steps: ["fair_value = price * (1 + ppp_gap)", "return_gap = fair_value / price - 1"]
+    summary: "依据购买力平价偏离比例，对即期汇率做结构性修正。",
+    steps: ["fair_value = price * (1 + ppp_gap)", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P(1 + g_{ppp})", "RG = \\frac{FV}{P} - 1"]
   },
   forex_rate_differential_v1: {
-    summary: "基于利差与持有期估算汇率公允值。",
+    summary: "按照利差和持有期限估算汇率的 carry 驱动偏移。",
     steps: [
       "fair_value = price * (1 + carry_differential * horizon_years)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 + d_{carry} h)", "RG = \\frac{FV}{P} - 1"]
   },
   forex_reer_reversion_v1: {
-    summary: "以 REER 偏离为锚，叠加动量回归估值。",
+    summary: "以实际有效汇率偏离为锚，并用动量回归项抑制短期过冲。",
     steps: [
       "fair_value = price * (1 + reer_gap - reversion_speed * momentum)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 + g_{reer} - \\lambda m)", "RG = \\frac{FV}{P} - 1"]
   },
   bond_yield_v1: {
-    summary: "基于久期与收益率冲击修正债券价格。",
+    summary: "使用久期近似把收益率冲击映射为债券价格变动。",
     steps: [
       "fair_value = price * (1 - duration * yield_shift)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 - D\\Delta y)", "RG = \\frac{FV}{P} - 1"]
   },
   bond_spread_duration_v1: {
-    summary: "基于利差变动、久期与凸性估算债券价格变化。",
+    summary: "在久期一阶项基础上加入凸性二阶修正，估计利差冲击后的债券价格。",
     steps: [
       "fair_value = price * (1 - duration * spread_change + convexity * spread_change^2)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 - D\\Delta s + C(\\Delta s)^2)", "RG = \\frac{FV}{P} - 1"]
   },
   bond_real_rate_v1: {
-    summary: "基于实际利率偏离与敏感度估算债券公允值。",
+    summary: "用实际利率偏离及其敏感度估算价格的方向和幅度。",
     steps: [
       "fair_value = price * (1 - sensitivity * real_rate_gap)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 - \\beta\\Delta r)", "RG = \\frac{FV}{P} - 1"]
   },
   stock_pe_relative_v1: {
-    summary: "基于 PE(TTM) 与目标 PE 的相对偏离估值。",
-    steps: ["fair_value = price * target_pe / pe_ttm", "return_gap = fair_value / price - 1"]
+    summary: "先给出目标市盈率，再与当前盈利能力对应的估值水平做对比映射价格。",
+    steps: ["fair_value = price * target_pe / pe_ttm", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P \\cdot \\frac{PE^*}{\\frac{P}{EPS_{ttm}}}", "RG = \\frac{FV}{P} - 1"]
   },
   stock_pb_relative_v1: {
-    summary: "基于 PB 与目标 PB 的相对偏离估值。",
-    steps: ["fair_value = price * target_pb / pb", "return_gap = fair_value / price - 1"]
+    summary: "以目标市净率和每股净资产为锚，映射当前价格到目标估值区间。",
+    steps: ["fair_value = price * target_pb / pb", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P \\cdot \\frac{PB^*}{\\frac{P}{BPS}}", "RG = \\frac{FV}{P} - 1"]
   },
   stock_ps_relative_v1: {
-    summary: "基于 PS(TTM) 与目标 PS 的相对偏离估值。",
-    steps: ["fair_value = price * target_ps / ps_ttm", "return_gap = fair_value / price - 1"]
+    summary: "以目标市销率和滚动营收能力为核心，得到对应的公允价格。",
+    steps: ["fair_value = price * target_ps / ps_ttm", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P \\cdot \\frac{PS^*}{\\frac{P}{S_{ttm}}}", "RG = \\frac{FV}{P} - 1"]
   },
   stock_peg_relative_v1: {
-    summary: "基于 PEG 与增长率推导目标 PE，再映射到公允值。",
-    steps: ["target_pe = growth * 100 * target_peg", "fair_value = price * target_pe / pe_ttm"]
+    summary: "先由增长假设和目标 PEG 推导目标市盈率，再与当前盈利估值比较。",
+    steps: ["target_pe = growth * 100 * target_peg", "fair_value = price * target_pe / pe_ttm"],
+    stepsLatex: [
+      "PE^* = g \\cdot 100 \\cdot PEG^*",
+      "FV = P \\cdot \\frac{PE^*}{\\frac{P}{EPS_{ttm}}}"
+    ]
   },
   stock_ev_ebitda_relative_v1: {
-    summary: "基于 EV/EBITDA 相对倍数估值（当前版本使用统一替代指标）。",
-    steps: ["fair_value = price * target_ev_ebitda / base_multiple", "return_gap = fair_value / price - 1"]
+    summary: "比较目标与当前企业价值倍数，并按相对比例映射到价格。",
+    steps: [
+      "fair_value = price * target_ev_ebitda / ev_ebitda_ttm",
+      "return_gap = fair_value / price - 1"
+    ],
+    stepsLatex: [
+      "FV = P \\cdot \\frac{\\frac{EV^*}{EBITDA^*}}{\\frac{EV_{ttm}}{EBITDA_{ttm}}}",
+      "RG = \\frac{FV}{P} - 1"
+    ]
   },
   stock_ev_sales_relative_v1: {
-    summary: "基于 EV/Sales 相对倍数估值。",
-    steps: ["fair_value = price * target_ev_sales / ps_ttm", "return_gap = fair_value / price - 1"]
+    summary: "将目标企业价值收入倍数与当前收入定价水平对比，得到目标价格。",
+    steps: ["fair_value = price * target_ev_sales / ps_ttm", "return_gap = fair_value / price - 1"],
+    stepsLatex: [
+      "FV = P \\cdot \\frac{\\frac{EV^*}{Sales^*}}{\\frac{P}{S_{ttm}}}",
+      "RG = \\frac{FV}{P} - 1"
+    ]
   },
   stock_ddm_gordon_v1: {
-    summary: "股利折现（Gordon）模型估值。",
-    steps: ["fair_value = price * (dy*(1+g))/(r-g)", "return_gap = fair_value / price - 1"]
+    summary: "以可持续股息和长期增长假设为核心，通过折现得到内在价值。",
+    steps: ["fair_value = price * (dy*(1+g))/(r-g)", "return_gap = fair_value / price - 1"],
+    stepsLatex: ["FV = P \\cdot \\frac{d_y(1+g)}{r-g}", "RG = \\frac{FV}{P} - 1"]
   },
   stock_fcff_twostage_v1: {
-    summary: "FCFF 两阶段折现估值。",
-    steps: ["fair_value = price * f(stage1 growth, terminal growth, wacc)", "return_gap = fair_value / price - 1"]
+    summary: "分别估计高增长阶段与稳定阶段的现金流价值，再统一折算回价格。",
+    steps: ["fair_value = price * (stage1 + terminal) / normalize_years", "return_gap = fair_value / price - 1"],
+    stepsLatex: [
+      "FV = P \\cdot \\frac{y_{fcff}(1+g_1)N + \\frac{y_{fcff}(1+g_2)}{\\mathrm{WACC}-g_2}}{\\max(1,N+1)}",
+      "RG = \\frac{FV}{P} - 1"
+    ]
   },
   generic_factor_v1: {
-    summary: "通用多因子兜底方法，使用动量与波动率做基础修正。",
+    summary: "用趋势与波动两个基础因子做保守修正，作为兜底估值。",
     steps: [
       "fair_value = price * (1 + momentum * 0.5) * (1 - volatility * 0.15)",
       "return_gap = fair_value / price - 1"
-    ]
+    ],
+    stepsLatex: ["FV = P(1 + 0.5m)(1 - 0.15\\sigma)", "RG = \\frac{FV}{P} - 1"]
   }
 };
+
+interface FormulaSymbolHint {
+  key: string;
+  symbol: string;
+  meaning: string;
+  relationLatex?: string;
+  impactNote?: string;
+}
+
+type FormulaSymbolHintValue = Omit<FormulaSymbolHint, "key">;
+
+const FORMULA_SYMBOL_HINT_LIBRARY: Record<string, FormulaSymbolHintValue> = {
+  P: { symbol: "P", meaning: "当前市场价格。" },
+  FV: { symbol: "FV", meaning: "模型输出的公允价值。" },
+  RG: { symbol: "RG", meaning: "相对当前价格的收益偏离。" },
+  m: { symbol: "m", meaning: "动量因子，反映趋势方向与强度。" },
+  sigma: { symbol: "\\sigma", meaning: "波动率，反映价格不确定性。" },
+  sigma_20d: { symbol: "\\sigma_{20d}", meaning: "近20日实现波动率。" },
+  lambda_vol: { symbol: "\\lambda_{vol}", meaning: "波动率折价系数。" },
+  sigma_iv: { symbol: "\\sigma_{iv}", meaning: "隐含波动率。" },
+  sigma_rv: { symbol: "\\sigma_{rv}", meaning: "实现波动率。" },
+  beta_vrp: { symbol: "\\beta_{vrp}", meaning: "波动率风险溢价系数。" },
+  q_sigma: { symbol: "q_{\\sigma}", meaning: "波动率历史分位数。" },
+  "q_0": { symbol: "q_0", meaning: "分位锚点。" },
+  k_q: { symbol: "k_q", meaning: "分位敏感度系数。" },
+  b: { symbol: "b", meaning: "期货基差，反映现货与期货价差。" },
+  w_m: { symbol: "w_m", meaning: "动量项权重。" },
+  w_sigma: { symbol: "w_{\\sigma}", meaning: "波动惩罚权重。" },
+  b_e: { symbol: "b_e", meaning: "预期基差比例。" },
+  y_r: { symbol: "y_r", meaning: "展期收益比例。" },
+  c: { symbol: "c", meaning: "Carry 因子。" },
+  lambda: { symbol: "\\lambda", meaning: "均值回归速度或强度。" },
+  pi_inv: { symbol: "\\pi_{inv}", meaning: "库存溢价因子。" },
+  lambda_sigma: { symbol: "\\lambda_{\\sigma}", meaning: "波动惩罚系数。" },
+  g_ppp: { symbol: "g_{ppp}", meaning: "购买力平价偏离比例。" },
+  d_carry: { symbol: "d_{carry}", meaning: "两币种 carry 利差。" },
+  h: { symbol: "h", meaning: "持有期（年）。" },
+  g_reer: { symbol: "g_{reer}", meaning: "实际有效汇率偏离比例。" },
+  D: { symbol: "D", meaning: "久期。" },
+  delta_y: { symbol: "\\Delta y", meaning: "收益率变动幅度。" },
+  delta_s: { symbol: "\\Delta s", meaning: "信用利差变动幅度。" },
+  C: { symbol: "C", meaning: "凸性。" },
+  beta: { symbol: "\\beta", meaning: "对实际利率偏离的敏感度。" },
+  delta_r: { symbol: "\\Delta r", meaning: "实际利率偏离幅度。" },
+  "PE^*": {
+    symbol: "PE^*",
+    meaning: "目标市盈率。",
+    impactNote: "在盈利能力不变时，目标市盈率上调会抬升公允价值，下调会压低公允价值。"
+  },
+  "EPS_{ttm}": {
+    symbol: "EPS_{ttm}",
+    meaning: "过去十二个月每股收益。",
+    relationLatex: "PE_{ttm} = \\frac{P}{EPS_{ttm}}",
+    impactNote: "在目标估值水平不变时，过去十二个月每股收益越高，公允价值越高。"
+  },
+  "PB^*": {
+    symbol: "PB^*",
+    meaning: "目标市净率。",
+    impactNote: "在净资产不变时，目标市净率上调会抬升公允价值，下调会压低公允价值。"
+  },
+  BPS: {
+    symbol: "BPS",
+    meaning: "每股净资产。",
+    relationLatex: "PB = \\frac{P}{BPS}",
+    impactNote: "在目标市净率不变时，每股净资产越高，公允价值越高。"
+  },
+  "PS^*": {
+    symbol: "PS^*",
+    meaning: "目标市销率。",
+    impactNote: "在收入规模不变时，目标市销率上调会抬升公允价值，下调会压低公允价值。"
+  },
+  "S_{ttm}": {
+    symbol: "S_{ttm}",
+    meaning: "过去十二个月销售额或每股销售。",
+    relationLatex: "PS_{ttm} = \\frac{P}{S_{ttm}}",
+    impactNote: "在目标市销率不变时，过去十二个月销售额越高，公允价值越高。"
+  },
+  g: { symbol: "g", meaning: "长期增长率假设。" },
+  "PEG^*": { symbol: "PEG^*", meaning: "目标 PEG 倍数。" },
+  "EV^*": {
+    symbol: "EV^*",
+    meaning: "目标企业价值。",
+    relationLatex: "(EV/EBITDA)^* = \\frac{EV^*}{EBITDA^*}",
+    impactNote: "在目标盈利能力不变时，目标企业价值上调会抬升公允价值。"
+  },
+  "EBITDA^*": {
+    symbol: "EBITDA^*",
+    meaning: "目标 EBITDA。",
+    relationLatex: "(EV/EBITDA)^* = \\frac{EV^*}{EBITDA^*}",
+    impactNote: "在目标企业价值不变时，目标 EBITDA 上调会压低目标倍数，从而压低公允价值。"
+  },
+  "EV_{ttm}": {
+    symbol: "EV_{ttm}",
+    meaning: "过去十二个月口径对应的企业价值。",
+    relationLatex: "(EV/EBITDA)_{ttm} = \\frac{EV_{ttm}}{EBITDA_{ttm}}",
+    impactNote: "在目标倍数不变时，当前企业价值越高，当前倍数越高，公允价值映射结果越低。"
+  },
+  "EBITDA_{ttm}": {
+    symbol: "EBITDA_{ttm}",
+    meaning: "过去十二个月息税折旧摊销前利润。",
+    relationLatex: "(EV/EBITDA)_{ttm} = \\frac{EV_{ttm}}{EBITDA_{ttm}}",
+    impactNote: "在目标倍数不变时，当前 EBITDA 越高，当前倍数越低，公允价值映射结果越高。"
+  },
+  "Sales^*": {
+    symbol: "Sales^*",
+    meaning: "目标营业收入。",
+    relationLatex: "(EV/Sales)^* = \\frac{EV^*}{Sales^*}",
+    impactNote: "在目标企业价值不变时，目标营业收入上调会压低目标倍数，从而压低公允价值。"
+  },
+  d_y: {
+    symbol: "d_y",
+    meaning: "股息率。",
+    impactNote: "在贴现率和增长率不变时，股息率上调会抬升公允价值。"
+  },
+  r: {
+    symbol: "r",
+    meaning: "折现率。",
+    impactNote: "在现金流不变时，折现率上调会压低公允价值，下调会抬升公允价值。"
+  },
+  "g_1": {
+    symbol: "g_1",
+    meaning: "高增长阶段增长率。",
+    impactNote: "高增长阶段增速上调会抬升第一阶段价值贡献。"
+  },
+  "g_2": {
+    symbol: "g_2",
+    meaning: "稳定阶段增长率。",
+    impactNote: "稳定阶段增速上调会抬升终值估算；若过高接近折现率会显著放大估值。"
+  },
+  "y_{fcff}": {
+    symbol: "y_{fcff}",
+    meaning: "自由现金流收益率假设。",
+    impactNote: "现金流收益率上调会同步抬升阶段现金流与终值。"
+  },
+  N: {
+    symbol: "N",
+    meaning: "高增长阶段持续年数。",
+    impactNote: "高增长阶段持续时间越长，第一阶段贡献越高。"
+  },
+  WACC: {
+    symbol: "\\mathrm{WACC}",
+    meaning: "加权平均资本成本。",
+    impactNote: "资本成本上调会压低折现后的公允价值，下调会抬升公允价值。"
+  }
+};
+
+const FORMULA_SYMBOL_HINT_KEYS: Record<string, string[]> = {
+  equity_factor_v1: ["P", "m", "sigma", "FV"],
+  futures_basis_v1: ["P", "b", "FV"],
+  futures_trend_vol_v1: ["P", "w_m", "m", "w_sigma", "sigma", "FV"],
+  futures_term_structure_v1: ["P", "b_e", "y_r", "FV"],
+  volatility_discount_v1: ["P", "sigma_20d", "lambda_vol", "FV"],
+  volatility_risk_premium_v1: ["P", "sigma_iv", "sigma_rv", "beta_vrp", "FV"],
+  volatility_percentile_band_v1: ["P", "q_sigma", "q_0", "k_q", "FV"],
+  spot_carry_v1: ["P", "c", "FV"],
+  spot_mean_reversion_v1: ["P", "lambda", "m", "FV"],
+  spot_inventory_risk_v1: ["P", "pi_inv", "lambda_sigma", "sigma", "FV"],
+  forex_ppp_v1: ["P", "g_ppp", "FV"],
+  forex_rate_differential_v1: ["P", "d_carry", "h", "FV"],
+  forex_reer_reversion_v1: ["P", "g_reer", "lambda", "m", "FV"],
+  bond_yield_v1: ["P", "D", "delta_y", "FV"],
+  bond_spread_duration_v1: ["P", "D", "delta_s", "C", "FV"],
+  bond_real_rate_v1: ["P", "beta", "delta_r", "FV"],
+  stock_pe_relative_v1: ["P", "PE^*", "EPS_{ttm}", "FV"],
+  stock_pb_relative_v1: ["P", "PB^*", "BPS", "FV"],
+  stock_ps_relative_v1: ["P", "PS^*", "S_{ttm}", "FV"],
+  stock_peg_relative_v1: ["g", "PEG^*", "PE^*", "P", "EPS_{ttm}", "FV"],
+  stock_ev_ebitda_relative_v1: ["P", "EV^*", "EBITDA^*", "EV_{ttm}", "EBITDA_{ttm}", "FV"],
+  stock_ev_sales_relative_v1: ["P", "EV^*", "Sales^*", "S_{ttm}", "FV"],
+  stock_ddm_gordon_v1: ["P", "d_y", "g", "r", "FV"],
+  stock_fcff_twostage_v1: ["P", "y_{fcff}", "N", "g_1", "g_2", "WACC", "FV"],
+  generic_factor_v1: ["P", "m", "sigma", "FV"]
+};
+
+const FORMULA_SYMBOL_HIGHLIGHT_PATTERNS: Partial<Record<string, RegExp[]>> = {
+  P: [/(?<![A-Za-z\\])P(?![A-Za-z_])/g],
+  FV: [/(?<![A-Za-z\\])FV(?![A-Za-z_])/g],
+  m: [/(?<![A-Za-z\\])m(?![_A-Za-z])/g],
+  sigma: [/\\sigma/g],
+  sigma_20d: [/\\sigma_\{20d\}/g],
+  lambda_vol: [/\\lambda_\{vol\}/g],
+  sigma_iv: [/\\sigma_\{iv\}/g],
+  sigma_rv: [/\\sigma_\{rv\}/g],
+  beta_vrp: [/\\beta_\{vrp\}/g],
+  q_sigma: [/q_\{\\sigma\}/g],
+  "q_0": [/q_0/g],
+  k_q: [/k_q/g],
+  b: [/(?<![A-Za-z\\])b(?![_A-Za-z])/g],
+  w_m: [/w_m/g],
+  w_sigma: [/w_\{\\sigma\}/g],
+  b_e: [/b_e/g],
+  y_r: [/y_r/g],
+  c: [/(?<![A-Za-z\\])c(?![_A-Za-z])/g],
+  lambda: [/\\lambda(?![_A-Za-z])/g],
+  pi_inv: [/\\pi_\{inv\}/g],
+  lambda_sigma: [/\\lambda_\{\\sigma\}/g],
+  g_ppp: [/g_\{ppp\}/g],
+  d_carry: [/d_\{carry\}/g],
+  h: [/(?<![A-Za-z\\])h(?![_A-Za-z])/g],
+  g_reer: [/g_\{reer\}/g],
+  D: [/(?<![A-Za-z\\])D(?![A-Za-z_])/g],
+  delta_y: [/\\Delta y/g],
+  delta_s: [/\\Delta s/g],
+  C: [/(?<![A-Za-z\\])C(?![A-Za-z_])/g],
+  beta: [/\\beta/g],
+  delta_r: [/\\Delta r/g],
+  "PE^*": [/PE\^\*/g],
+  "EPS_{ttm}": [/EPS_\{ttm\}/g],
+  "PB^*": [/PB\^\*/g],
+  BPS: [/(?<![A-Za-z\\])BPS(?![A-Za-z_])/g],
+  "PS^*": [/PS\^\*/g],
+  "S_{ttm}": [/S_\{ttm\}/g],
+  g: [/(?<![A-Za-z\\])g(?![_A-Za-z])/g],
+  "PEG^*": [/PEG\^\*/g],
+  "EV^*": [/EV\^\*/g],
+  "EBITDA^*": [/EBITDA\^\*/g],
+  "EV_{ttm}": [/EV_\{ttm\}/g],
+  "EBITDA_{ttm}": [/EBITDA_\{ttm\}/g],
+  "Sales^*": [/Sales\^\*/g],
+  d_y: [/d_y/g],
+  r: [/(?<![A-Za-z\\])r(?![_A-Za-z])/g],
+  "g_1": [/g_1/g],
+  "g_2": [/g_2/g],
+  "y_{fcff}": [/y_\{fcff\}/g],
+  N: [/(?<![A-Za-z\\])N(?![A-Za-z_])/g],
+  WACC: [/\\mathrm\{WACC\}/g, /(?<![A-Za-z\\])WACC(?![A-Za-z_])/g]
+};
+
+const PARAM_TO_SYMBOL_CANDIDATES: Record<string, string[]> = {
+  "market.price": ["P"],
+  "output.fair_value": ["FV"],
+  "output.return_gap": ["RG"],
+  "valuation.pe_ttm": ["EPS_{ttm}"],
+  "valuation.pb": ["BPS"],
+  "valuation.ps_ttm": ["S_{ttm}"],
+  "valuation.ev_ebitda_ttm": ["EV_{ttm}", "EBITDA_{ttm}"],
+  "valuation.ev_sales_ttm": ["EV_{ttm}", "S_{ttm}"],
+  "valuation.dv_ttm": ["d_y"],
+  "risk.volatility.20d": ["sigma", "sigma_20d", "sigma_rv"],
+  targetPe: ["PE^*"],
+  target_pe: ["PE^*"],
+  targetPb: ["PB^*"],
+  target_pb: ["PB^*"],
+  targetPs: ["PS^*"],
+  target_ps: ["PS^*"],
+  targetPeg: ["PEG^*"],
+  target_peg: ["PEG^*"],
+  targetEvEbitda: ["EV^*", "EBITDA^*"],
+  target_ev_ebitda: ["EV^*", "EBITDA^*"],
+  targetEvSales: ["EV^*", "Sales^*"],
+  target_ev_sales: ["EV^*", "Sales^*"],
+  dividendYield: ["d_y"],
+  dividend_yield: ["d_y"],
+  growthRate: ["g"],
+  growth_rate: ["g"],
+  discountRate: ["r"],
+  discount_rate: ["r"],
+  fcffYield: ["y_{fcff}"],
+  fcff_yield: ["y_{fcff}"],
+  highGrowthYears: ["N"],
+  high_growth_years: ["N"],
+  highGrowthRate: ["g_1"],
+  high_growth_rate: ["g_1"],
+  terminalGrowthRate: ["g_2"],
+  terminal_growth_rate: ["g_2"],
+  wacc: ["WACC"],
+  "factor.momentum.20d": ["m"],
+  momentumWeight: ["w_m"],
+  volatilityPenalty: ["w_sigma", "lambda_sigma"],
+  volatilityDiscountWeight: ["lambda_vol"],
+  volatility_discount_weight: ["lambda_vol"],
+  impliedVolatility: ["sigma_iv"],
+  implied_volatility: ["sigma_iv"],
+  vrpBeta: ["beta_vrp"],
+  vrp_beta: ["beta_vrp"],
+  volatilityPercentile: ["q_sigma"],
+  volatility_percentile: ["q_sigma"],
+  percentileAnchor: ["q_0"],
+  percentile_anchor: ["q_0"],
+  percentileSensitivity: ["k_q"],
+  percentile_sensitivity: ["k_q"],
+  basisWeight: ["b"],
+  "factor.basis": ["b"],
+  volPenalty: ["w_sigma", "lambda_sigma"],
+  "factor.carry.annualized": ["c"],
+  expectedBasisPct: ["b_e"],
+  rollYieldPct: ["y_r"],
+  reversionStrength: ["lambda"],
+  inventoryPremium: ["pi_inv"],
+  carryDifferential: ["d_carry"],
+  horizonYears: ["h"],
+  "factor.ppp_gap": ["g_ppp"],
+  reerGap: ["g_reer"],
+  reversionSpeed: ["lambda"],
+  duration: ["D"],
+  "risk.duration": ["D"],
+  spreadChange: ["delta_s"],
+  "risk.yield_shift": ["delta_y"],
+  convexity: ["C"],
+  realRateGap: ["delta_r"],
+  sensitivity: ["beta"]
+};
+
+function getFormulaSymbolHints(formulaId: string): FormulaSymbolHint[] {
+  const keys = FORMULA_SYMBOL_HINT_KEYS[formulaId] ?? FORMULA_SYMBOL_HINT_KEYS.generic_factor_v1;
+  return keys
+    .map((key): FormulaSymbolHint | null => {
+      const item = FORMULA_SYMBOL_HINT_LIBRARY[key];
+      if (!item) return null;
+      return {
+        key,
+        symbol: item.symbol,
+        meaning: item.meaning,
+        relationLatex: item.relationLatex,
+        impactNote: item.impactNote
+      };
+    })
+    .filter((item): item is FormulaSymbolHint => item !== null);
+}
 
 const PARAM_GUIDES: Record<
   string,
@@ -205,6 +615,36 @@ const PARAM_GUIDES: Record<
     label: "波动率惩罚",
     meaning: "波动率上升时对估值的下修强度。",
     range: "0 ~ 1"
+  },
+  volatilityDiscountWeight: {
+    label: "波动率折价系数",
+    meaning: "将实现波动率映射为价格折价比例的系数。",
+    range: "0 ~ 2"
+  },
+  impliedVolatility: {
+    label: "隐含波动率",
+    meaning: "来自期权市场或近似估计的前瞻波动率。",
+    range: "0 ~ 2"
+  },
+  vrpBeta: {
+    label: "风险溢价系数",
+    meaning: "隐含与实现波动率差值对估值的传导系数。",
+    range: "0 ~ 2"
+  },
+  volatilityPercentile: {
+    label: "波动率分位数",
+    meaning: "当前波动率在历史样本中的分位位置。",
+    range: "0 ~ 1"
+  },
+  percentileAnchor: {
+    label: "分位锚点",
+    meaning: "分位估值中性点，通常设为 50% 分位。",
+    range: "0 ~ 1"
+  },
+  percentileSensitivity: {
+    label: "分位敏感度",
+    meaning: "分位偏离锚点时估值调整的强度。",
+    range: "0 ~ 2"
   },
   basisWeight: {
     label: "基差权重",
@@ -277,6 +717,141 @@ const PARAM_GUIDES: Record<
   sensitivity: {
     label: "敏感度",
     meaning: "价格对实际利率偏离的敏感系数。"
+  },
+  targetPe: {
+    label: "目标 PE",
+    meaning: "用于相对估值映射公允价值的目标市盈率。",
+    range: "5 ~ 60"
+  },
+  targetPb: {
+    label: "目标 PB",
+    meaning: "用于相对估值映射公允价值的目标市净率。",
+    range: "0.5 ~ 10"
+  },
+  targetPs: {
+    label: "目标 PS",
+    meaning: "用于相对估值映射公允价值的目标市销率。",
+    range: "0.2 ~ 20"
+  },
+  targetPeg: {
+    label: "目标 PEG",
+    meaning: "增长率到目标 PE 的映射系数。",
+    range: "0.5 ~ 2"
+  },
+  targetEvEbitda: {
+    label: "目标 EV/EBITDA",
+    meaning: "EV/EBITDA 相对估值使用的目标倍数。",
+    range: "3 ~ 25"
+  },
+  targetEvSales: {
+    label: "目标 EV/Sales",
+    meaning: "EV/Sales 相对估值使用的目标倍数。",
+    range: "0.5 ~ 15"
+  },
+  dividendYield: {
+    label: "股息率",
+    meaning: "DDM 模型中的股息收益率输入。",
+    range: "0 ~ 0.15"
+  },
+  growthRate: {
+    label: "增长率",
+    meaning: "盈利/现金流长期增长假设。",
+    range: "-0.1 ~ 0.3"
+  },
+  discountRate: {
+    label: "折现率",
+    meaning: "未来现金流折现到当前的贴现率。",
+    range: "0.03 ~ 0.2"
+  },
+  fcffYield: {
+    label: "FCFF 收益率",
+    meaning: "自由现金流收益率假设。",
+    range: "0 ~ 0.2"
+  },
+  highGrowthYears: {
+    label: "高增长年限",
+    meaning: "FCFF 两阶段模型第一阶段持续年数。",
+    range: "1 ~ 15"
+  },
+  highGrowthRate: {
+    label: "高增长率",
+    meaning: "FCFF 两阶段模型第一阶段增长率。",
+    range: "0 ~ 0.5"
+  },
+  terminalGrowthRate: {
+    label: "终值增长率",
+    meaning: "FCFF 两阶段模型终值阶段增长率。",
+    range: "0 ~ 0.08"
+  },
+  wacc: {
+    label: "WACC",
+    meaning: "加权平均资本成本，用于折现自由现金流。",
+    range: "0.03 ~ 0.2"
+  },
+  target_pe: {
+    label: "目标 PE",
+    meaning: "用于相对估值映射公允价值的目标市盈率。",
+    range: "5 ~ 60"
+  },
+  target_pb: {
+    label: "目标 PB",
+    meaning: "用于相对估值映射公允价值的目标市净率。",
+    range: "0.5 ~ 10"
+  },
+  target_ps: {
+    label: "目标 PS",
+    meaning: "用于相对估值映射公允价值的目标市销率。",
+    range: "0.2 ~ 20"
+  },
+  target_peg: {
+    label: "目标 PEG",
+    meaning: "增长率到目标 PE 的映射系数。",
+    range: "0.5 ~ 2"
+  },
+  target_ev_ebitda: {
+    label: "目标 EV/EBITDA",
+    meaning: "EV/EBITDA 相对估值使用的目标倍数。",
+    range: "3 ~ 25"
+  },
+  target_ev_sales: {
+    label: "目标 EV/Sales",
+    meaning: "EV/Sales 相对估值使用的目标倍数。",
+    range: "0.5 ~ 15"
+  },
+  dividend_yield: {
+    label: "股息率",
+    meaning: "DDM 模型中的股息收益率输入。",
+    range: "0 ~ 0.15"
+  },
+  growth_rate: {
+    label: "增长率",
+    meaning: "盈利/现金流长期增长假设。",
+    range: "-0.1 ~ 0.3"
+  },
+  discount_rate: {
+    label: "折现率",
+    meaning: "未来现金流折现到当前的贴现率。",
+    range: "0.03 ~ 0.2"
+  },
+  fcff_yield: {
+    label: "FCFF 收益率",
+    meaning: "自由现金流收益率假设。",
+    range: "0 ~ 0.2"
+  },
+  high_growth_years: {
+    label: "高增长年限",
+    meaning: "FCFF 两阶段模型第一阶段持续年数。",
+    range: "1 ~ 15"
+  },
+  high_growth_rate: {
+    label: "高增长率",
+    meaning: "FCFF 两阶段模型第一阶段增长率。",
+    range: "0 ~ 0.5"
+  },
+  terminal_growth_rate: {
+    label: "终值增长率",
+    meaning: "FCFF 两阶段模型终值阶段增长率。",
+    range: "0 ~ 0.08"
   }
 };
 
@@ -292,6 +867,8 @@ const METRIC_GUIDES: Record<string, string> = {
   "valuation.pe_ttm": "PE(TTM) 输入",
   "valuation.pb": "PB 输入",
   "valuation.ps_ttm": "PS(TTM) 输入",
+  "valuation.ev_ebitda_ttm": "EV/EBITDA(TTM) 输入",
+  "valuation.ev_sales_ttm": "EV/Sales(TTM) 输入",
   "valuation.dv_ttm": "股息率输入",
   "valuation.turnover_rate": "换手率输入",
   "output.fair_value": "估值输出：公允值",
@@ -305,11 +882,6 @@ const DEFAULT_POLICY_LABELS: Record<ValuationMethodInputField["defaultPolicy"], 
   global_median: "全局中位数",
   constant: "常量"
 };
-
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => String(item).trim()).filter(Boolean);
-}
 
 function getFormulaId(version: ValuationMethodVersion | null): string {
   if (!version) return "generic_factor_v1";
@@ -326,6 +898,12 @@ function inferAssetGroups(method: ValuationMethod): Array<Exclude<AssetGroupKey,
   const assetClasses = method.assetScope.assetClasses.map((item) => item.toLowerCase());
   const kinds = method.assetScope.kinds.map((item) => item.toLowerCase());
   const domains = method.assetScope.domains.map((item) => String(item).toLowerCase());
+  const isVolatility =
+    key.includes("volatility") || domains.includes("volatility") || domains.includes("vol");
+
+  if (isVolatility) {
+    return ["volatility"];
+  }
 
   const isEtf =
     key.includes(".etf.") ||
@@ -371,11 +949,6 @@ function inferAssetGroups(method: ValuationMethod): Array<Exclude<AssetGroupKey,
   return ["generic"];
 }
 
-function formatScopeList(items: string[]): string {
-  if (items.length === 0) return "--";
-  return items.join(", ");
-}
-
 function formatDateOnly(value: number): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "--";
@@ -409,6 +982,279 @@ function parseDraftValue(raw: string): unknown {
   }
 }
 
+function normalizeMathExpression(expression: string): string {
+  return expression.replace(/\s+/g, "").toLowerCase();
+}
+
+function isCommonReturnGapExpression(expression: string): boolean {
+  const normalized = normalizeMathExpression(expression);
+  return (
+    normalized === "rg=\\frac{fv}{p}-1" ||
+    normalized === "return_gap=fair_value/price-1" ||
+    normalized === "\\text{return_gap=fair_value/price-1}"
+  );
+}
+
+function formatCellValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "--";
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "--";
+  }
+  if (typeof value === "string") return value.trim() || "--";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function fallbackLayerByKind(kind: ValuationMethodInputField["kind"]): GraphLayer {
+  if (kind === "objective") return "top";
+  if (kind === "subjective") return "first_order";
+  return "output";
+}
+
+function highlightFormulaExpressionBySymbolKey(
+  expression: string,
+  symbolKey: string | null
+): string {
+  if (!symbolKey) return expression;
+  const patterns = FORMULA_SYMBOL_HIGHLIGHT_PATTERNS[symbolKey] ?? [];
+  if (patterns.length === 0) return expression;
+  let highlighted = expression;
+  for (const pattern of patterns) {
+    highlighted = highlighted.replace(pattern, (match) => `\\textcolor{red}{${match}}`);
+  }
+  return highlighted;
+}
+
+const SEMANTIC_STOPWORDS = new Set([
+  "估值",
+  "模型",
+  "方法",
+  "策略",
+  "逻辑",
+  "版本",
+  "计算",
+  "说明",
+  "相关",
+  "当前",
+  "内置",
+  "基于",
+  "相对",
+  "估算",
+  "股票",
+  "指数",
+  "基金",
+  "etf",
+  "stock",
+  "bond",
+  "forex",
+  "futures",
+  "spot",
+  "volatility",
+  "rate"
+]);
+
+const SEMANTIC_ALIASES: Record<string, string[]> = {
+  ddm: ["股利折现"],
+  pe: ["市盈率"],
+  pb: ["市净率"],
+  ps: ["市销率"],
+  fcff: ["自由现金流"]
+};
+
+function semanticTokensOf(text: string): Set<string> {
+  const tokens = text
+    .toLowerCase()
+    .replace(/[()（）[\]【】{}]/g, " ")
+    .match(/[a-z0-9\u4e00-\u9fa5]+/g);
+  if (!tokens) return new Set();
+  const out = new Set<string>();
+  for (const token of tokens) {
+    if (!token || SEMANTIC_STOPWORDS.has(token)) continue;
+    out.add(token);
+    const aliases = SEMANTIC_ALIASES[token] ?? [];
+    for (const alias of aliases) {
+      if (!SEMANTIC_STOPWORDS.has(alias)) {
+        out.add(alias);
+      }
+    }
+  }
+  return out;
+}
+
+function isTextSemanticallyDuplicate(left: string, right: string): boolean {
+  const leftTokens = semanticTokensOf(left);
+  const rightTokens = semanticTokensOf(right);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return false;
+
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1;
+  }
+  if (overlap === 0) return false;
+
+  const minSize = Math.min(leftTokens.size, rightTokens.size);
+  const maxSize = Math.max(leftTokens.size, rightTokens.size);
+  return overlap >= 2 && (overlap / minSize >= 0.8 || overlap / maxSize >= 0.6);
+}
+
+interface AtomicParamRow {
+  rowId: string;
+  key: string;
+  kind: "objective" | "subjective" | "derived";
+  kindLabel: string;
+  layer: GraphLayer;
+  layerLabel: string;
+  traitLabel: string;
+  name: string;
+  symbolKey: string | null;
+  symbolMath: string | null;
+  currentValue: string;
+  baselineValue: string;
+  range: string;
+  description: string;
+  relationLatex: string | null;
+  impactNote: string | null;
+  sourceOrDefault: string;
+  defaultPolicyText: string;
+  statusLabel: string;
+  statusDetail: string;
+  editable: boolean;
+  displayOrder: number;
+  hasValue: boolean;
+}
+
+interface ControlParameterItem {
+  id: string;
+  key: string;
+  symbolLatexList: string[];
+  displaySymbolLatex: string | null;
+  preferWide: boolean;
+  value: string;
+  statusLabel: string;
+  statusDetail: string;
+  editable: boolean;
+}
+
+function toKeyVariants(key: string): string[] {
+  const snake = key.replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
+  const camel = key.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase());
+  return Array.from(new Set([key, snake, camel]));
+}
+
+const SYMBOL_DISPLAY_META: Record<string, { name: string }> = {
+  P: { name: "市场价格" },
+  FV: { name: "公允价值" },
+  RG: { name: "收益偏离（相对市场价）" },
+  m: { name: "动量因子" },
+  sigma: { name: "波动率" },
+  b: { name: "基差" },
+  w_m: { name: "动量权重" },
+  w_sigma: { name: "波动惩罚权重" },
+  b_e: { name: "预期基差比例" },
+  y_r: { name: "展期收益比例" },
+  c: { name: "持有收益因子" },
+  sigma_20d: { name: "20日实现波动率" },
+  lambda_vol: { name: "波动率折价系数" },
+  sigma_iv: { name: "隐含波动率" },
+  sigma_rv: { name: "实现波动率" },
+  beta_vrp: { name: "波动率风险溢价系数" },
+  q_sigma: { name: "波动率分位数" },
+  "q_0": { name: "分位锚点" },
+  k_q: { name: "分位敏感度" },
+  lambda: { name: "均值回归强度" },
+  pi_inv: { name: "库存溢价" },
+  lambda_sigma: { name: "波动惩罚系数" },
+  g_ppp: { name: "购买力平价偏离比例" },
+  d_carry: { name: "两币种年化利差" },
+  h: { name: "持有期（年）" },
+  g_reer: { name: "实际有效汇率偏离比例" },
+  D: { name: "久期" },
+  delta_y: { name: "收益率变动" },
+  delta_s: { name: "信用利差变动" },
+  C: { name: "凸性" },
+  beta: { name: "敏感度系数" },
+  delta_r: { name: "实际利率偏离" },
+  "PE^*": { name: "目标市盈率" },
+  "EPS_{ttm}": { name: "过去十二个月每股收益" },
+  "PB^*": { name: "目标市净率" },
+  BPS: { name: "每股净资产" },
+  "PS^*": { name: "目标市销率" },
+  "S_{ttm}": { name: "过去十二个月销售额" },
+  g: { name: "长期增长率" },
+  "PEG^*": { name: "目标市盈增长比" },
+  "EV^*": { name: "目标企业价值" },
+  "EBITDA^*": { name: "目标息税折旧摊销前利润" },
+  "EV_{ttm}": { name: "过去十二个月企业价值" },
+  "EBITDA_{ttm}": { name: "过去十二个月息税折旧摊销前利润" },
+  "Sales^*": { name: "目标营业收入" },
+  d_y: { name: "股息率" },
+  r: { name: "折现率" },
+  "g_1": { name: "高增长阶段增长率" },
+  "g_2": { name: "稳定阶段增长率" },
+  "y_{fcff}": { name: "自由现金流收益率" },
+  N: { name: "高增长阶段年数" },
+  WACC: { name: "加权平均资本成本" }
+};
+
+const PARAM_KEY_CONTAINS_SYMBOL_CANDIDATES: Array<{
+  includes: string[];
+  symbols: string[];
+}> = [
+  { includes: ["ev_ebitda_ttm"], symbols: ["EV_{ttm}", "EBITDA_{ttm}"] },
+  { includes: ["ev_sales_ttm"], symbols: ["EV_{ttm}", "S_{ttm}"] },
+  { includes: ["target_ev_ebitda", "targetevebitda"], symbols: ["EV^*", "EBITDA^*"] },
+  { includes: ["target_ev_sales", "targetevsales"], symbols: ["EV^*", "Sales^*"] }
+];
+
+function normalizeKeyForContainsMatch(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9_]/g, "");
+}
+
+function resolveSymbolKeysForFieldKey(key: string): string[] {
+  const variants = toKeyVariants(key);
+  for (const variant of variants) {
+    const candidates = PARAM_TO_SYMBOL_CANDIDATES[variant];
+    if (candidates && candidates.length > 0) {
+      return candidates;
+    }
+  }
+  const normalizedVariants = variants.map(normalizeKeyForContainsMatch);
+  for (const rule of PARAM_KEY_CONTAINS_SYMBOL_CANDIDATES) {
+    const matched = rule.includes.some((token) =>
+      normalizedVariants.some((variant) => variant.includes(token))
+    );
+    if (matched) {
+      return rule.symbols;
+    }
+  }
+  return [];
+}
+
+function findParamGuideByKey(key: string): { label: string; meaning: string; range?: string } | undefined {
+  for (const variant of toKeyVariants(key)) {
+    const guide = PARAM_GUIDES[variant];
+    if (guide) return guide;
+  }
+  return undefined;
+}
+
+function resolveAtomicRowName(
+  symbolKey: string,
+  fallbackFieldLabel?: string | null,
+  fallbackGuideLabel?: string
+): string {
+  const symbolMetaName = SYMBOL_DISPLAY_META[symbolKey]?.name;
+  if (symbolMetaName) return symbolMetaName;
+  const fieldLabel = fallbackFieldLabel?.trim();
+  if (fieldLabel) return fieldLabel;
+  const guideLabel = fallbackGuideLabel?.trim();
+  if (guideLabel) return guideLabel;
+  return symbolKey;
+}
+
 export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -416,7 +1262,6 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [assetGroup, setAssetGroup] = useState<AssetGroupKey>("all");
-  const [showCustomMethods, setShowCustomMethods] = useState(false);
   const [methods, setMethods] = useState<ValuationMethod[]>([]);
   const [selectedMethodKey, setSelectedMethodKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<ValuationMethodDetail | null>(null);
@@ -425,9 +1270,18 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
   const [draftParamValues, setDraftParamValues] = useState<Record<string, string>>({});
   const [draftInputSchema, setDraftInputSchema] = useState<ValuationMethodInputField[]>([]);
   const [versionDetailOpen, setVersionDetailOpen] = useState(false);
-  const [structureDetailOpen, setStructureDetailOpen] = useState(false);
-  const [structureDetailTab, setStructureDetailTab] =
-    useState<StructureDetailTabKey>("input_schema");
+  const [schemaKindFilter, setSchemaKindFilter] =
+    useState<UnifiedInputKindFilter>("all");
+  const [schemaLayerFilter, setSchemaLayerFilter] =
+    useState<UnifiedLayerFilter>("all");
+  const [schemaOnlyEditable, setSchemaOnlyEditable] = useState(false);
+  const [schemaOnlyHasValue, setSchemaOnlyHasValue] = useState(false);
+  const [expandedSchemaRowId, setExpandedSchemaRowId] = useState<string | null>(null);
+  const [controlEditDialog, setControlEditDialog] = useState<{
+    key: string;
+    symbolLatex: string | null;
+    value: string;
+  } | null>(null);
 
   const marketApi = window.mytrader?.insights;
 
@@ -443,7 +1297,6 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
     }
     return sortedVersions[0] ?? null;
   }, [detail, sortedVersions]);
-
   const previousVersion = useMemo(() => {
     if (!selectedVersion) return null;
     return sortedVersions.find((version) => version.version < selectedVersion.version) ?? null;
@@ -451,6 +1304,43 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
 
   const formulaId = useMemo(() => getFormulaId(selectedVersion), [selectedVersion]);
   const formulaGuide = FORMULA_GUIDES[formulaId] ?? FORMULA_GUIDES.generic_factor_v1;
+  const formulaSymbolHints = useMemo(() => getFormulaSymbolHints(formulaId), [formulaId]);
+  const methodDescriptionToShow = useMemo(() => {
+    if (!detail?.method.description?.trim()) return null;
+    return isTextSemanticallyDuplicate(detail.method.name, detail.method.description)
+      ? null
+      : detail.method.description;
+  }, [detail]);
+  const formulaSummaryToShow = useMemo(() => {
+    const summary = formulaGuide.summary?.trim();
+    if (!summary) return null;
+    if (detail && isTextSemanticallyDuplicate(detail.method.name, summary)) {
+      return null;
+    }
+    if (methodDescriptionToShow && isTextSemanticallyDuplicate(methodDescriptionToShow, summary)) {
+      return null;
+    }
+    return summary;
+  }, [detail, formulaGuide.summary, methodDescriptionToShow]);
+  const overviewText = useMemo(() => {
+    if (methodDescriptionToShow) return methodDescriptionToShow;
+    if (formulaSummaryToShow) return formulaSummaryToShow;
+    return "该估值方法基于核心输入参数计算公允价值。";
+  }, [formulaSummaryToShow, methodDescriptionToShow]);
+  const formulaLogicBrief = useMemo(() => {
+    if (formulaSummaryToShow) return formulaSummaryToShow;
+    const summary = formulaGuide.summary?.trim();
+    if (summary) return summary;
+    return "根据核心输入参数计算公允价值。";
+  }, [formulaGuide.summary, formulaSummaryToShow]);
+  const formulaDisplaySteps = useMemo(() => {
+    const rawSteps =
+      formulaGuide.stepsLatex.length > 0
+        ? formulaGuide.stepsLatex
+        : formulaGuide.steps.map((step) => `\\text{${step}}`);
+    const methodSpecificSteps = rawSteps.filter((step) => !isCommonReturnGapExpression(step));
+    return methodSpecificSteps.length > 0 ? methodSpecificSteps : rawSteps;
+  }, [formulaGuide]);
 
   useEffect(() => {
     if (!selectedVersion) {
@@ -525,28 +1415,30 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
 
   useEffect(() => {
     setVersionDetailOpen(false);
-    setStructureDetailOpen(false);
-    setStructureDetailTab("input_schema");
+    setSchemaKindFilter("all");
+    setSchemaLayerFilter("all");
+    setSchemaOnlyEditable(false);
+    setSchemaOnlyHasValue(false);
+    setExpandedSchemaRowId(null);
+    setControlEditDialog(null);
   }, [selectedMethodKey]);
 
   useEffect(() => {
-    if (!versionDetailOpen && !structureDetailOpen) return;
+    if (!versionDetailOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setVersionDetailOpen(false);
-        setStructureDetailOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [structureDetailOpen, versionDetailOpen]);
+  }, [versionDetailOpen]);
 
   const visibleMethods = useMemo(() => {
-    if (showCustomMethods) return methods;
     return methods.filter((method) => method.isBuiltin);
-  }, [methods, showCustomMethods]);
+  }, [methods]);
 
   const filteredMethods = useMemo(() => {
     if (assetGroup === "all") return visibleMethods;
@@ -580,49 +1472,6 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
     return map;
   }, [filteredMethods]);
 
-  const requiredMetrics = useMemo(
-    () => normalizeStringArray(selectedVersion?.metricSchema["required"]),
-    [selectedVersion]
-  );
-
-  const outputMetrics = useMemo(
-    () => normalizeStringArray(selectedVersion?.metricSchema["outputs"]),
-    [selectedVersion]
-  );
-
-  const graphByLayer = useMemo(() => {
-    const grouped: Record<GraphLayer, Array<ValuationMethodVersion["graph"][number]>> = {
-      top: [],
-      first_order: [],
-      second_order: [],
-      output: [],
-      risk: []
-    };
-    for (const node of selectedVersion?.graph ?? []) {
-      const layer = node.layer as GraphLayer;
-      if (grouped[layer]) {
-        grouped[layer].push(node);
-      }
-    }
-    return grouped;
-  }, [selectedVersion]);
-
-  const keyParams = useMemo(() => {
-    if (!selectedVersion) return [];
-    return Object.entries(selectedVersion.paramSchema)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => {
-        const guide = PARAM_GUIDES[key];
-        return {
-          key,
-          value,
-          label: guide?.label ?? key,
-          meaning: guide?.meaning ?? "参数含义待补充",
-          range: guide?.range ?? "--"
-        };
-      });
-  }, [selectedVersion]);
-
   const versionParamCompareRows = useMemo(() => {
     if (!selectedVersion || !previousVersion) return [];
     const current = selectedVersion.paramSchema;
@@ -637,20 +1486,406 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
       .filter((row) => !areValuesEqual(row.previous, row.current));
   }, [previousVersion, selectedVersion]);
 
-  const groupedInputSchema = useMemo(() => {
-    const grouped: Record<"objective" | "subjective" | "derived", ValuationMethodInputField[]> = {
-      objective: [],
-      subjective: [],
-      derived: []
+  const graphNodeByKey = useMemo(() => {
+    const map = new Map<string, ValuationMethodVersion["graph"][number]>();
+    for (const node of selectedVersion?.graph ?? []) {
+      map.set(node.key, node);
+    }
+    return map;
+  }, [selectedVersion]);
+
+  const formulaSymbolHintByKey = useMemo(() => {
+    const map = new Map<string, FormulaSymbolHint>();
+    for (const hint of formulaSymbolHints) {
+      map.set(hint.key, hint);
+    }
+    return map;
+  }, [formulaSymbolHints]);
+  const formulaSymbolKeySet = useMemo(
+    () => new Set(formulaSymbolHints.map((hint) => hint.key)),
+    [formulaSymbolHints]
+  );
+  const draftParamKeySet = useMemo(() => new Set(Object.keys(draftParamValues)), [draftParamValues]);
+  const resolveDraftParamKey = useCallback(
+    (key: string): string | null => {
+      const candidates = toKeyVariants(key);
+      return candidates.find((candidate) => draftParamKeySet.has(candidate)) ?? null;
+    },
+    [draftParamKeySet]
+  );
+
+  const unifiedSchemaRows = useMemo<AtomicParamRow[]>(() => {
+    const isBuiltinMethod = Boolean(detail?.method.isBuiltin);
+    const rows: AtomicParamRow[] = [];
+    const emittedRowKeys = new Set<string>();
+    const schemaFieldKeys = new Set<string>();
+
+    const resolveDraftParamValue = (paramKey: string | null, fallbackValue: unknown): unknown => {
+      if (!paramKey) return fallbackValue;
+      const raw = draftParamValues[paramKey];
+      if (raw === undefined) return fallbackValue;
+      return parseDraftValue(raw);
     };
+
+    const appendRow = (row: AtomicParamRow) => {
+      const dedupeKey = `${row.kind}:${row.key}:${row.symbolKey ?? row.symbolMath ?? "none"}`;
+      if (emittedRowKeys.has(dedupeKey)) return;
+      emittedRowKeys.add(dedupeKey);
+      rows.push(row);
+    };
+
+    const appendFieldRows = (
+      field: ValuationMethodInputField,
+      rowPrefix: string,
+      currentRawValue: unknown,
+      baselineRawValue: unknown,
+      allowEdit: boolean
+    ) => {
+      if (field.key === "output.return_gap" || field.key === "valuation.return_gap") return;
+      const symbolKeys = resolveSymbolKeysForFieldKey(field.key).filter((key) =>
+        formulaSymbolKeySet.has(key)
+      );
+      if (symbolKeys.length === 0) return;
+      const graphNode = graphNodeByKey.get(field.key) ?? null;
+      const layer = (graphNode?.layer as GraphLayer | undefined) ?? fallbackLayerByKind(field.kind);
+      const guide = findParamGuideByKey(field.key);
+      const defaultPolicyText =
+        field.kind === "subjective"
+          ? `默认策略：${DEFAULT_POLICY_LABELS[field.defaultPolicy]}`
+          : "默认策略：--";
+      const sourceOrDefault =
+        field.kind === "objective"
+          ? `来源：${field.objectiveSource ?? "--"}`
+          : field.kind === "subjective"
+            ? defaultPolicyText
+            : "来源：模型计算";
+      const statusLabel =
+        field.kind === "objective" ? "自动采集" : field.kind === "derived" ? "模型输出" : "主观参数";
+      const statusDetail =
+        field.kind === "objective"
+          ? "客观输入 · 只读"
+          : field.kind === "derived"
+            ? "派生输出 · 只读"
+            : allowEdit
+              ? "主观输入 · 可在控制参数中调整"
+              : isBuiltinMethod
+                ? "主观输入 · 只读（内置）"
+                : "主观输入 · 只读";
+
+      symbolKeys.forEach((symbolKey, index) => {
+        const symbolHint =
+          formulaSymbolHintByKey.get(symbolKey) ?? FORMULA_SYMBOL_HINT_LIBRARY[symbolKey] ?? null;
+        if (!symbolHint) return;
+        const descriptionSegments = [
+          symbolHint.meaning,
+          field.description,
+          guide?.meaning,
+          METRIC_GUIDES[field.key]
+        ].filter((item): item is string => Boolean(item && item.trim()));
+        const mergedDescription: string[] = [];
+        for (const segment of descriptionSegments) {
+          if (!mergedDescription.some((existing) => isTextSemanticallyDuplicate(existing, segment))) {
+            mergedDescription.push(segment);
+          }
+        }
+        appendRow({
+          rowId: `${rowPrefix}:${field.key}:${symbolKey}:${index}`,
+          key: field.key,
+          kind: field.kind,
+          kindLabel: INPUT_KIND_LABELS[field.kind],
+          layer,
+          layerLabel: GRAPH_LAYER_LABELS[layer],
+          traitLabel: `${INPUT_KIND_TRAIT_PREFIX_LABELS[field.kind]} · ${GRAPH_LAYER_LABELS[layer]}`,
+          name: resolveAtomicRowName(symbolKey, field.label, guide?.label),
+          symbolKey,
+          symbolMath: symbolHint.symbol,
+          currentValue:
+            field.kind === "subjective" ? formatCellValue(currentRawValue) : "--",
+          baselineValue:
+            field.kind === "subjective" ? formatCellValue(baselineRawValue) : "--",
+          range: guide?.range ?? "--",
+          description: mergedDescription.join(" "),
+          relationLatex: symbolHint.relationLatex ?? null,
+          impactNote: symbolHint.impactNote ?? null,
+          sourceOrDefault,
+          defaultPolicyText,
+          statusLabel,
+          statusDetail,
+          editable: field.kind === "subjective" && allowEdit,
+          displayOrder: field.displayOrder + index / 10,
+          hasValue:
+            (field.kind === "subjective" &&
+              (formatCellValue(currentRawValue) !== "--" ||
+                formatCellValue(baselineRawValue) !== "--")) ||
+            field.kind !== "subjective"
+        });
+      });
+    };
+
     for (const field of draftInputSchema) {
-      grouped[field.kind].push(field);
+      schemaFieldKeys.add(field.key);
+      const paramDraftKey = field.kind === "subjective" ? resolveDraftParamKey(field.key) : null;
+      const currentRawValue =
+        field.kind === "subjective"
+          ? resolveDraftParamValue(
+              paramDraftKey,
+              selectedVersion?.paramSchema[field.key] ?? field.defaultValue
+            )
+          : null;
+      const baselineRawValue =
+        field.kind === "subjective" ? field.defaultValue : null;
+      appendFieldRows(
+        field,
+        "schema",
+        currentRawValue,
+        baselineRawValue,
+        field.kind === "subjective" && field.editable && Boolean(paramDraftKey) && !isBuiltinMethod
+      );
     }
-    for (const key of Object.keys(grouped) as Array<keyof typeof grouped>) {
-      grouped[key] = [...grouped[key]].sort((a, b) => a.displayOrder - b.displayOrder);
+
+    if (selectedVersion) {
+      const parameterKeys = Object.keys(selectedVersion.paramSchema).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      for (const key of parameterKeys) {
+        if (key === "output.return_gap" || key === "valuation.return_gap") continue;
+        if (schemaFieldKeys.has(key)) continue;
+        const paramDraftKey = resolveDraftParamKey(key) ?? key;
+        const currentRawValue = resolveDraftParamValue(paramDraftKey, selectedVersion.paramSchema[key]);
+        const pseudoField: ValuationMethodInputField = {
+          key,
+          label: findParamGuideByKey(key)?.label ?? key,
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "none",
+          defaultValue: selectedVersion.paramSchema[key] as number | null,
+          displayOrder: 9_999,
+          description: findParamGuideByKey(key)?.meaning ?? null
+        };
+        appendFieldRows(
+          pseudoField,
+          "param",
+          currentRawValue,
+          selectedVersion.paramSchema[key],
+          !isBuiltinMethod && Boolean(paramDraftKey)
+        );
+      }
     }
-    return grouped;
-  }, [draftInputSchema]);
+
+    const rowPriority = (row: AtomicParamRow): number => {
+      if (row.kind === "subjective") return 0;
+      if (row.kind === "objective") return 1;
+      return 2;
+    };
+
+    const bestRowBySymbol = new Map<string, AtomicParamRow>();
+    for (const row of rows) {
+      if (!row.symbolKey) continue;
+      const previous = bestRowBySymbol.get(row.symbolKey);
+      if (!previous) {
+        bestRowBySymbol.set(row.symbolKey, row);
+        continue;
+      }
+      const previousPriority = rowPriority(previous);
+      const currentPriority = rowPriority(row);
+      if (
+        currentPriority < previousPriority ||
+        (currentPriority === previousPriority && row.displayOrder < previous.displayOrder)
+      ) {
+        bestRowBySymbol.set(row.symbolKey, row);
+      }
+    }
+
+    const dedupedRows = rows.filter((row) => {
+      if (!row.symbolKey) return true;
+      return bestRowBySymbol.get(row.symbolKey)?.rowId === row.rowId;
+    });
+
+    const expectedSymbolKeys =
+      FORMULA_SYMBOL_HINT_KEYS[formulaId] ?? FORMULA_SYMBOL_HINT_KEYS.generic_factor_v1;
+    const presentSymbolKeys = new Set(
+      dedupedRows
+        .map((row) => row.symbolKey)
+        .filter((item): item is string => Boolean(item))
+    );
+    for (const symbolKey of expectedSymbolKeys) {
+      if (symbolKey === "RG" || presentSymbolKeys.has(symbolKey)) continue;
+      const hint = formulaSymbolHintByKey.get(symbolKey) ?? FORMULA_SYMBOL_HINT_LIBRARY[symbolKey];
+      if (!hint) continue;
+      dedupedRows.push({
+        rowId: `missing:${formulaId}:${symbolKey}`,
+        key: `missing.${symbolKey}`,
+        kind: symbolKey === "FV" ? "derived" : "objective",
+        kindLabel: symbolKey === "FV" ? INPUT_KIND_LABELS.derived : INPUT_KIND_LABELS.objective,
+        layer: symbolKey === "FV" ? "output" : "top",
+        layerLabel: symbolKey === "FV" ? GRAPH_LAYER_LABELS.output : GRAPH_LAYER_LABELS.top,
+        traitLabel:
+          symbolKey === "FV"
+            ? `${INPUT_KIND_TRAIT_PREFIX_LABELS.derived} · ${GRAPH_LAYER_LABELS.output}`
+            : `${INPUT_KIND_TRAIT_PREFIX_LABELS.objective} · ${GRAPH_LAYER_LABELS.top}`,
+        name: resolveAtomicRowName(symbolKey, hint.meaning, hint.meaning),
+        symbolKey,
+        symbolMath: hint.symbol,
+        currentValue: "--",
+        baselineValue: "--",
+        range: "--",
+        description: hint.meaning,
+        relationLatex: hint.relationLatex ?? null,
+        impactNote: hint.impactNote ?? null,
+        sourceOrDefault: "来源：公式符号补齐",
+        defaultPolicyText: "默认策略：--",
+        statusLabel: "待映射",
+        statusDetail: "公式存在该符号，但输入定义未映射到该符号。",
+        editable: false,
+        displayOrder: 99_999,
+        hasValue: false
+      });
+    }
+
+    return dedupedRows.sort((left, right) => {
+      const byKind = INPUT_KIND_ORDER[left.kind] - INPUT_KIND_ORDER[right.kind];
+      if (byKind !== 0) return byKind;
+      const byLayer =
+        GRAPH_LAYER_ORDER.indexOf(left.layer) - GRAPH_LAYER_ORDER.indexOf(right.layer);
+      if (byLayer !== 0) return byLayer;
+      const byDisplayOrder = left.displayOrder - right.displayOrder;
+      if (byDisplayOrder !== 0) return byDisplayOrder;
+      return left.key.localeCompare(right.key);
+    });
+  }, [
+    draftInputSchema,
+    draftParamValues,
+    detail?.method.isBuiltin,
+    formulaId,
+    formulaSymbolHintByKey,
+    formulaSymbolKeySet,
+    graphNodeByKey,
+    resolveDraftParamKey,
+    selectedVersion
+  ]);
+
+  const controlParameterItems = useMemo<ControlParameterItem[]>(() => {
+    if (!selectedVersion) return [];
+    const items: ControlParameterItem[] = [];
+    const emittedKeys = new Set<string>();
+    const isBuiltinMethod = Boolean(detail?.method.isBuiltin);
+    const schemaFieldKeys = new Set(draftInputSchema.map((field) => field.key));
+
+    const resolveControlStatus = (
+      schemaEditable: boolean | null
+    ): { editable: boolean; statusLabel: string; statusDetail: string } => {
+      if (isBuiltinMethod) {
+        return { editable: false, statusLabel: "内置", statusDetail: "内置只读" };
+      }
+      if (schemaEditable === false) {
+        return { editable: false, statusLabel: "只读", statusDetail: "规则只读" };
+      }
+      return { editable: true, statusLabel: "可修改", statusDetail: "可编辑" };
+    };
+
+    const appendControlItem = (
+      fieldKey: string,
+      defaultValue: unknown,
+      schemaEditable: boolean | null
+    ) => {
+      const paramDraftKey = resolveDraftParamKey(fieldKey) ?? fieldKey;
+      if (emittedKeys.has(paramDraftKey)) return;
+      const symbolKeys = resolveSymbolKeysForFieldKey(fieldKey).filter((key) =>
+        formulaSymbolKeySet.has(key)
+      );
+      if (symbolKeys.length === 0) return;
+      emittedKeys.add(paramDraftKey);
+      const status = resolveControlStatus(schemaEditable);
+      const symbolLatexList = symbolKeys.map(
+        (symbolKey) => FORMULA_SYMBOL_HINT_LIBRARY[symbolKey]?.symbol ?? symbolKey
+      );
+      items.push({
+        id: `control:${paramDraftKey}`,
+        key: paramDraftKey,
+        symbolLatexList,
+        displaySymbolLatex:
+          symbolLatexList.length === 0
+            ? null
+            : symbolLatexList.length === 1
+              ? symbolLatexList[0]
+              : symbolLatexList.join(" / "),
+        preferWide:
+          symbolLatexList.length > 1 ||
+          (symbolLatexList.length === 1 && (symbolLatexList[0]?.length ?? 0) >= 14),
+        value: draftParamValues[paramDraftKey] ?? toDraftString(defaultValue),
+        editable: status.editable,
+        statusLabel: status.statusLabel,
+        statusDetail: status.statusDetail
+      });
+    };
+
+    for (const field of draftInputSchema) {
+      if (field.kind !== "subjective") continue;
+      appendControlItem(field.key, field.defaultValue, field.editable);
+    }
+
+    for (const [key, value] of Object.entries(selectedVersion.paramSchema)) {
+      if (schemaFieldKeys.has(key)) continue;
+      appendControlItem(key, value, null);
+    }
+
+    return items.sort((left, right) => left.key.localeCompare(right.key, "zh-Hans-CN"));
+  }, [
+    detail?.method.isBuiltin,
+    draftInputSchema,
+    draftParamValues,
+    formulaSymbolKeySet,
+    resolveDraftParamKey,
+    selectedVersion
+  ]);
+
+  const filteredUnifiedSchemaRows = useMemo(() => {
+    return unifiedSchemaRows.filter((row) => {
+      if (schemaKindFilter !== "all" && row.kind !== schemaKindFilter) return false;
+      if (schemaLayerFilter !== "all" && row.layer !== schemaLayerFilter) {
+        return false;
+      }
+      if (schemaOnlyEditable && !row.editable) {
+        return false;
+      }
+      if (schemaOnlyHasValue && !row.hasValue) {
+        return false;
+      }
+      return true;
+    });
+  }, [
+    schemaKindFilter,
+    schemaLayerFilter,
+    schemaOnlyEditable,
+    schemaOnlyHasValue,
+    unifiedSchemaRows
+  ]);
+
+  useEffect(() => {
+    if (
+      expandedSchemaRowId &&
+      !filteredUnifiedSchemaRows.some((row) => row.rowId === expandedSchemaRowId)
+    ) {
+      setExpandedSchemaRowId(null);
+    }
+  }, [expandedSchemaRowId, filteredUnifiedSchemaRows]);
+
+  const activeFormulaSymbolKey = useMemo(() => {
+    if (!expandedSchemaRowId) return null;
+    const activeRow =
+      filteredUnifiedSchemaRows.find((row) => row.rowId === expandedSchemaRowId) ?? null;
+    if (!activeRow) return null;
+    if (activeRow.kind === "derived") return null;
+    return activeRow.symbolKey ?? null;
+  }, [expandedSchemaRowId, filteredUnifiedSchemaRows]);
+
+  const highlightedFormulaSteps = useMemo(() => {
+    return formulaDisplaySteps.map((step) =>
+      highlightFormulaExpressionBySymbolKey(step, activeFormulaSymbolKey)
+    );
+  }, [activeFormulaSymbolKey, formulaDisplaySteps]);
 
   const handleSetActiveVersion = useCallback(
     async (versionId: string) => {
@@ -726,33 +1961,9 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
     selectedVersion
   ]);
 
-  const handleSaveInputSchema = useCallback(async () => {
-    if (!marketApi || !detail || !selectedVersion) return;
-    if (detail.method.isBuiltin) {
-      setError("内置方法只读，请先克隆后编辑输入定义。");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const updated = await marketApi.upsertValuationMethodInputSchema({
-        methodKey: detail.method.methodKey,
-        versionId: selectedVersion.id,
-        inputSchema: draftInputSchema
-      });
-      setDetail(updated);
-      setNotice("输入定义已保存。");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, [detail, draftInputSchema, marketApi, selectedVersion]);
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap items-center gap-2">
           {ASSET_GROUPS.map((group) => {
             const active = assetGroup === group.key;
@@ -771,25 +1982,6 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
               </button>
             );
           })}
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-2 rounded border border-slate-200 dark:border-border-dark px-2 py-1 text-xs text-slate-600 dark:text-slate-300">
-            <input
-              type="checkbox"
-              checked={showCustomMethods}
-              onChange={(event) => setShowCustomMethods(event.target.checked)}
-            />
-            显示自定义
-          </label>
-          <props.Button
-            variant="secondary"
-            size="sm"
-            icon="refresh"
-            onClick={() => void loadMethods(selectedMethodKey)}
-            disabled={loading || saving}
-          >
-            刷新
-          </props.Button>
         </div>
       </div>
 
@@ -910,114 +2102,238 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
                     </div>
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-300">
-                    {detail.method.description ?? "暂无说明"}
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    适用范围：资产类别[{formatScopeList(detail.method.assetScope.assetClasses)}] ·
-                    标的类型[{formatScopeList(detail.method.assetScope.kinds)}] · 市场[
-                    {formatScopeList(detail.method.assetScope.markets)}] · 领域[
-                    {formatScopeList(detail.method.assetScope.domains.map(String))}]
+                    {overviewText}
                   </div>
                 </div>
 
-                <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-2">
+                <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-3">
                   <div className="text-sm font-medium text-slate-800 dark:text-slate-100">计算逻辑</div>
-                  <div className="text-xs text-slate-600 dark:text-slate-300">{formulaGuide.summary}</div>
-                  <div className="space-y-1">
-                    {formulaGuide.steps.map((step) => (
-                      <div key={step} className="font-mono text-[11px] text-slate-700 dark:text-slate-200">
-                        {step}
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="space-y-1 md:col-span-2">
+                      {highlightedFormulaSteps.map((step, index) => (
+                        <div
+                          key={`${formulaId}.${index}`}
+                          className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5 bg-slate-50/70 dark:bg-background-dark/40 text-slate-700 dark:text-slate-200"
+                        >
+                          <BlockMath math={step} />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="md:col-span-1 rounded-md border border-slate-200 dark:border-border-dark px-3 py-2">
+                      <div className="text-xs text-slate-600 dark:text-slate-300 leading-5">
+                        {formulaLogicBrief}
                       </div>
-                    ))}
+                    </div>
                   </div>
                 </div>
 
                 <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-2">
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                    关键参数（含义）
-                  </div>
-                  <div className="max-h-48 overflow-auto rounded border border-slate-200 dark:border-border-dark">
-                    {keyParams.map((item) => (
-                      <div
-                        key={item.key}
-                        className="px-3 py-2 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0"
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                        参数定义
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="ui-input rounded-md px-2 py-1 text-[11px] w-[96px]"
+                        value={schemaKindFilter}
+                        onChange={(event) =>
+                          setSchemaKindFilter(event.target.value as UnifiedInputKindFilter)
+                        }
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                            {item.label}
-                          </div>
-                          <div className="font-mono text-xs text-slate-900 dark:text-slate-100">
-                            {String(item.value)}
-                          </div>
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.key}</div>
-                        <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                          {item.meaning}
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                          建议范围：{item.range}
-                        </div>
-                      </div>
-                    ))}
-                    {keyParams.length === 0 && (
-                      <div className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">暂无参数。</div>
-                    )}
+                        <option value="all">全部类别</option>
+                        <option value="objective">客观输入</option>
+                        <option value="subjective">主观输入</option>
+                        <option value="derived">派生输出</option>
+                      </select>
+                      <select
+                        className="ui-input rounded-md px-2 py-1 text-[11px] w-[96px]"
+                        value={schemaLayerFilter}
+                        onChange={(event) =>
+                          setSchemaLayerFilter(event.target.value as UnifiedLayerFilter)
+                        }
+                      >
+                        <option value="all">全部阶数</option>
+                        {GRAPH_LAYER_ORDER.map((layer) => (
+                          <option key={layer} value={layer}>
+                            {GRAPH_LAYER_LABELS[layer]}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-border-dark rounded px-2 py-1">
+                        <input
+                          type="checkbox"
+                          checked={schemaOnlyEditable}
+                          onChange={(event) => setSchemaOnlyEditable(event.target.checked)}
+                        />
+                        仅可编辑
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-border-dark rounded px-2 py-1">
+                        <input
+                          type="checkbox"
+                          checked={schemaOnlyHasValue}
+                          onChange={(event) => setSchemaOnlyHasValue(event.target.checked)}
+                        />
+                        仅有值
+                      </label>
+                    </div>
                   </div>
-                </div>
 
-                <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                      输入与输出指标
-                    </div>
-                    <props.Button
-                      variant="secondary"
-                      size="sm"
-                      icon="info"
-                      onClick={() => {
-                        setStructureDetailTab("input_schema");
-                        setStructureDetailOpen(true);
-                      }}
-                    >
-                      详情
-                    </props.Button>
+                  <div className="max-h-[420px] overflow-y-auto overflow-x-hidden rounded border border-slate-200 dark:border-border-dark">
+                    <table className="w-full text-[12px] table-fixed">
+                      <thead className="bg-slate-50/70 dark:bg-background-dark/40 sticky top-0 z-10">
+                        <tr className="text-slate-600 dark:text-slate-300">
+                          <th className="text-left font-semibold px-2 py-2 w-[14%]">参数</th>
+                          <th className="text-left font-semibold px-2 py-2 w-[28%]">名称</th>
+                          <th className="text-left font-semibold px-2 py-2 w-[24%]">属性</th>
+                          <th className="text-center font-semibold px-1 py-2 w-[12%]">当前值</th>
+                          <th className="text-center font-semibold px-1 py-2 w-[12%]">基准值</th>
+                          <th className="text-left font-semibold px-2 py-2 w-[10%]">状态</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredUnifiedSchemaRows.map((row) => {
+                          const expanded = row.rowId === expandedSchemaRowId;
+                          return [
+                            <tr
+                              key={row.rowId}
+                              className="border-t border-slate-100 dark:border-border-dark/60 cursor-pointer"
+                              onClick={() =>
+                                setExpandedSchemaRowId((previous) =>
+                                  previous === row.rowId ? null : row.rowId
+                                )
+                              }
+                            >
+                              <td className="px-2 py-1.5 text-slate-800 dark:text-slate-100 whitespace-nowrap overflow-hidden text-ellipsis">
+                                {row.symbolMath ? (
+                                  <InlineMath math={row.symbolMath} />
+                                ) : (
+                                  <span className="font-mono">{row.key}</span>
+                                )}
+                              </td>
+                              <td
+                                className="px-2 py-1.5 text-slate-700 dark:text-slate-200 whitespace-nowrap overflow-hidden text-ellipsis"
+                                title={row.name}
+                              >
+                                <span className="block truncate">{row.name}</span>
+                              </td>
+                              <td
+                                className="px-2 py-1.5 text-[11px] text-slate-600 dark:text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis"
+                                title={row.traitLabel}
+                              >
+                                <span className="block truncate">{row.traitLabel}</span>
+                              </td>
+                              <td className="px-2 py-1.5 text-center font-mono text-slate-800 dark:text-slate-100">
+                                {row.currentValue}
+                              </td>
+                              <td className="px-2 py-1.5 text-center font-mono text-slate-800 dark:text-slate-100">
+                                <div className="group relative inline-flex">
+                                  <span>{row.baselineValue}</span>
+                                  <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-[180px] rounded border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark px-2 py-1 text-[11px] leading-5 text-slate-600 dark:text-slate-300 shadow-sm whitespace-pre-line group-hover:block">
+                                    {`${row.defaultPolicyText}\n建议区间：${row.range}`}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <span
+                                  className="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 whitespace-nowrap"
+                                  title={row.statusDetail}
+                                >
+                                  {row.statusLabel}
+                                </span>
+                              </td>
+                            </tr>,
+                            expanded ? (
+                              <tr
+                                key={`${row.rowId}:detail`}
+                                className="border-t border-slate-100 dark:border-border-dark/60"
+                              >
+                                <td colSpan={6} className="px-3 py-2 text-[11px] text-slate-600 dark:text-slate-300">
+                                  <div className="space-y-1">
+                                    <div>说明：{row.description}</div>
+                                    {row.relationLatex && (
+                                      <div className="flex items-center gap-1">
+                                        <span>关系：</span>
+                                        <InlineMath math={row.relationLatex} />
+                                      </div>
+                                    )}
+                                    {row.impactNote && <div>影响：{row.impactNote}</div>}
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null
+                          ];
+                        })}
+                        {filteredUnifiedSchemaRows.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">
+                              当前筛选下暂无字段定义。
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">输入</div>
-                      <div className="space-y-1">
-                        {requiredMetrics.map((metric) => (
-                          <div key={metric} className="text-[11px]">
-                            <span className="font-mono text-slate-900 dark:text-slate-100">{metric}</span>
-                            <span className="text-slate-500 dark:text-slate-400">
-                              {" "}
-                              · {METRIC_GUIDES[metric] ?? "含义待补充"}
-                            </span>
+
+                  {controlParameterItems.length > 0 && (
+                    <div className="rounded border border-slate-200 dark:border-border-dark px-2 py-2 space-y-2">
+                      <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                        控制参数
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {controlParameterItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`rounded border border-slate-200 dark:border-border-dark px-2 py-1.5 ${
+                              item.preferWide ? "lg:col-span-2" : ""
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 whitespace-nowrap">
+                              <div className="text-sm text-slate-700 dark:text-slate-200">
+                                {item.displaySymbolLatex ? (
+                                  <InlineMath math={item.displaySymbolLatex} />
+                                ) : (
+                                  <span className="font-mono">{item.key}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 min-w-0 flex-1 justify-center">
+                                <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300 truncate">
+                                  {formatCellValue(parseDraftValue(item.value))}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="px-1.5 py-1 rounded border border-slate-200 dark:border-border-dark text-[11px] text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-background-dark/60 disabled:opacity-60"
+                                  disabled={!item.editable}
+                                  onClick={() =>
+                                    setControlEditDialog({
+                                      key: item.key,
+                                      symbolLatex: item.displaySymbolLatex,
+                                      value: item.value
+                                    })
+                                  }
+                                >
+                                  值设置
+                                </button>
+                              </div>
+                              <div className="flex items-center justify-end">
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${
+                                    item.editable
+                                      ? "border-emerald-200 text-emerald-700"
+                                      : "border-slate-200 dark:border-border-dark text-slate-500 dark:text-slate-400"
+                                  }`}
+                                  title={item.statusDetail}
+                                >
+                                  {item.statusLabel}
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         ))}
-                        {requiredMetrics.length === 0 && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">暂无</div>
-                        )}
                       </div>
                     </div>
-                    <div>
-                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">输出</div>
-                      <div className="space-y-1">
-                        {outputMetrics.map((metric) => (
-                          <div key={metric} className="text-[11px]">
-                            <span className="font-mono text-slate-900 dark:text-slate-100">{metric}</span>
-                            <span className="text-slate-500 dark:text-slate-400">
-                              {" "}
-                              · {METRIC_GUIDES[metric] ?? "含义待补充"}
-                            </span>
-                          </div>
-                        ))}
-                        {outputMetrics.length === 0 && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">暂无</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
               </>
@@ -1026,181 +2342,70 @@ export function OtherValuationMethodsTab(props: OtherValuationMethodsTabProps) {
         </div>
       </div>
 
-      {structureDetailOpen && detail && (
+      {controlEditDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/35"
-            onClick={() => setStructureDetailOpen(false)}
-            aria-label="关闭结构详情"
+            onClick={() => setControlEditDialog(null)}
+            aria-label="关闭值设置"
           />
-          <div className="relative z-10 w-[min(1080px,92vw)] max-h-[86vh] rounded-lg border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark shadow-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-200 dark:border-border-dark flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-                  详情
-                </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                  {detail.method.name}
-                </div>
+          <div className="relative z-10 w-[min(420px,92vw)] rounded-lg border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark shadow-xl">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-border-dark flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                值设置
               </div>
               <button
                 type="button"
-                className="text-xs px-2.5 py-1.5 rounded border border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
-                onClick={() => setStructureDetailOpen(false)}
+                className="text-xs px-2 py-1 rounded border border-slate-200 dark:border-border-dark text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-background-dark/60"
+                onClick={() => setControlEditDialog(null)}
               >
                 关闭
               </button>
             </div>
-
-            <div className="px-4 py-3 border-b border-slate-200 dark:border-border-dark flex items-center gap-2">
-              <button
-                type="button"
-                className={`px-2.5 py-1.5 rounded border text-xs transition-colors ${
-                  structureDetailTab === "input_schema"
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
-                }`}
-                onClick={() => setStructureDetailTab("input_schema")}
-              >
-                输入定义
-              </button>
-              <button
-                type="button"
-                className={`px-2.5 py-1.5 rounded border text-xs transition-colors ${
-                  structureDetailTab === "metric_graph"
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
-                }`}
-                onClick={() => setStructureDetailTab("metric_graph")}
-              >
-                指标层级图
-              </button>
-              {!detail.method.isBuiltin && structureDetailTab === "input_schema" && (
-                <div className="ml-auto">
-                  <props.Button
-                    variant="secondary"
-                    size="sm"
-                    icon="save"
-                    onClick={() => void handleSaveInputSchema()}
-                    disabled={saving}
-                  >
-                    保存输入定义
-                  </props.Button>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(86vh-108px)]">
-              {structureDetailTab === "input_schema" && (
-                <>
-                  {(["objective", "subjective", "derived"] as const).map((kind) => {
-                    const items = groupedInputSchema[kind];
-                    if (items.length === 0) return null;
-                    return (
-                      <div key={kind} className="rounded border border-slate-200 dark:border-border-dark">
-                        <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/40">
-                          {kind === "objective" ? "客观输入" : kind === "subjective" ? "主观输入" : "派生输出"}
-                        </div>
-                        <div className="max-h-44 overflow-auto">
-                          {items.map((field) => (
-                            <div
-                              key={field.key}
-                              className="px-2 py-2 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
-                                    {field.label}
-                                  </div>
-                                  <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                                    {field.key}
-                                  </div>
-                                </div>
-                                <div className="text-[11px] text-right text-slate-500 dark:text-slate-400">
-                                  <div>unit: {field.unit}</div>
-                                  <div>editable: {field.editable ? "yes" : "no"}</div>
-                                </div>
-                              </div>
-                              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                                source: {field.objectiveSource ?? "--"} · 默认策略:{" "}
-                                {DEFAULT_POLICY_LABELS[field.defaultPolicy]}
-                              </div>
-                              {field.kind === "subjective" && (
-                                <div className="mt-1 flex items-center gap-2">
-                                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                    默认值
-                                  </span>
-                                  <input
-                                    className="ui-input w-28 rounded-md px-2 py-1 text-xs"
-                                    value={field.defaultValue ?? ""}
-                                    onChange={(event) => {
-                                      const raw = event.target.value.trim();
-                                      const next =
-                                        raw === ""
-                                          ? null
-                                          : Number.isFinite(Number(raw))
-                                            ? Number(raw)
-                                            : field.defaultValue;
-                                      setDraftInputSchema((previous) =>
-                                        previous.map((item) =>
-                                          item.key === field.key
-                                            ? { ...item, defaultValue: next }
-                                            : item
-                                        )
-                                      );
-                                    }}
-                                    disabled={detail.method.isBuiltin}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {draftInputSchema.length === 0 && (
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      当前版本未定义输入结构。
-                    </div>
-                  )}
-                </>
-              )}
-
-              {structureDetailTab === "metric_graph" && (
-                <div className="space-y-2">
-                  {GRAPH_LAYER_ORDER.map((layer) => {
-                    const nodes = graphByLayer[layer];
-                    if (nodes.length === 0) return null;
-                    return (
-                      <div key={layer} className="rounded border border-slate-200 dark:border-border-dark">
-                        <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/40">
-                          {GRAPH_LAYER_LABELS[layer]}
-                        </div>
-                        <div className="max-h-28 overflow-y-auto">
-                          {nodes.map((node) => (
-                            <div
-                              key={node.key}
-                              className="px-2 py-1.5 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0"
-                            >
-                              <div className="font-mono text-[11px] text-slate-900 dark:text-slate-100">
-                                {node.key}
-                              </div>
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                depends: {node.dependsOn.join(", ") || "--"} · unit: {node.unit}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {GRAPH_LAYER_ORDER.every((layer) => graphByLayer[layer].length === 0) && (
-                    <div className="text-xs text-slate-500 dark:text-slate-400">暂无层级节点。</div>
-                  )}
-                </div>
-              )}
+            <div className="px-4 py-3 space-y-3">
+              <div className="text-xs text-slate-600 dark:text-slate-300 inline-flex items-center gap-1">
+                {controlEditDialog.symbolLatex ? (
+                  <InlineMath math={controlEditDialog.symbolLatex} />
+                ) : (
+                  <span className="font-mono">{controlEditDialog.key}</span>
+                )}
+                <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                  ({controlEditDialog.key})
+                </span>
+              </div>
+              <input
+                className="ui-input w-full rounded-md px-2 py-1.5 text-sm font-mono"
+                value={controlEditDialog.value}
+                onChange={(event) =>
+                  setControlEditDialog((previous) =>
+                    previous ? { ...previous, value: event.target.value } : previous
+                  )
+                }
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="text-xs px-2.5 py-1.5 rounded border border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-dark/60"
+                  onClick={() => setControlEditDialog(null)}
+                >
+                  取消
+                </button>
+                <props.Button
+                  variant="primary"
+                  size="sm"
+                  icon="check"
+                  onClick={() => {
+                    setDraftParamValues((previous) => ({
+                      ...previous,
+                      [controlEditDialog.key]: controlEditDialog.value
+                    }));
+                    setControlEditDialog(null);
+                  }}
+                >
+                  确认
+                </props.Button>
+              </div>
             </div>
           </div>
         </div>

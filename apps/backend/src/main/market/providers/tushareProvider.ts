@@ -214,7 +214,7 @@ export const tushareProvider: MarketProvider = {
             start_date: startDate,
             end_date: endDate
           },
-          "ts_code,trade_date,circ_mv,total_mv,pe_ttm,pb,ps_ttm,dv_ttm,turnover_rate"
+          "ts_code,trade_date,circ_mv,total_mv,pe_ttm,pb,ps_ttm,ev_ebitda,ev_sales,dv_ttm,turnover_rate"
         );
 
         const fields = res.fields ?? [];
@@ -226,6 +226,8 @@ export const tushareProvider: MarketProvider = {
         const idxPeTtm = fields.indexOf("pe_ttm");
         const idxPb = fields.indexOf("pb");
         const idxPsTtm = fields.indexOf("ps_ttm");
+        const idxEvEbitda = fields.indexOf("ev_ebitda");
+        const idxEvSales = fields.indexOf("ev_sales");
         const idxDvTtm = fields.indexOf("dv_ttm");
         const idxTurnoverRate = fields.indexOf("turnover_rate");
         if (idxTsCode === -1 || idxTradeDate === -1) {
@@ -241,6 +243,10 @@ export const tushareProvider: MarketProvider = {
           const peTtm = idxPeTtm === -1 ? null : normalizeNumber(row[idxPeTtm]);
           const pb = idxPb === -1 ? null : normalizeNumber(row[idxPb]);
           const psTtm = idxPsTtm === -1 ? null : normalizeNumber(row[idxPsTtm]);
+          const evEbitdaTtm =
+            idxEvEbitda === -1 ? null : normalizeNumber(row[idxEvEbitda]);
+          const evSalesTtm =
+            idxEvSales === -1 ? null : normalizeNumber(row[idxEvSales]);
           const dvTtm = idxDvTtm === -1 ? null : normalizeNumber(row[idxDvTtm]);
           const turnoverRate =
             idxTurnoverRate === -1 ? null : normalizeNumber(row[idxTurnoverRate]);
@@ -253,6 +259,8 @@ export const tushareProvider: MarketProvider = {
             peTtm,
             pb,
             psTtm,
+            evEbitdaTtm,
+            evSalesTtm,
             dvTtm,
             turnoverRate
           } satisfies ProviderDailyBasic);

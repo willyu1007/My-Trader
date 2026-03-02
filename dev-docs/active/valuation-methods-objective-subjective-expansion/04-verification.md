@@ -9,6 +9,7 @@
 - `pnpm -C apps/backend typecheck` -> pass（spec 归一化/编译接入后复验）
 - `pnpm -C apps/backend verify:insights-e2e` -> pass（spec 编译接入后复验）
 - `pnpm -C apps/backend verify:insights-e2e` -> pass（graph 自动派生 + 发布一致性阻断接入后复验）
+- `pnpm -C apps/frontend typecheck` -> pass（LaTeX 公式渲染接入后复验）
 - `pnpm typecheck` -> pass
 - `pnpm build` -> pass
 - `pnpm -C apps/backend verify:insights-e2e` -> pass
@@ -20,6 +21,34 @@
     - 默认方法路由正确（`stock -> builtin.stock.pe.relative.v1`，`etf -> builtin.etf.pe.relative.v1`）
     - 旧 `previewValuationBySymbol` 与新计算接口结果兼容
     - 期货/现货/外汇/债券新增方法可被调用并产出估值结果
+- `pnpm -C apps/frontend typecheck` -> pass（EV/EBITDA 复合参数展示修正）
+- `pnpm -C apps/backend typecheck` -> pass（EV/EBITDA 真源链路切换）
+- `pnpm -C apps/backend verify:insights-e2e` -> pass（EV/EBITDA 使用 `valuation.ev_ebitda_ttm` 复验）
+  - 覆盖新增断言：
+    - objective snapshots 包含 `valuation.ev_ebitda_ttm`
+    - `builtin.stock.ev_ebitda.relative.v1` 估值按 `targetEvEbitda / ev_ebitda_ttm` 计算
+- `pnpm -C apps/frontend typecheck` -> pass（原子公式/参数表重构后）
+- `pnpm typecheck` -> fail（首次）
+  - 失败点：`apps/frontend verify:theme` 报 `color-literal`，文件 `OtherValuationMethodsTab.tsx` 中存在 `#dc2626`。
+  - 修复：将 KaTeX 高亮颜色改为 `\\textcolor{red}{...}`，移除硬编码十六进制颜色。
+- `pnpm typecheck` -> pass（修复 color literal 后复验）
+- `pnpm -C apps/frontend typecheck` -> pass（控制参数区下移 + LaTeX 化 + 参数去重/补齐后）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（控制参数简化模式：去说明、按钮式值设置、三列布局）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（控制参数状态说明 + 值设置弹窗）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（参数表去说明列 + 六列重排 + 属性短前缀）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（参数表无横向滚动：百分比列宽 + 去 min-w）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（控制参数去操作项 + 单行展示）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（参数名称/待映射状态/控制参数复合符号校准）
+- `pnpm typecheck` -> pass（全仓复验）
+- `pnpm -C apps/frontend typecheck` -> pass（波动率域分组 + 3 个波动率方法公式展示）
+- `pnpm -C apps/backend typecheck` -> pass（波动率方法 seed + 默认输入 + 计算分支）
+- `pnpm typecheck` -> pass（全仓复验）
 
 ## Manual checks
 - 待联调（桌面端）：
@@ -28,3 +57,20 @@
   - `MarketDetailWorkspace` 方法下拉按 `stock/etf` 自动过滤是否符合预期
   - `OtherValuationMethodsTab` 中新增域方法（期货/现货/外汇/债券）展示是否完整
   - 客观参数质量统计（fresh/stale/fallback/missing）展示准确性
+- 本轮定向验收（代码级）：
+  - `stock_ev_ebitda_relative_v1`：
+    - 控制参数符号渲染逻辑已改为复合展示（`EV^* / EBITDA^*`）。
+    - 参数名称来源改为符号语义优先，避免 `EV^*` 与 `EBITDA^*` 同名。
+  - `stock_ev_sales_relative_v1`：
+    - 控制参数符号渲染逻辑支持复合展示（`EV^* / Sales^*`）。
+  - `stock_ddm_gordon_v1`：
+    - 参数表仍保留符号级去重路径，`d_y` 仅保留一条。
+  - 缺失映射场景：
+    - 公式补齐行状态已从“说明项”改为“待映射”，并附加映射缺口说明文案。
+- 波动率方法验收点（代码级）：
+  - 方法列表新增：
+    - `builtin.volatility.discount.v1`
+    - `builtin.volatility.risk.premium.v1`
+    - `builtin.volatility.percentile.band.v1`
+  - 估值方法分组新增“波动率”一级分类，位置在“通用”左侧。
+  - 三个新公式在 `FORMULA_GUIDES` 中有对应 LaTeX 展示与符号映射。

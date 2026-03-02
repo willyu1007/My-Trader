@@ -2,7 +2,7 @@ import { all, exec, execVolatile, get, run, transaction } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 13;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await execVolatile(db, "pragma foreign_keys = on;");
@@ -977,6 +977,26 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
       );
     }
 
+    if (currentVersion < 12) {
+      currentVersion = 12;
+      await seedBuiltinValuationMethods(db);
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
+    if (currentVersion < 13) {
+      currentVersion = 13;
+      await seedBuiltinValuationMethods(db);
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
     if (currentVersion >= 3) {
       const baselineRow = await get<{ value: string }>(
         db,
@@ -1124,7 +1144,7 @@ const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
     },
     formulaId: "stock_ev_ebitda_relative_v1",
     metricSchema: {
-      required: ["market.price", "valuation.pe_ttm"],
+      required: ["market.price", "valuation.ev_ebitda_ttm"],
       outputs: ["output.fair_value", "output.return_gap"]
     },
     paramSchema: {
@@ -1340,6 +1360,69 @@ const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
     paramSchema: {
       expectedBasisPct: 0.01,
       rollYieldPct: 0.005
+    }
+  },
+  {
+    id: "builtin.volatility.discount",
+    methodKey: "builtin.volatility.discount.v1",
+    name: "波动率折价估值",
+    description: "以实现波动率作为风险折价项，修正当前价格。",
+    assetScope: {
+      kinds: ["stock", "fund", "index", "futures", "spot", "forex"],
+      assetClasses: ["stock", "etf", "futures", "spot"],
+      markets: ["CN", "HK", "US", "FX"],
+      domains: ["volatility"]
+    },
+    formulaId: "volatility_discount_v1",
+    metricSchema: {
+      required: ["market.price", "risk.volatility.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      volatilityDiscountWeight: 0.6
+    }
+  },
+  {
+    id: "builtin.volatility.risk.premium",
+    methodKey: "builtin.volatility.risk.premium.v1",
+    name: "波动率风险溢价估值",
+    description: "基于隐含与实现波动率差值，映射风险溢价到估值修正。",
+    assetScope: {
+      kinds: ["stock", "fund", "index", "futures", "spot", "forex"],
+      assetClasses: ["stock", "etf", "futures", "spot"],
+      markets: ["CN", "HK", "US", "FX"],
+      domains: ["volatility"]
+    },
+    formulaId: "volatility_risk_premium_v1",
+    metricSchema: {
+      required: ["market.price", "risk.volatility.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      impliedVolatility: 0.28,
+      vrpBeta: 0.8
+    }
+  },
+  {
+    id: "builtin.volatility.percentile.band",
+    methodKey: "builtin.volatility.percentile.band.v1",
+    name: "波动率分位区间估值",
+    description: "基于波动率分位偏离锚点生成风险调整估值。",
+    assetScope: {
+      kinds: ["stock", "fund", "index", "futures", "spot", "forex"],
+      assetClasses: ["stock", "etf", "futures", "spot"],
+      markets: ["CN", "HK", "US", "FX"],
+      domains: ["volatility"]
+    },
+    formulaId: "volatility_percentile_band_v1",
+    metricSchema: {
+      required: ["market.price", "risk.volatility.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      volatilityPercentile: 0.5,
+      percentileAnchor: 0.5,
+      percentileSensitivity: 0.4
     }
   },
   {
@@ -1762,6 +1845,17 @@ function buildDefaultInputSchema(
     defaultValue: null,
     description: "来自基础面表。"
   };
+  const objectiveEvEbitda = {
+    key: "valuation.ev_ebitda_ttm",
+    label: "EV/EBITDA(TTM)",
+    kind: "objective",
+    unit: "number",
+    editable: false,
+    objectiveSource: "market.daily_basics.ev_ebitda_ttm",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "来自基础面表。"
+  };
   const objectiveDv = {
     key: "valuation.dv_ttm",
     label: "股息率(TTM)",
@@ -1891,7 +1985,7 @@ function buildDefaultInputSchema(
     case "stock_ev_ebitda_relative_v1":
       return [
         ...common,
-        { ...objectivePe, displayOrder: 10 },
+        { ...objectiveEvEbitda, displayOrder: 10 },
         {
           key: "targetEvEbitda",
           label: "目标EV/EBITDA",
@@ -2113,6 +2207,93 @@ function buildDefaultInputSchema(
           defaultValue: 0.005,
           displayOrder: 21,
           description: "期限结构带来的展期收益。"
+        }
+      ];
+    case "volatility_discount_v1":
+      return [
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "volatilityDiscountWeight",
+          label: "波动率折价系数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.6,
+          displayOrder: 20,
+          description: "将实现波动率映射到价格折价比例。"
+        }
+      ];
+    case "volatility_risk_premium_v1":
+      return [
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "impliedVolatility",
+          label: "隐含波动率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.28,
+          displayOrder: 20,
+          description: "可来自期权隐含波动率或研究输入。"
+        },
+        {
+          key: "vrpBeta",
+          label: "风险溢价系数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.8,
+          displayOrder: 21,
+          description: "隐含与实现波动率差值对价格影响的传导系数。"
+        }
+      ];
+    case "volatility_percentile_band_v1":
+      return [
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "volatilityPercentile",
+          label: "波动率分位数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.5,
+          displayOrder: 20,
+          description: "当前波动率在历史样本中的分位位置（0-1）。"
+        },
+        {
+          key: "percentileAnchor",
+          label: "分位锚点",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "constant",
+          defaultValue: 0.5,
+          displayOrder: 21,
+          description: "分位估值的中性锚点。"
+        },
+        {
+          key: "percentileSensitivity",
+          label: "分位敏感度",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.4,
+          displayOrder: 22,
+          description: "分位偏离锚点后的估值调整强度。"
         }
       ];
     case "spot_carry_v1":

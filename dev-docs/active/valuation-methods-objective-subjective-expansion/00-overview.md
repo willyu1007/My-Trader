@@ -17,4 +17,4 @@
 implemented
 
 ## Current focus
-- 回归与验收记录归档（typecheck/build/e2e + UI 手工验收待联调）。
+- 原子公式规范落地后的 UI 联调验收（参数表原子展示、控制参数区、公式高亮与展开说明）。

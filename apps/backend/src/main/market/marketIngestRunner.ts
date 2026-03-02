@@ -807,6 +807,8 @@ async function ingestTargetsRange(
             peTtm: row.peTtm,
             pb: row.pb,
             psTtm: row.psTtm,
+            evEbitdaTtm: row.evEbitdaTtm,
+            evSalesTtm: row.evSalesTtm,
             dvTtm: row.dvTtm,
             turnoverRate: row.turnoverRate,
             source: "tushare"
@@ -2281,7 +2283,7 @@ async function ingestDailyBasicWave2(input: {
         "daily_basic",
         input.token,
         { ts_code: symbol, trade_date: tradeDateRaw },
-        "ts_code,trade_date,circ_mv,total_mv,pe_ttm,pb,ps_ttm,dv_ttm,turnover_rate"
+        "ts_code,trade_date,circ_mv,total_mv,pe_ttm,pb,ps_ttm,ev_ebitda,ev_sales,dv_ttm,turnover_rate"
       );
       const rows = mapDailyBasicRows(res, new Set([symbol]), "tushare", now);
       basicRows.push(...rows);
@@ -2306,6 +2308,8 @@ async function ingestDailyBasicWave2(input: {
         "pe_ttm",
         "pb",
         "ps_ttm",
+        "ev_ebitda_ttm",
+        "ev_sales_ttm",
         "dv_ttm",
         "turnover_rate",
         "source",
@@ -2866,6 +2870,8 @@ async function ingestUniverseTradeDate(
       "pe_ttm",
       "pb",
       "ps_ttm",
+      "ev_ebitda_ttm",
+      "ev_sales_ttm",
       "dv_ttm",
       "turnover_rate",
       "source",
@@ -3177,6 +3183,8 @@ function mapDailyBasicRows(
     number | null,
     number | null,
     number | null,
+    number | null,
+    number | null,
     string,
     number
   ]
@@ -3190,6 +3198,8 @@ function mapDailyBasicRows(
   const idxPeTtm = fields.indexOf("pe_ttm");
   const idxPb = fields.indexOf("pb");
   const idxPsTtm = fields.indexOf("ps_ttm");
+  const idxEvEbitda = fields.indexOf("ev_ebitda");
+  const idxEvSales = fields.indexOf("ev_sales");
   const idxDvTtm = fields.indexOf("dv_ttm");
   const idxTurnoverRate = fields.indexOf("turnover_rate");
   if (idxSymbol === -1 || idxDate === -1) return [];
@@ -3198,6 +3208,8 @@ function mapDailyBasicRows(
     [
       string,
       string,
+      number | null,
+      number | null,
       number | null,
       number | null,
       number | null,
@@ -3222,6 +3234,8 @@ function mapDailyBasicRows(
       idxPeTtm === -1 ? null : normalizeNumber(row[idxPeTtm]),
       idxPb === -1 ? null : normalizeNumber(row[idxPb]),
       idxPsTtm === -1 ? null : normalizeNumber(row[idxPsTtm]),
+      idxEvEbitda === -1 ? null : normalizeNumber(row[idxEvEbitda]),
+      idxEvSales === -1 ? null : normalizeNumber(row[idxEvSales]),
       idxDvTtm === -1 ? null : normalizeNumber(row[idxDvTtm]),
       idxTurnoverRate === -1 ? null : normalizeNumber(row[idxTurnoverRate]),
       source,

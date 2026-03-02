@@ -254,6 +254,8 @@ export async function ensureAnalysisDuckdbSchema(
         pe_ttm double,
         pb double,
         ps_ttm double,
+        ev_ebitda_ttm double,
+        ev_sales_ttm double,
         dv_ttm double,
         turnover_rate double,
         source varchar not null,
@@ -265,6 +267,8 @@ export async function ensureAnalysisDuckdbSchema(
       "alter table daily_basics add column if not exists pe_ttm double;",
       "alter table daily_basics add column if not exists pb double;",
       "alter table daily_basics add column if not exists ps_ttm double;",
+      "alter table daily_basics add column if not exists ev_ebitda_ttm double;",
+      "alter table daily_basics add column if not exists ev_sales_ttm double;",
       "alter table daily_basics add column if not exists dv_ttm double;",
       "alter table daily_basics add column if not exists turnover_rate double;"
     ];

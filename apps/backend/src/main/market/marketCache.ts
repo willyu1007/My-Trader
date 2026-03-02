@@ -205,6 +205,8 @@ async function ensureMarketCacheSchemaInTransaction(
         pe_ttm real,
         pb real,
         ps_ttm real,
+        ev_ebitda_ttm real,
+        ev_sales_ttm real,
         dv_ttm real,
         turnover_rate real,
         source text not null,
@@ -217,6 +219,8 @@ async function ensureMarketCacheSchemaInTransaction(
   await ensureColumn(db, "daily_basics", "pe_ttm", "real");
   await ensureColumn(db, "daily_basics", "pb", "real");
   await ensureColumn(db, "daily_basics", "ps_ttm", "real");
+  await ensureColumn(db, "daily_basics", "ev_ebitda_ttm", "real");
+  await ensureColumn(db, "daily_basics", "ev_sales_ttm", "real");
   await ensureColumn(db, "daily_basics", "dv_ttm", "real");
   await ensureColumn(db, "daily_basics", "turnover_rate", "real");
 

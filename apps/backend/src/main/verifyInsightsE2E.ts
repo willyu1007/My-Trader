@@ -175,9 +175,9 @@ async function seedMarketData(marketDbPath: string, businessDbPath: string): Pro
       marketDb,
       `
         insert into daily_basics (
-          symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
+          symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, ev_ebitda_ttm, ev_sales_ttm, dv_ttm, turnover_rate, source, ingested_at
         )
-        values ('600519.SH', '2026-01-06', 2000000, 3000000, 22, 4.4, 6.6, 0.03, 1.5, 'verify', ?)
+        values ('600519.SH', '2026-01-06', 2000000, 3000000, 22, 4.4, 6.6, 11, 4.2, 0.03, 1.5, 'verify', ?)
       `,
       [now]
     );
@@ -185,9 +185,9 @@ async function seedMarketData(marketDbPath: string, businessDbPath: string): Pro
       marketDb,
       `
         insert into daily_basics (
-          symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
+          symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, ev_ebitda_ttm, ev_sales_ttm, dv_ttm, turnover_rate, source, ingested_at
         )
-        values ('510300.SH', '2026-01-06', 5000000, 5200000, 16, 1.8, 2.4, 0.018, 2.2, 'verify', ?)
+        values ('510300.SH', '2026-01-06', 5000000, 5200000, 16, 1.8, 2.4, 13, 3.1, 0.018, 2.2, 'verify', ?)
       `,
       [now]
     );
@@ -280,6 +280,10 @@ async function runSmokeE2E(): Promise<void> {
       objectiveSnapshots.some((item) => item.metricKey === "valuation.pe_ttm"),
       "objective snapshots should include pe_ttm"
     );
+    assert(
+      objectiveSnapshots.some((item) => item.metricKey === "valuation.ev_ebitda_ttm"),
+      "objective snapshots should include ev_ebitda_ttm"
+    );
 
     await upsertValuationSubjectiveDefault(businessDb, {
       methodKey: "builtin.stock.pe.relative.v1",
@@ -309,6 +313,24 @@ async function runSmokeE2E(): Promise<void> {
     assert(
       stockPeWithDefault.confidence === "high",
       `stock PE with fresh inputs should be high confidence, got ${stockPeWithDefault.confidence}`
+    );
+
+    await upsertValuationSubjectiveDefault(businessDb, {
+      methodKey: "builtin.stock.ev_ebitda.relative.v1",
+      inputKey: "targetEvEbitda",
+      market: "CN",
+      value: 13,
+      source: "verify-default"
+    });
+    const stockEvEbitdaPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.stock.ev_ebitda.relative.v1"
+    });
+    assert(!stockEvEbitdaPreview.notApplicable, "stock EV/EBITDA compute should be applicable");
+    assert(
+      approxEqual(stockEvEbitdaPreview.baseValue ?? 0, 130, 1e-6),
+      `stock EV/EBITDA base value should follow target/ev_ebitda_ttm ratio, got ${stockEvEbitdaPreview.baseValue}`
     );
 
     await upsertValuationSubjectiveOverride(businessDb, {

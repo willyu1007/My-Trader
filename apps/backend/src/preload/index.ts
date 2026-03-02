@@ -92,6 +92,14 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_GET_DAILY_BARS, input),
     seedDemoData: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_SEED_DEMO_DATA, input ?? null),
+    listTestDataScenarios: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_DATA_SCENARIOS_LIST),
+    getTestDataStatus: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_DATA_STATUS_GET),
+    injectTestData: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_DATA_INJECT, input),
+    cleanupTestData: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_DATA_CLEANUP, input ?? null),
     getTokenStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_GET_STATUS),
     setToken: (input) => ipcRenderer.invoke(IPC_CHANNELS.MARKET_TOKEN_SET, input),
     testToken: (input) =>

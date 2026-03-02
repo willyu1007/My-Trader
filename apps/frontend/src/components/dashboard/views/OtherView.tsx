@@ -253,16 +253,7 @@ export function OtherView(props: OtherViewProps) {
   } satisfies OtherDataStatusTabProps;
   const testTabProps = {
     Button: props.Button,
-    FormGroup: props.FormGroup,
-    Input: props.Input,
     activePortfolio: props.activePortfolio,
-    handleChooseCsv: props.handleChooseCsv,
-    handleImportHoldings: props.handleImportHoldings,
-    handleImportPrices: props.handleImportPrices,
-    handleSeedMarketDemoData: props.handleSeedMarketDemoData,
-    holdingsCsvPath: props.holdingsCsvPath,
-    marketDemoSeeding: props.marketDemoSeeding,
-    pricesCsvPath: props.pricesCsvPath,
     setActiveView: props.setActiveView
   } satisfies OtherTestTabProps;
   const valuationMethodsTabProps = {
@@ -273,8 +264,10 @@ export function OtherView(props: OtherViewProps) {
   return (
     <Panel>
       <div
-        className={`space-y-6 w-full max-w-none ${
-          otherTab === "data-management" ? "pt-2" : "pt-6"
+        className={`w-full max-w-none ${
+          otherTab === "test"
+            ? "h-full min-h-0 pt-2"
+            : `space-y-6 ${otherTab === "data-management" ? "pt-2" : "pt-6"}`
         }`}
       >
         {otherTab === "data-management" &&
