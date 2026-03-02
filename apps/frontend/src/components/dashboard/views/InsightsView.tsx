@@ -44,6 +44,7 @@ const STAGE_OPTIONS: InsightEffectStage[] = [
   "risk"
 ];
 const OPERATOR_OPTIONS: InsightEffectOperator[] = ["set", "add", "mul", "min", "max"];
+const NEWS_SOURCE_OPTIONS = ["all", "policy", "company", "macro"] as const;
 const INSIGHT_BUILTIN_TAG_OPTIONS = [
   "政策",
   "宏观",
@@ -245,7 +246,9 @@ export function InsightsView(props: InsightsViewProps) {
   const [selectedFactIds, setSelectedFactIds] = useState<string[]>([]);
   const [generationFactInput, setGenerationFactInput] = useState("");
   const [generationNewsQuery, setGenerationNewsQuery] = useState("");
-  const [generationNewsSource, setGenerationNewsSource] = useState("all");
+  const [generationNewsSource, setGenerationNewsSource] = useState<(typeof NEWS_SOURCE_OPTIONS)[number]>("all");
+  const [generationNewsSourceOpen, setGenerationNewsSourceOpen] = useState(false);
+  const generationNewsSourceRef = useRef<HTMLDivElement | null>(null);
 
   const [createTitle, setCreateTitle] = useState("");
   const [createThesis, setCreateThesis] = useState("");
@@ -256,6 +259,8 @@ export function InsightsView(props: InsightsViewProps) {
   const [createValidTo, setCreateValidTo] = useState(
     () => getDefaultInsightValidityWindow().validTo
   );
+  const [createStatusOpen, setCreateStatusOpen] = useState(false);
+  const createStatusRef = useRef<HTMLDivElement | null>(null);
   const [createTags, setCreateTags] = useState<string[]>([]);
   const [createTagsOpen, setCreateTagsOpen] = useState(false);
   const createTagsRef = useRef<HTMLDivElement | null>(null);
@@ -319,6 +324,12 @@ export function InsightsView(props: InsightsViewProps) {
     if (createTags.length <= 2) return `标签：${createTags.join(" / ")}`;
     return `标签：已选 ${createTags.length} 项`;
   }, [createTags]);
+
+  const createStatusButtonLabel = useMemo(() => `状态: ${createStatus}`, [createStatus]);
+  const generationNewsSourceButtonLabel = useMemo(
+    () => `搜索范围：${generationNewsSource}`,
+    [generationNewsSource]
+  );
 
   const syncEditorFromDetail = useCallback((nextDetail: InsightDetail | null) => {
     if (!nextDetail) {
@@ -494,15 +505,21 @@ export function InsightsView(props: InsightsViewProps) {
   }, [notice]);
 
   useEffect(() => {
-    if (!createTagsOpen) return;
+    if (!createTagsOpen && !createStatusOpen && !generationNewsSourceOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
+      if (generationNewsSourceRef.current?.contains(target)) return;
+      if (createStatusRef.current?.contains(target)) return;
       if (createTagsRef.current?.contains(target)) return;
+      setGenerationNewsSourceOpen(false);
+      setCreateStatusOpen(false);
       setCreateTagsOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        setGenerationNewsSourceOpen(false);
+        setCreateStatusOpen(false);
         setCreateTagsOpen(false);
       }
     };
@@ -512,7 +529,7 @@ export function InsightsView(props: InsightsViewProps) {
       document.removeEventListener("mousedown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [createTagsOpen]);
+  }, [createStatusOpen, createTagsOpen, generationNewsSourceOpen]);
 
   useEffect(() => {
     if (!api || insights.length === 0) {
@@ -687,6 +704,18 @@ export function InsightsView(props: InsightsViewProps) {
     setCreateTags([]);
   }, []);
 
+  const handleResetCreateDraft = useCallback(() => {
+    const defaultValidity = getDefaultInsightValidityWindow();
+    setCreateTitle("");
+    setCreateThesis("");
+    setCreateStatus("draft");
+    setCreateValidFrom(defaultValidity.validFrom);
+    setCreateValidTo(defaultValidity.validTo);
+    setCreateTags([]);
+    setCreateStatusOpen(false);
+    setCreateTagsOpen(false);
+  }, []);
+
   const handleCreateInsight = useCallback(async () => {
     if (!api) return;
     if (!createTitle.trim()) {
@@ -713,14 +742,7 @@ export function InsightsView(props: InsightsViewProps) {
         validTo: createValidTo || null,
         tags: createTags
       });
-      setCreateTitle("");
-      setCreateThesis("");
-      setCreateStatus("draft");
-      const defaultValidity = getDefaultInsightValidityWindow();
-      setCreateValidFrom(defaultValidity.validFrom);
-      setCreateValidTo(defaultValidity.validTo);
-      setCreateTags([]);
-      setCreateTagsOpen(false);
+      handleResetCreateDraft();
       setNotice(`观点已创建：${created.title}`);
       await loadInsights(created.id);
       await loadInsightDetail(created.id);
@@ -737,6 +759,7 @@ export function InsightsView(props: InsightsViewProps) {
     createTitle,
     createValidFrom,
     createValidTo,
+    handleResetCreateDraft,
     loadInsightDetail,
     loadInsights
   ]);
@@ -1056,52 +1079,199 @@ export function InsightsView(props: InsightsViewProps) {
         )}
 
         {props.insightsTab === "generate" && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 xl:grid-cols-[38%_62%] gap-3">
-              <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/70 overflow-hidden">
+          <div className="grid grid-cols-1 md:grid-cols-[5fr_3fr] gap-3">
+            <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/70 h-[760px] min-h-0 flex flex-col overflow-hidden">
+              <div className="px-3 py-2 border-b border-slate-200 dark:border-border-dark flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-medium text-slate-800 dark:text-slate-100">事实列表</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">共 {facts.length} 条</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    已选 {selectedFactIds.length} 条
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <props.Button
+                    variant="danger"
+                    size="sm"
+                    icon="delete"
+                    onClick={() => void handleRemoveSelectedFacts()}
+                    disabled={saving || selectedFactIds.length === 0}
+                  >
+                    删除选中
+                  </props.Button>
+                  <props.Button
+                    variant="primary"
+                    size="sm"
+                    icon="auto_awesome"
+                    onClick={handleGenerateDraftFromFacts}
+                    disabled={saving || facts.length === 0}
+                  >
+                    生成观点草稿
+                  </props.Button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto">
+                <table className="w-full text-xs table-fixed">
+                  <thead className="sticky top-0 bg-slate-50 dark:bg-background-dark/80">
+                    <tr className="border-b border-slate-200 dark:border-border-dark">
+                      <th className="px-2 py-2 text-center w-[8%]">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-sky-600"
+                          checked={allFactsSelected}
+                          onChange={(event) => handleToggleAllFactsSelection(event.target.checked)}
+                          disabled={facts.length === 0 || saving}
+                          aria-label="全选事实"
+                        />
+                      </th>
+                      <th className="px-2 py-2 text-left font-medium text-slate-600 dark:text-slate-300 w-[56%]">
+                        事实内容
+                      </th>
+                      <th className="px-2 py-2 text-left font-medium text-slate-600 dark:text-slate-300 w-[24%]">
+                        创建时间
+                      </th>
+                      <th className="px-2 py-2 text-right font-medium text-slate-600 dark:text-slate-300 w-[12%]">
+                        操作
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {factsLoading && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-3 text-slate-500 dark:text-slate-400">
+                          加载事实中...
+                        </td>
+                      </tr>
+                    )}
+                    {!factsLoading &&
+                      facts.map((fact) => (
+                        <tr
+                          key={fact.id}
+                          className="border-b border-slate-100 dark:border-border-dark/60"
+                        >
+                          <td className="px-2 py-2 align-top text-center">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 accent-sky-600"
+                              checked={selectedFactIdSet.has(fact.id)}
+                              onChange={(event) =>
+                                handleToggleFactSelection(fact.id, event.target.checked)
+                              }
+                              disabled={saving}
+                              aria-label={`选择事实 ${fact.id}`}
+                            />
+                          </td>
+                          <td className="px-2 py-2 align-top text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words">
+                            {fact.content}
+                          </td>
+                          <td className="px-2 py-2 align-top text-slate-500 dark:text-slate-400">
+                            {props.formatDateTime(fact.createdAt)}
+                          </td>
+                          <td className="px-2 py-2 align-top text-right">
+                            <props.Button
+                              variant="danger"
+                              size="sm"
+                              icon="delete"
+                              onClick={() => void handleRemoveFact(fact.id)}
+                              disabled={saving}
+                            >
+                              删除
+                            </props.Button>
+                          </td>
+                        </tr>
+                      ))}
+                    {!factsLoading && facts.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-3 text-slate-500 dark:text-slate-400">
+                          暂无事实，请先新增。
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div className="h-[760px] min-h-0 grid grid-rows-[1fr_1fr] gap-3">
+              <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/70 min-h-0 flex flex-col overflow-hidden">
                 <div className="px-3 py-2 border-b border-slate-200 dark:border-border-dark flex items-center justify-between gap-2">
                   <div className="text-sm font-medium text-slate-800 dark:text-slate-100">事实录入</div>
+                  <props.Button
+                    variant="primary"
+                    size="sm"
+                    icon="add"
+                    className="h-6 min-w-[64px] justify-center !px-2 !py-1 text-[12px]"
+                    onClick={() => void handleCreateFact()}
+                    disabled={saving || !generationFactInput.trim()}
+                  >
+                    添加
+                  </props.Button>
                 </div>
-                <div className="px-3 py-3 space-y-3">
-                  <div className="space-y-2 pb-3 border-b border-slate-200 dark:border-border-dark">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                        事实输入
-                      </div>
-                      <props.Button
-                        variant="secondary"
-                        size="sm"
-                        icon="add"
-                        onClick={() => void handleCreateFact()}
-                        disabled={saving || !generationFactInput.trim()}
-                      >
-                        新增事实
-                      </props.Button>
-                    </div>
-                    <textarea
-                      className="ui-input w-full rounded-md px-2 py-1.5 text-sm min-h-[132px] resize-none"
-                      placeholder="输入一条事实，例如：央行降准 50bp、公司发布回购计划。"
-                      value={generationFactInput}
-                      onChange={(event) => setGenerationFactInput(event.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2 pt-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                <div className="px-3 py-2 flex-1 min-h-0 overflow-auto space-y-2">
+                  <textarea
+                    className="ui-input w-full rounded-md px-2 py-1.5 text-sm h-[112px] resize-none"
+                    placeholder="输入一条事实，例如：央行降准 50bp、公司发布回购计划。"
+                    value={generationFactInput}
+                    onChange={(event) => setGenerationFactInput(event.target.value)}
+                  />
+                  <div className="border-t border-slate-200 dark:border-border-dark pt-2 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
                         资讯搜索
                       </div>
-                      <props.Button
-                        variant="secondary"
-                        size="sm"
-                        icon="search"
-                        onClick={handleReservedNewsSearch}
-                        disabled={saving}
-                      >
-                        搜索
-                      </props.Button>
+                      <div className="ml-auto flex items-center gap-2">
+                        <div ref={generationNewsSourceRef} className="relative">
+                          <button
+                            type="button"
+                            className="relative h-7 min-w-[132px] rounded px-2 text-left text-xs text-slate-500 dark:text-slate-300 bg-slate-100/70 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            onClick={() => setGenerationNewsSourceOpen((current) => !current)}
+                            disabled={saving}
+                          >
+                            <span className="block truncate pr-6">{generationNewsSourceButtonLabel}</span>
+                            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400">
+                              expand_more
+                            </span>
+                          </button>
+                          {generationNewsSourceOpen && (
+                            <div className="absolute right-0 top-full mt-1 z-50 w-[132px]">
+                              <div className="ui-popover-menu rounded-md border p-1.5 space-y-1">
+                                {NEWS_SOURCE_OPTIONS.map((source) => {
+                                  const selected = generationNewsSource === source;
+                                  return (
+                                    <button
+                                      key={source}
+                                      type="button"
+                                      className={`w-full text-left rounded px-2 py-1 text-xs transition-colors ${
+                                        selected
+                                          ? "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300"
+                                          : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                      }`}
+                                      onClick={() => {
+                                        setGenerationNewsSource(source);
+                                        setGenerationNewsSourceOpen(false);
+                                      }}
+                                    >
+                                      {source}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <props.Button
+                          variant="secondary"
+                          size="sm"
+                          icon="search"
+                          className="h-6 min-w-[64px] justify-center !px-2 !py-1 text-[12px] font-normal !bg-transparent !border-transparent !shadow-none text-slate-500 dark:text-slate-300 hover:!bg-slate-100/80 dark:hover:!bg-slate-800/70 hover:!border-slate-200 dark:hover:!border-slate-700"
+                          onClick={handleReservedNewsSearch}
+                          disabled={saving}
+                        >
+                          搜索
+                        </props.Button>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-[1fr,140px] gap-2">
+                    <div className="grid grid-cols-1 gap-2">
                       <input
                         className="ui-input rounded-md px-2 py-1.5 text-sm"
                         placeholder="资讯关键词"
@@ -1113,278 +1283,195 @@ export function InsightsView(props: InsightsViewProps) {
                           }
                         }}
                       />
-                      <select
-                        className="ui-select rounded-md px-2 py-1.5 text-sm"
-                        value={generationNewsSource}
-                        onChange={(event) => setGenerationNewsSource(event.target.value)}
-                      >
-                        <option value="all">all</option>
-                        <option value="policy">policy</option>
-                        <option value="company">company</option>
-                        <option value="macro">macro</option>
-                      </select>
                     </div>
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    当前版本仅预留资讯搜索调用位，未接入外部数据源。
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      当前版本仅预留资讯搜索调用位，未接入外部数据源。
+                    </div>
                   </div>
                 </div>
               </section>
 
-              <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/70 overflow-hidden">
-                <div className="px-3 py-2 border-b border-slate-200 dark:border-border-dark flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="font-medium text-slate-800 dark:text-slate-100">事实列表</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">共 {facts.length} 条</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      已选 {selectedFactIds.length} 条
-                    </span>
+              <section className="rounded-md border border-slate-200 dark:border-border-dark bg-white/70 dark:bg-panel-dark/70 min-h-0 flex flex-col">
+                <div className="px-2 py-1 border-b border-slate-200 dark:border-border-dark">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-slate-800 dark:text-slate-100">观点草稿</div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <props.Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-6 min-w-[64px] justify-center !px-2 !py-1 text-[12px] font-normal !bg-transparent !border-transparent !shadow-none text-slate-500 dark:text-slate-300 hover:!bg-slate-100/80 dark:hover:!bg-slate-800/70 hover:!border-slate-200 dark:hover:!border-slate-700"
+                        onClick={() => props.setInsightsTab("manage")}
+                        disabled={saving}
+                      >
+                        管理
+                      </props.Button>
+                      <props.Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-6 min-w-[64px] justify-center !px-2 !py-1 text-[12px] font-normal !bg-transparent !border-transparent !shadow-none text-slate-500 dark:text-slate-300 hover:!bg-slate-100/80 dark:hover:!bg-slate-800/70 hover:!border-slate-200 dark:hover:!border-slate-700"
+                        onClick={handleResetCreateDraft}
+                        disabled={saving}
+                      >
+                        重置
+                      </props.Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <props.Button
-                      variant="danger"
-                      size="sm"
-                      icon="delete"
-                      onClick={() => void handleRemoveSelectedFacts()}
-                      disabled={saving || selectedFactIds.length === 0}
-                    >
-                      删除选中
-                    </props.Button>
+                </div>
+                <div className="px-2 py-2 flex-1 min-h-0 flex flex-col space-y-2">
+                  <div className="grid grid-cols-1 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                      <div ref={createStatusRef} className="relative sm:col-span-2">
+                        <button
+                          type="button"
+                          className="relative h-8 w-full rounded-md border border-slate-200 dark:border-border-dark bg-transparent px-2 text-left text-xs text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          onClick={() => {
+                            setCreateStatusOpen((current) => !current);
+                            setCreateTagsOpen(false);
+                          }}
+                          disabled={saving}
+                        >
+                          <span className="block truncate pr-6">{createStatusButtonLabel}</span>
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400">
+                            expand_more
+                          </span>
+                        </button>
+                        {createStatusOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-50">
+                            <div className="ui-popover-menu rounded-md border p-1.5 space-y-1">
+                              {STATUS_OPTIONS.map((status) => {
+                                const selected = createStatus === status;
+                                return (
+                                  <button
+                                    key={status}
+                                    type="button"
+                                    className={`w-full text-left rounded px-2 py-1 text-xs transition-colors ${
+                                      selected
+                                        ? "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300"
+                                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    }`}
+                                    onClick={() => {
+                                      setCreateStatus(status);
+                                      setCreateStatusOpen(false);
+                                    }}
+                                  >
+                                    {status}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div ref={createTagsRef} className="relative sm:col-span-3">
+                        <button
+                          type="button"
+                          className="relative h-8 w-full rounded-md border border-slate-200 dark:border-border-dark bg-transparent px-2 text-left text-xs text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          onClick={() => {
+                            setCreateTagsOpen((current) => !current);
+                            setCreateStatusOpen(false);
+                          }}
+                          disabled={saving}
+                        >
+                          <span className="block truncate pr-6">{createTagButtonLabel}</span>
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400">
+                            expand_more
+                          </span>
+                        </button>
+                        {createTagsOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-50">
+                            <div className="ui-popover-menu max-h-64 overflow-auto rounded-md border p-2 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  className="text-xs text-primary hover:underline"
+                                  onClick={handleSelectAllCreateTags}
+                                >
+                                  全选
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-xs text-slate-500 hover:underline"
+                                  onClick={handleClearCreateTags}
+                                >
+                                  清空
+                                </button>
+                              </div>
+                              <div className="space-y-1">
+                                {INSIGHT_BUILTIN_TAG_OPTIONS.map((tag) => {
+                                  const selected = createTags.includes(tag);
+                                  return (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      className={`w-full text-left rounded px-2 py-1 text-xs transition-colors ${
+                                        selected
+                                          ? "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300"
+                                          : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                                      }`}
+                                      onClick={() => handleToggleCreateTag(tag)}
+                                    >
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <span
+                                          className={`h-3 w-3 rounded-sm border ${
+                                            selected
+                                              ? "bg-sky-500 border-sky-500"
+                                              : "border-slate-300 dark:border-slate-600"
+                                          }`}
+                                        />
+                                        {tag}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <input
+                      className="ui-input rounded-md px-2 py-1.5 text-sm"
+                      placeholder="观点标题"
+                      value={createTitle}
+                      onChange={(event) => setCreateTitle(event.target.value)}
+                    />
+                  </div>
+                  <textarea
+                    className="ui-input w-full rounded-md px-2 py-1.5 text-sm h-[144px] min-h-[144px] resize-none"
+                    placeholder="观点论述（草稿生成后可继续编辑）"
+                    value={createThesis}
+                    onChange={(event) => setCreateThesis(event.target.value)}
+                  />
+                  <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                    <div className="min-w-0 flex items-center gap-1.5 whitespace-nowrap">
+                      <span className="text-xs text-slate-500 dark:text-slate-300">有效期</span>
+                      <input
+                        type="date"
+                        className="ui-input h-8 w-[108px] rounded-md px-2 py-1 text-xs"
+                        value={createValidFrom}
+                        onChange={(event) => setCreateValidFrom(event.target.value)}
+                      />
+                      <span className="text-xs text-slate-400">至</span>
+                      <input
+                        type="date"
+                        className="ui-input h-8 w-[108px] rounded-md px-2 py-1 text-xs"
+                        value={createValidTo}
+                        onChange={(event) => setCreateValidTo(event.target.value)}
+                      />
+                    </div>
                     <props.Button
                       variant="primary"
                       size="sm"
-                      icon="auto_awesome"
-                      onClick={handleGenerateDraftFromFacts}
-                      disabled={saving || facts.length === 0}
+                      className="h-8 w-[80px] justify-center !px-2 !py-1 text-[12px]"
+                      onClick={() => void handleCreateInsight()}
+                      disabled={saving}
                     >
-                      生成观点草稿
+                      创建
                     </props.Button>
                   </div>
                 </div>
-                <div className="min-h-[320px] max-h-[460px] overflow-auto">
-                  <table className="w-full text-xs table-fixed">
-                    <thead className="sticky top-0 bg-slate-50 dark:bg-background-dark/80">
-                      <tr className="border-b border-slate-200 dark:border-border-dark">
-                        <th className="px-2 py-2 text-center w-[8%]">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 accent-sky-600"
-                            checked={allFactsSelected}
-                            onChange={(event) => handleToggleAllFactsSelection(event.target.checked)}
-                            disabled={facts.length === 0 || saving}
-                            aria-label="全选事实"
-                          />
-                        </th>
-                        <th className="px-2 py-2 text-left font-medium text-slate-600 dark:text-slate-300 w-[56%]">
-                          事实内容
-                        </th>
-                        <th className="px-2 py-2 text-left font-medium text-slate-600 dark:text-slate-300 w-[24%]">
-                          创建时间
-                        </th>
-                        <th className="px-2 py-2 text-right font-medium text-slate-600 dark:text-slate-300 w-[12%]">
-                          操作
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {factsLoading && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-3 py-3 text-slate-500 dark:text-slate-400"
-                          >
-                            加载事实中...
-                          </td>
-                        </tr>
-                      )}
-                      {!factsLoading &&
-                        facts.map((fact) => (
-                          <tr
-                            key={fact.id}
-                            className="border-b border-slate-100 dark:border-border-dark/60"
-                          >
-                            <td className="px-2 py-2 align-top text-center">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 accent-sky-600"
-                                checked={selectedFactIdSet.has(fact.id)}
-                                onChange={(event) =>
-                                  handleToggleFactSelection(fact.id, event.target.checked)
-                                }
-                                disabled={saving}
-                                aria-label={`选择事实 ${fact.id}`}
-                              />
-                            </td>
-                            <td className="px-2 py-2 align-top text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words">
-                              {fact.content}
-                            </td>
-                            <td className="px-2 py-2 align-top text-slate-500 dark:text-slate-400">
-                              {props.formatDateTime(fact.createdAt)}
-                            </td>
-                            <td className="px-2 py-2 align-top text-right">
-                              <props.Button
-                                variant="danger"
-                                size="sm"
-                                icon="delete"
-                                onClick={() => void handleRemoveFact(fact.id)}
-                                disabled={saving}
-                              >
-                                删除
-                              </props.Button>
-                            </td>
-                          </tr>
-                        ))}
-                      {!factsLoading && facts.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-3 py-3 text-slate-500 dark:text-slate-400"
-                          >
-                            暂无事实，请先新增。
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
               </section>
             </div>
-
-            <div className="border-t border-slate-200 dark:border-border-dark" />
-
-            <section className="space-y-2 px-1">
-              <div className="px-2 py-1 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">观点草稿</div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <div className="flex items-center gap-1 px-1">
-                    <input
-                      type="date"
-                      className="ui-input text-xs w-32 border-0 bg-transparent dark:bg-transparent focus:ring-0 focus:border-transparent rounded-none"
-                      value={createValidFrom}
-                      onChange={(event) => setCreateValidFrom(event.target.value)}
-                    />
-                    <span className="text-xs text-slate-400">至</span>
-                    <input
-                      type="date"
-                      className="ui-input text-xs w-32 border-0 bg-transparent dark:bg-transparent focus:ring-0 focus:border-transparent rounded-none"
-                      value={createValidTo}
-                      onChange={(event) => setCreateValidTo(event.target.value)}
-                    />
-                  </div>
-                  <span className="h-4 w-px bg-slate-200 dark:bg-border-dark" />
-                  <div ref={createTagsRef} className="relative w-full sm:w-44">
-                    <button
-                      type="button"
-                      className="relative h-7 w-full rounded px-2 text-left text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                      onClick={() => setCreateTagsOpen((current) => !current)}
-                      disabled={saving}
-                    >
-                      <span className="block truncate pr-6">{createTagButtonLabel}</span>
-                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400">
-                        expand_more
-                      </span>
-                    </button>
-                    {createTagsOpen && (
-                      <div className="absolute left-0 right-0 top-full mt-1 z-50">
-                        <div className="ui-popover-menu max-h-64 overflow-auto rounded-md border p-2 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              className="text-xs text-primary hover:underline"
-                              onClick={handleSelectAllCreateTags}
-                            >
-                              全选
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs text-slate-500 hover:underline"
-                              onClick={handleClearCreateTags}
-                            >
-                              清空
-                            </button>
-                          </div>
-                          <div className="space-y-1">
-                            {INSIGHT_BUILTIN_TAG_OPTIONS.map((tag) => {
-                              const selected = createTags.includes(tag);
-                              return (
-                                <button
-                                  key={tag}
-                                  type="button"
-                                  className={`w-full text-left rounded px-2 py-1 text-xs transition-colors ${
-                                    selected
-                                      ? "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300"
-                                      : "hover:bg-slate-100 dark:hover:bg-slate-800"
-                                  }`}
-                                  onClick={() => handleToggleCreateTag(tag)}
-                                >
-                                  <span className="inline-flex items-center gap-1.5">
-                                    <span
-                                      className={`h-3 w-3 rounded-sm border ${
-                                        selected
-                                          ? "bg-sky-500 border-sky-500"
-                                          : "border-slate-300 dark:border-slate-600"
-                                      }`}
-                                    />
-                                    {tag}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <span className="h-4 w-px bg-slate-200 dark:bg-border-dark" />
-                  <props.Button
-                    variant="secondary"
-                    size="sm"
-                    className="w-[104px] justify-center"
-                    onClick={() => props.setInsightsTab("manage")}
-                    disabled={saving}
-                  >
-                    去管理
-                  </props.Button>
-                  <props.Button
-                    variant="primary"
-                    size="sm"
-                    icon="add"
-                    className="w-[104px] justify-center"
-                    onClick={() => void handleCreateInsight()}
-                    disabled={saving}
-                  >
-                    创建观点
-                  </props.Button>
-                </div>
-              </div>
-              <div className="px-2 py-1 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-[1fr,190px] gap-2">
-                  <input
-                    className="ui-input rounded-md px-2 py-1.5 text-sm"
-                    placeholder="观点标题"
-                    value={createTitle}
-                    onChange={(event) => setCreateTitle(event.target.value)}
-                  />
-                  <select
-                    className="ui-select rounded-md px-2 py-1.5 text-sm"
-                    value={createStatus}
-                    onChange={(event) => setCreateStatus(event.target.value as InsightStatus)}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <textarea
-                  className="ui-input w-full rounded-md px-2 py-1.5 text-sm min-h-[140px] resize-none"
-                  placeholder="观点论述（草稿生成后可继续编辑）"
-                  value={createThesis}
-                  onChange={(event) => setCreateThesis(event.target.value)}
-                />
-              </div>
-            </section>
           </div>
         )}
 

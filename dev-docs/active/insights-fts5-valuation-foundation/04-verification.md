@@ -163,6 +163,15 @@
 - `2026-02-27` `pnpm -C apps/frontend typecheck`（观点默认有效期：当前日期至一年后）
   - Result: pass
   - Notes: 生成页默认 `valid_from/valid_to` 与创建后重置逻辑更新后，前端编译检查通过。
+- `2026-03-02` `pnpm -C apps/frontend typecheck`（生成页 2:1 左右重排 + 右侧上下固定区）
+  - Result: pass
+  - Notes: 生成页重排为“左事实列表 / 右上事实录入 / 右下观点草稿”，并引入固定高度后前端编译检查通过。
+- `2026-03-02` `pnpm -C apps/frontend typecheck`（生成页宽比 5:3）
+  - Result: pass
+  - Notes: 左右分栏比例从 `2:1` 微调为 `5:3` 后，前端编译检查通过。
+- `2026-03-02` `pnpm -C apps/frontend typecheck`（观点草稿按钮改名 + 同行等高）
+  - Result: pass
+  - Notes: 按钮文案改为 `管理/创建`，并通过按钮组约束保持同一行与等高后，前端编译检查通过。
 
 ## Manual checks
 - [x] backend 运行时可创建 FTS5 virtual table
